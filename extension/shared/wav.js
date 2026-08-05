@@ -63,5 +63,7 @@
     return buffer;
   }
 
-  root.QwenReaderWav = { encodeMono16: encodeMono16 };
-}(globalThis));
+  const api = { encodeMono16: encodeMono16, resample: resample };
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  root.QwenReaderWav = api;
+}(typeof globalThis !== 'undefined' ? globalThis : this));
