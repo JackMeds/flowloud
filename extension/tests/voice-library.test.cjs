@@ -36,6 +36,7 @@ test('creates imported profiles with fixed WAV metadata and transcription state'
 
   assert.deepEqual(result, {
     name: '导入音色', wavB64: 'UklGRg==', mimeType: 'audio/wav', sampleRate: 24000,
+    spkB64: '', rvqB64: '',
     refText: '请保持安静。', sourceFileName: '导入音色.m4a', durationSeconds: 8.5,
     createdAt: '2026-08-05T00:00:00.000Z', updatedAt: '2026-08-05T00:00:01.000Z',
     transcription: { provider: 'edge-web-speech', status: 'pending', attempts: 2 },
@@ -60,4 +61,52 @@ test('rejects incomplete, duplicate, and built-in rename sources', () => {
     { name: 'same', wavB64: 'UklGRg==' }, { name: 'same', wavB64: 'UklGRg==' },
   ], {}, 'same', 'new'));
   assert.throws(() => Library.planRename([{ name: 'empty' }], {}, 'empty', 'new'));
+});
+
+test('rejects remote aliases and profiles explicitly marked as non-local', () => {
+  const cases = [
+    { name: 'remote flag', wavB64: 'UklGRg==', remote: true },
+    { name: 'non-local flag', wavB64: 'UklGRg==', local: false },
+    { name: 'remote alias', wavB64: 'UklGRg==', kind: 'alias' },
+  ];
+
+  for (const profile of cases) {
+    assert.throws(() => Library.planRename([profile], {}, profile.name, 'local name'));
+  }
+});
+
+test('allows a legacy local WAV profile with empty reference text', () => {
+  const profile = { name: '无台词本地音色', wavB64: 'UklGRg==', refText: '' };
+
+  const plan = Library.planRename([profile], {}, profile.name, '新本地音色');
+
+  assert.equal(plan.newProfile.name, '新本地音色');
+  assert.equal(plan.newProfile.wavB64, 'UklGRg==');
+  assert.equal(plan.newProfile.refText, '');
+});
+
+test('preserves and allows a complete local extracted profile', () => {
+  const profile = {
+    name: '已提取音色', local: true, spk_b64: 'c3Br', rvq_b64: 'cnZx', refText: '',
+  };
+
+  const normalized = Library.normalizeProfile(profile);
+  const plan = Library.planRename([profile], {}, profile.name, '已提取新音色');
+
+  assert.equal(normalized.spkB64, 'c3Br');
+  assert.equal(normalized.rvqB64, 'cnZx');
+  assert.equal(plan.newProfile.spkB64, 'c3Br');
+  assert.equal(plan.newProfile.rvqB64, 'cnZx');
+  assert.equal(plan.newProfile.wavB64, '');
+});
+
+test('rejects destination names equivalent after sanitization', () => {
+  const source = { name: 'source', wavB64: 'UklGRg==' };
+
+  assert.throws(() => Library.planRename([
+    source, { name: 'Voice ', wavB64: 'UklGRg==' },
+  ], {}, source.name, 'Voice'));
+  assert.throws(() => Library.planRename([
+    source, { name: 'Cafe\u0301', wavB64: 'UklGRg==' },
+  ], {}, source.name, 'Café'));
 });

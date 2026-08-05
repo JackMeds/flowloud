@@ -10,6 +10,7 @@
   if (!naming) throw new Error('缺少音色命名模块。');
 
   const BUILTIN_VOICES = new Set(['邵思萌', 'qwen-clone']);
+  const NON_LOCAL_KINDS = new Set(['builtin', 'alias', 'remote']);
 
   function text(value) {
     return String(value || '');
@@ -27,6 +28,8 @@
     return {
       name: naming.sanitizeName(input.name),
       wavB64: text(input.wavB64 || input.wav_b64),
+      spkB64: text(input.spkB64 || input.spk_b64),
+      rvqB64: text(input.rvqB64 || input.rvq_b64),
       mimeType: text(input.mimeType) || 'audio/wav',
       sampleRate: number(input.sampleRate, 24000),
       refText: text(input.refText || input.ref_text),
@@ -63,8 +66,20 @@
     });
   }
 
-  function isBuiltIn(profile) {
-    return Boolean(profile && (profile.builtIn || profile.builtin || BUILTIN_VOICES.has(profile.name)));
+  function isCompleteLocalProfile(profile) {
+    if (!profile || typeof profile !== 'object') return false;
+    const kind = text(profile.kind).trim().toLowerCase();
+    if (
+      profile.local === false || profile.remote === true || profile.builtIn || profile.builtin ||
+      NON_LOCAL_KINDS.has(kind) || BUILTIN_VOICES.has(profile.name)
+    ) {
+      return false;
+    }
+    const hasWav = Boolean(text(profile.wavB64 || profile.wav_b64));
+    const hasExtractedVoice = Boolean(
+      text(profile.spkB64 || profile.spk_b64) && text(profile.rvqB64 || profile.rvq_b64)
+    );
+    return hasWav || hasExtractedVoice;
   }
 
   function planRename(profiles, settings, oldName, newName) {
@@ -75,11 +90,12 @@
     if (matches.length !== 1) throw new Error('找不到唯一的待重命名音色。');
 
     const oldProfile = matches[0];
-    if (isBuiltIn(oldProfile)) throw new Error('内置音色不能重命名。');
-    if (!text(oldProfile.wavB64 || oldProfile.wav_b64)) {
-      throw new Error('音色资料不完整，缺少参考 WAV。');
+    if (!isCompleteLocalProfile(oldProfile)) {
+      throw new Error('只能重命名资料完整的本地音色。');
     }
-    if (inputProfiles.some((profile) => profile && profile.name === newValue && profile !== oldProfile)) {
+    if (inputProfiles.some((profile) => (
+      profile && profile !== oldProfile && naming.sanitizeName(profile.name) === newValue
+    ))) {
       throw new Error('音色名称已存在。');
     }
 
