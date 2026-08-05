@@ -10,7 +10,7 @@
   if (!naming) throw new Error('缺少音色命名模块。');
 
   const BUILTIN_VOICES = new Set(['邵思萌', 'qwen-clone']);
-  const NON_LOCAL_KINDS = new Set(['builtin', 'alias', 'remote']);
+  const NON_LOCAL_KINDS = new Set(['builtin', 'alias', 'remote', 'provider']);
 
   function text(value) {
     return String(value || '');

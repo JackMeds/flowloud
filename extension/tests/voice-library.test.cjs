@@ -68,6 +68,7 @@ test('rejects remote aliases and profiles explicitly marked as non-local', () =>
     { name: 'remote flag', wavB64: 'UklGRg==', remote: true },
     { name: 'non-local flag', wavB64: 'UklGRg==', local: false },
     { name: 'remote alias', wavB64: 'UklGRg==', kind: 'alias' },
+    { name: 'provider alias', wavB64: 'UklGRg==', kind: ' Provider ' },
   ];
 
   for (const profile of cases) {
