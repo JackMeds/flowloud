@@ -73,7 +73,8 @@
           let track;
           let timer;
           let settled = false;
-          let recognitionHalted = false;
+          let stopRequested = false;
+          let abortCalled = false;
           let cleanupPromise;
           let abortListenerAttached = false;
           const finalResults = new Map();
@@ -94,8 +95,8 @@
               recognition.onend = null;
             }
             if (source) source.onended = null;
-            if (abortRecognition && recognition && !recognitionHalted) {
-              recognitionHalted = true;
+            if (abortRecognition && recognition && !abortCalled) {
+              abortCalled = true;
               try { recognition.abort(); } catch (_) { /* already stopped */ }
             }
             try { if (source) source.disconnect(); } catch (_) { /* already disconnected */ }
@@ -174,8 +175,8 @@
               else finish(null, { text: text }, false);
             };
             source.onended = () => {
-              if (recognitionHalted) return;
-              recognitionHalted = true;
+              if (stopRequested) return;
+              stopRequested = true;
               try {
                 recognition.stop();
               } catch (error) {
@@ -278,7 +279,9 @@
 
   async function transcribeWithRetry(provider, request, options) {
     const config = options || {};
-    const retries = Number.isInteger(config.retries) && config.retries >= 0 ? config.retries : 2;
+    const retries = Number.isInteger(config.retries) && config.retries >= 0
+      ? Math.min(config.retries, 2)
+      : 2;
     const delays = Array.isArray(config.delaysMs) && config.delaysMs.length
       ? config.delaysMs
       : [1000, 3000];

@@ -83,6 +83,7 @@ function createRecognitionHarness(events, options = {}) {
 
     stop() {
       state.recognitionStops += 1;
+      if (options.stopThrows) throw new Error('stop failed');
     }
 
     abort() {
@@ -108,7 +109,7 @@ function createRecognitionHarness(events, options = {}) {
     }
 
     createBufferSource() {
-      return {
+      const source = {
         connect(destination) {
           assert.equal(destination, state.destination);
           state.sourceConnects += 1;
@@ -118,7 +119,7 @@ function createRecognitionHarness(events, options = {}) {
           state.sourceStarts += 1;
           state.operations.push('source.start');
           queueMicrotask(() => {
-            if (typeof this.onended === 'function') this.onended();
+            if (options.autoSourceEnd !== false && typeof this.onended === 'function') this.onended();
             for (const event of events) {
               if (event.type === 'result' && typeof state.recognition.onresult === 'function') {
                 state.recognition.onresult(event);
@@ -133,6 +134,8 @@ function createRecognitionHarness(events, options = {}) {
           });
         },
       };
+      state.source = source;
+      return source;
     }
 
     createMediaStreamDestination() {
@@ -173,6 +176,9 @@ function createRecognitionHarness(events, options = {}) {
     signal,
     fireTimeout() {
       if (state.timerCallback) state.timerCallback();
+    },
+    endSource() {
+      if (state.source && typeof state.source.onended === 'function') state.source.onended();
     },
   };
 }
@@ -313,7 +319,7 @@ test('classifies a recognition network error as transient and cleans resources o
   );
 
   assert.equal(fake.state.recognitionStops, 1);
-  assert.equal(fake.state.recognitionAborts, 0);
+  assert.equal(fake.state.recognitionAborts, 1);
   assertCleanedOnce(fake.state);
   fake.fireTimeout();
   assertCleanedOnce(fake.state);
@@ -461,4 +467,82 @@ test('abort during retry backoff rejects immediately without another provider ca
   assert.equal(provider.calls, 1);
   assert.equal(signal.addCalls, 1);
   assert.equal(signal.removeCalls, 1);
+});
+
+test('timeout force-aborts recognition after source end requested stop', async () => {
+  const fake = createRecognitionHarness([], { autoSourceEnd: false });
+  const provider = Transcription.createEdgeSpeechProvider(fake.dependencies);
+  let settled = false;
+  const pending = provider.transcribe(fake.request);
+  pending.then(() => { settled = true; }, () => { settled = true; });
+
+  fake.endSource();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(fake.state.recognitionStops, 1);
+  assert.equal(fake.state.recognitionAborts, 0);
+  assert.equal(settled, false);
+  fake.fireTimeout();
+  await assert.rejects(pending, (error) => error.code === 'recognition_timeout');
+  assert.equal(fake.state.recognitionStops, 1);
+  assert.equal(fake.state.recognitionAborts, 1);
+  assertCleanedOnce(fake.state);
+  fake.fireTimeout();
+  assertCleanedOnce(fake.state);
+});
+
+test('user cancellation force-aborts recognition after source end requested stop', async () => {
+  const fake = createRecognitionHarness([], { autoSourceEnd: false });
+  const provider = Transcription.createEdgeSpeechProvider(fake.dependencies);
+  let settled = false;
+  const pending = provider.transcribe(fake.request);
+  pending.then(() => { settled = true; }, () => { settled = true; });
+
+  fake.endSource();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(fake.state.recognitionStops, 1);
+  assert.equal(fake.state.recognitionAborts, 0);
+  assert.equal(settled, false);
+  fake.signal.abort();
+  await assert.rejects(pending, (error) => error.name === 'AbortError');
+  assert.equal(fake.state.recognitionStops, 1);
+  assert.equal(fake.state.recognitionAborts, 1);
+  assertCleanedOnce(fake.state);
+  fake.signal.abort();
+  assertCleanedOnce(fake.state);
+});
+
+test('a thrown recognition stop is followed by one force-abort and cleanup', async () => {
+  const fake = createRecognitionHarness([], { autoSourceEnd: false, stopThrows: true });
+  const provider = Transcription.createEdgeSpeechProvider(fake.dependencies);
+  const pending = provider.transcribe(fake.request);
+
+  fake.endSource();
+
+  await assert.rejects(pending, (error) => error.code === 'recognition_failed');
+  assert.equal(fake.state.recognitionStops, 1);
+  assert.equal(fake.state.recognitionAborts, 1);
+  assertCleanedOnce(fake.state);
+  fake.fireTimeout();
+  assertCleanedOnce(fake.state);
+});
+
+test('caps configured retries at two attempts after the initial call', async () => {
+  const provider = {
+    calls: 0,
+    async transcribe() {
+      this.calls += 1;
+      throw failure('network');
+    },
+  };
+
+  await assert.rejects(
+    Transcription.transcribeWithRetry(provider, {
+      samples: new Float32Array([0.1]), sampleRate: 24000,
+    }, { retries: 99, delaysMs: [0, 0], wait: async () => {} }),
+    (error) => error.code === 'network',
+  );
+
+  assert.equal(provider.calls, 3);
 });
