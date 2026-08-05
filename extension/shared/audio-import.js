@@ -8,6 +8,9 @@
 
   const FRAME_MS = 20;
   const BOUNDARY_MS = 100;
+  const MIN_SEGMENT_SECONDS = 5;
+  const TARGET_SEGMENT_SECONDS = 10;
+  const MAX_SEGMENT_SECONDS = 15;
 
   function coded(code) {
     const error = new Error(code);
@@ -112,9 +115,14 @@
     if (!isFloat32Array(samples) || samples.length === 0 || !Number.isFinite(sampleRate) || sampleRate <= 0) {
       throw coded('invalid_audio');
     }
-    const minSeconds = optionSeconds(options, 'minSeconds', 5);
-    const preferredSeconds = optionSeconds(options, 'preferredSeconds', 10);
-    const maxSeconds = Math.max(minSeconds, optionSeconds(options, 'maxSeconds', 15));
+    const minSeconds = Math.min(MAX_SEGMENT_SECONDS, Math.max(
+      MIN_SEGMENT_SECONDS,
+      optionSeconds(options, 'minSeconds', MIN_SEGMENT_SECONDS),
+    ));
+    const maxSeconds = Math.max(minSeconds, Math.min(
+      MAX_SEGMENT_SECONDS,
+      optionSeconds(options, 'maxSeconds', MAX_SEGMENT_SECONDS),
+    ));
     const frames = analyzeFrames(samples, sampleRate, FRAME_MS);
     const activeFrames = frames.filter((frame) => frame.active);
     if (activeFrames.length === 0) throw coded('voice_too_short');
@@ -139,7 +147,7 @@
           - candidate.rmsVariation * 20
           - candidate.clippedRatio * 80
           - candidate.internalSilenceSeconds * 4
-          - Math.abs(candidate.durationSeconds - preferredSeconds) * 0.5;
+          - Math.abs(candidate.durationSeconds - TARGET_SEGMENT_SECONDS) * 0.5;
         candidates.push(candidate);
       }
     }

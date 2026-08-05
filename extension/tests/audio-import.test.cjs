@@ -58,6 +58,28 @@ test('rejects less than five seconds of active speech', () => {
   );
 });
 
+test('limits normalized import windows to five through fifteen seconds', () => {
+  const samples = concat(silence(6000), tone(22000, 0.2));
+  const audioImport = loadAudioImport();
+
+  for (const options of [
+    { minSeconds: 1, maxSeconds: 30, preferredSeconds: 30 },
+    { minSeconds: 20, maxSeconds: 30 },
+  ]) {
+    const result = audioImport.selectReferenceSegment(samples, 1000, options);
+    assert.ok(result.durationSeconds >= 5 && result.durationSeconds <= 15);
+  }
+});
+
+test('scores reference duration against a fixed ten-second target', () => {
+  const samples = concat(silence(6000), tone(15000, 0.2));
+  const result = loadAudioImport().selectReferenceSegment(samples, 1000, {
+    minSeconds: 5, maxSeconds: 15, preferredSeconds: 14,
+  });
+
+  assert.equal(result.durationSeconds, 10);
+});
+
 test('downmixes channels without clipping', () => {
   assert.deepEqual(
     [...loadAudioImport().downmix([new Float32Array([1, -1]), new Float32Array([0, 1])])],
