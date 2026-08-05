@@ -1,0 +1,22 @@
+{
+  "tid": 44,
+  "uid": 5,
+  "title": "NodeBB 测试主题",
+  "pagination": { "currentPage": 1, "pageCount": 2 },
+  "posts": [
+    {
+      "pid": 501,
+      "uid": 5,
+      "index": 0,
+      "content": "<p>NodeBB 楼主正文</p>",
+      "user": { "uid": 5, "username": "owner", "displayname": "楼主" }
+    },
+    {
+      "pid": 502,
+      "uid": 6,
+      "index": 1,
+      "content": "<p>同意</p>",
+      "user": { "uid": 6, "username": "reply", "displayname": "回复者" }
+    }
+  ]
+}

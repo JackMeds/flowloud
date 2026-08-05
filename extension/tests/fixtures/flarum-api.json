@@ -1,0 +1,36 @@
+{
+  "data": [
+    {
+      "type": "posts",
+      "id": "101",
+      "attributes": {
+        "number": 1,
+        "contentHtml": "<div class=\"Post-controls\"><button>点赞</button><button>回复</button></div><p>这是楼主的第一段正文。</p>"
+      },
+      "relationships": { "user": { "data": { "type": "users", "id": "u1" } } }
+    },
+    {
+      "type": "posts",
+      "id": "102",
+      "attributes": {
+        "number": 2,
+        "contentHtml": "<p>同意</p><div class=\"Post-actions\">点赞 · 编辑 · 举报</div>"
+      },
+      "relationships": { "user": { "data": { "type": "users", "id": "u2" } } }
+    },
+    {
+      "type": "posts",
+      "id": "103",
+      "attributes": {
+        "number": 3,
+        "contentHtml": "<p>补充一个不同作者的回复。</p><aside class=\"Post-signature\">签名档不应朗读</aside>"
+      },
+      "relationships": { "user": { "data": { "type": "users", "id": "u3" } } }
+    }
+  ],
+  "included": [
+    { "type": "users", "id": "u1", "attributes": { "username": "楼主" } },
+    { "type": "users", "id": "u2", "attributes": { "username": "阿明" } },
+    { "type": "users", "id": "u3", "attributes": { "username": "小雨" } }
+  ]
+}

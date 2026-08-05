@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "Qwen 网页朗读",
+  "version": "0.3.1",
+  "description": "自动识别论坛、小说与长文章，并使用本机 Qwen3-TTS 多音色朗读。",
+  "permissions": ["storage", "offscreen"],
+  "host_permissions": ["http://127.0.0.1:7811/*"],
+  "action": {
+    "default_title": "Qwen 网页朗读"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "commands": {
+    "toggle-reader": {
+      "suggested_key": {
+        "default": "Alt+O"
+      },
+      "description": "打开或收起 Qwen 朗读侧栏"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "run_at": "document_idle",
+      "js": [
+        "shared/defaults.js",
+        "shared/text.js",
+        "vendor/readability/Readability.js",
+        "shared/normalized-document.js",
+        "shared/extractors.js",
+        "shared/voice-assignment.js",
+        "shared/player-state.js",
+        "content/reader.js"
+      ]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["content/reader.css"],
+      "matches": ["http://*/*", "https://*/*"]
+    }
+  ],
+  "options_page": "voice-studio.html",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://127.0.0.1:7811"
+  }
+}

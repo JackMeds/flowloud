@@ -1,0 +1,277 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+
+const Player = require("../shared/player-state.js");
+
+function sampleSegments() {
+  return [
+    { id: "p1", authorName: "楼主", voice: "邵思萌", text: "第一段" },
+    { id: "p2", authorName: "回复者", voice: "音色B", text: "第二段" },
+    { id: "p3", authorName: "楼主", voice: "邵思萌", text: "第三段" },
+  ];
+}
+
+test("load success selects the first segment and exposes its author and voice", () => {
+  const state = Player.reduce(Player.createInitialState(), {
+    type: "LOAD_SUCCESS",
+    segments: sampleSegments(),
+  });
+
+  assert.equal(state.status, "ready");
+  assert.equal(state.index, 0);
+  assert.equal(state.current.authorName, "楼主");
+  assert.equal(state.current.voice, "邵思萌");
+});
+
+test("dynamic load can preserve a requested queue position", () => {
+  let state = Player.reduce(Player.createInitialState(), {
+    type: "LOAD_SUCCESS",
+    segments: sampleSegments(),
+  });
+  state = Player.reduce(state, {
+    type: "LOAD_START",
+    scanId: 2,
+    pageKey: "https://example.com/topic/1",
+    preserveSegments: true,
+  });
+  assert.equal(state.current.id, "p1");
+
+  state = Player.reduce(state, {
+    type: "LOAD_SUCCESS",
+    scanId: 2,
+    segments: [...sampleSegments(), { id: "p4", text: "新增回复" }],
+    index: 3,
+  });
+
+  assert.equal(state.index, 3);
+  assert.equal(state.current.id, "p4");
+});
+
+test("scan state stores the normalized document and rejects a stale scan result", () => {
+  const firstDocument = {
+    pageKey: "https://example.com/t/one",
+    adapter: "discourse",
+    blocks: [{ id: "old", text: "旧主题" }],
+  };
+  const secondDocument = {
+    pageKey: "https://example.com/t/two",
+    adapter: "discourse",
+    blocks: [{ id: "new", text: "新主题" }],
+  };
+
+  let state = Player.reduce(Player.createInitialState(), {
+    type: "LOAD_START",
+    scanId: 1,
+    pageKey: firstDocument.pageKey,
+  });
+  state = Player.reduce(state, {
+    type: "LOAD_START",
+    scanId: 2,
+    pageKey: secondDocument.pageKey,
+  });
+  const stale = Player.reduce(state, {
+    type: "LOAD_SUCCESS",
+    scanId: 1,
+    document: firstDocument,
+    segments: [{ id: "old", text: "旧主题" }],
+  });
+
+  assert.equal(stale, state);
+
+  const fresh = Player.reduce(state, {
+    type: "LOAD_SUCCESS",
+    scanId: 2,
+    document: secondDocument,
+    segments: [{ id: "new", text: "新主题" }],
+  });
+  assert.equal(fresh.status, "ready");
+  assert.equal(fresh.pageKey, secondDocument.pageKey);
+  assert.equal(fresh.document.adapter, "discourse");
+  assert.equal(fresh.current.text, "新主题");
+});
+
+test("page invalidation clears page-bound playback but preserves panel and tab", () => {
+  let state = Object.assign(Player.createInitialState(), {
+    panelOpen: true,
+    tab: "authors",
+  });
+  state = Player.reduce(state, {
+    type: "LOAD_START",
+    scanId: 4,
+    pageKey: "https://example.com/t/old",
+  });
+  state = Player.reduce(state, {
+    type: "LOAD_SUCCESS",
+    scanId: 4,
+    document: { pageKey: "https://example.com/t/old", blocks: [] },
+    segments: sampleSegments(),
+  });
+  state = Player.reduce(state, {
+    type: "AUDIO_PLAYING",
+    sessionId: "old-session",
+    prefetchedIndex: 1,
+  });
+  state = Player.reduce(state, {
+    type: "PAGE_INVALIDATE",
+    pageKey: "https://example.com/t/new",
+  });
+
+  assert.equal(state.panelOpen, true);
+  assert.equal(state.tab, "authors");
+  assert.equal(state.pageKey, "https://example.com/t/new");
+  assert.equal(state.document, null);
+  assert.deepEqual(state.segments, []);
+  assert.equal(state.current, null);
+  assert.equal(state.sessionId, null);
+  assert.equal(state.prefetchedIndex, null);
+  assert.equal(state.status, "idle");
+});
+
+test("pause and resume retain the current segment", () => {
+  let state = Player.reduce(Player.createInitialState(), {
+    type: "LOAD_SUCCESS",
+    segments: sampleSegments(),
+  });
+  state = Player.reduce(state, { type: "AUDIO_PLAYING" });
+  state = Player.reduce(state, { type: "PAUSE" });
+
+  assert.equal(state.status, "paused");
+  assert.equal(state.index, 0);
+
+  state = Player.reduce(state, { type: "RESUME" });
+  assert.equal(state.status, "playing");
+  assert.equal(state.index, 0);
+});
+
+test("next and previous clamp at queue boundaries and update current metadata", () => {
+  let state = Player.reduce(Player.createInitialState(), {
+    type: "LOAD_SUCCESS",
+    segments: sampleSegments(),
+  });
+  state = Player.reduce(state, { type: "PREVIOUS" });
+  assert.equal(state.index, 0);
+
+  state = Player.reduce(state, { type: "NEXT" });
+  assert.equal(state.index, 1);
+  assert.deepEqual(
+    { authorName: state.current.authorName, voice: state.current.voice },
+    { authorName: "回复者", voice: "音色B" },
+  );
+
+  state = Player.reduce(state, { type: "NEXT" });
+  state = Player.reduce(state, { type: "NEXT" });
+  assert.equal(state.index, 2);
+});
+
+test("stop clears transient playback and prefetched audio without losing the readable queue", () => {
+  let state = Player.reduce(Player.createInitialState(), {
+    type: "LOAD_SUCCESS",
+    segments: sampleSegments(),
+  });
+  state = Player.reduce(state, {
+    type: "AUDIO_PLAYING",
+    sessionId: "session-1",
+    prefetchedIndex: 1,
+  });
+  state = Player.reduce(state, { type: "STOP" });
+
+  assert.equal(state.status, "ready");
+  assert.equal(state.sessionId, null);
+  assert.equal(state.prefetchedIndex, null);
+  assert.equal(state.segments.length, 3);
+});
+
+test("error state contains a reader-facing message and can be cleared", () => {
+  let state = Player.reduce(Player.createInitialState(), {
+    type: "ERROR",
+    message: "本地 Qwen 服务未启动",
+  });
+  assert.equal(state.status, "error");
+  assert.equal(state.error, "本地 Qwen 服务未启动");
+
+  state = Player.reduce(state, { type: "CLEAR_ERROR" });
+  assert.equal(state.status, "idle");
+  assert.equal(state.error, null);
+});
+
+test("request cache reuses the prefetched next segment and cancels abandoned sessions", async () => {
+  const cancelled = [];
+  const cache = Player.createRequestCache(async (sessionId) => {
+    cancelled.push(sessionId);
+  });
+  let calls = 0;
+
+  const prefetched = cache.prefetch(1, "prefetch-1", async () => {
+    calls += 1;
+    return "audio-one";
+  });
+  const taken = cache.take(1);
+
+  assert.equal(taken.sessionId, "prefetch-1");
+  assert.equal(await taken.promise, "audio-one");
+  assert.equal(await prefetched, "audio-one");
+  assert.equal(calls, 1);
+
+  cache.prefetch(2, "prefetch-2", async () => "audio-two");
+  await cache.cancelAll();
+  assert.deepEqual(cancelled, ["prefetch-2"]);
+});
+
+test("a prefetched entry taken by a superseded seek can still be cancelled", async () => {
+  const cancelled = [];
+  const cache = Player.createRequestCache(async (sessionId) => {
+    cancelled.push(sessionId);
+  });
+  cache.prefetch(4, "orphan-prefetch", async () => "unused-audio");
+  const taken = cache.take(4);
+
+  await cache.discard(taken);
+
+  assert.deepEqual(cancelled, ["orphan-prefetch"]);
+});
+
+test("failed prefetch becomes a cache miss and performs exactly one foreground retry", async () => {
+  let foregroundCalls = 0;
+  const prefetched = {
+    promise: Promise.reject(new Error("warmup failed")),
+  };
+
+  const result = await Player.resolveAudioRequest(prefetched, async () => {
+    foregroundCalls += 1;
+    return { audioBase64: "UklGRg==" };
+  });
+
+  assert.equal(result.audioBase64, "UklGRg==");
+  assert.equal(foregroundCalls, 1);
+});
+
+test("cancelled prefetch is not retried as a foreground request", async () => {
+  let foregroundCalls = 0;
+  const cancellation = Object.assign(new Error("cancelled"), {
+    code: "cancelled",
+  });
+
+  await assert.rejects(
+    Player.resolveAudioRequest(
+      { promise: Promise.reject(cancellation) },
+      async () => {
+        foregroundCalls += 1;
+        return {};
+      },
+    ),
+    (error) => error === cancellation,
+  );
+  assert.equal(foregroundCalls, 0);
+});
+
+test("playback admission gate rejects an older invocation after a newer seek begins", () => {
+  const gate = Player.createInvocationGate();
+  const older = gate.begin();
+  const newer = gate.begin();
+
+  assert.equal(gate.isCurrent(older), false);
+  assert.equal(gate.isCurrent(newer), true);
+
+  gate.invalidate();
+  assert.equal(gate.isCurrent(newer), false);
+});

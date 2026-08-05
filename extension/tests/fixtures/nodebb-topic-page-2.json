@@ -1,0 +1,30 @@
+{
+  "tid": 44,
+  "uid": 5,
+  "title": "NodeBB 测试主题",
+  "pagination": { "currentPage": 2, "pageCount": 2 },
+  "posts": [
+    {
+      "pid": 502,
+      "uid": 6,
+      "index": 1,
+      "content": "<p>重复边界项</p>",
+      "user": { "uid": 6, "username": "reply", "displayname": "回复者" }
+    },
+    {
+      "pid": 503,
+      "uid": 5,
+      "index": 2,
+      "content": "<p>楼主第二次发言</p>",
+      "user": { "uid": 5, "username": "owner", "displayname": "楼主" }
+    },
+    {
+      "pid": 504,
+      "uid": 10,
+      "index": 3,
+      "content": "<p>已删除</p>",
+      "deleted": true,
+      "user": { "uid": 10, "username": "deleted", "displayname": "已删除" }
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "id": 42,
+  "title": "Discourse 测试主题",
+  "post_stream": {
+    "stream": [101, 102, 103, 104],
+    "posts": [
+      {
+        "id": 101,
+        "post_number": 1,
+        "user_id": 7,
+        "username": "owner",
+        "display_username": "楼主",
+        "cooked": "<p>楼主正文</p>",
+        "post_type": 1
+      },
+      {
+        "id": 103,
+        "post_number": 3,
+        "user_id": 8,
+        "username": "reply-a",
+        "display_username": "回复者",
+        "cooked": "<p>同意</p>",
+        "post_type": 1
+      }
+    ]
+  }
+}

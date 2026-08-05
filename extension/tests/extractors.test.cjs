@@ -1,0 +1,660 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const vm = require('node:vm');
+
+function loadModules() {
+  delete globalThis.QwenReaderText;
+  delete globalThis.QwenReaderNormalizedDocument;
+  delete globalThis.QwenReaderExtractors;
+  for (const relativePath of ['shared/text.js', 'shared/normalized-document.js', 'shared/extractors.js']) {
+    const absolutePath = path.join(__dirname, '..', relativePath);
+    if (!fs.existsSync(absolutePath)) continue;
+    const source = fs.readFileSync(absolutePath, 'utf8');
+    vm.runInThisContext(source, { filename: relativePath });
+  }
+  return globalThis.QwenReaderExtractors;
+}
+
+function readFixture(name) {
+  return JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8'));
+}
+
+test('parseFlarumApi identifies the original poster and preserves a two-character reply', () => {
+  const { parseFlarumApi } = loadModules();
+  const segments = parseFlarumApi(readFixture('flarum-api.json'));
+
+  assert.deepEqual(
+    segments.map(({ floor, authorId, authorName, isOp, text }) => ({ floor, authorId, authorName, isOp, text })),
+    [
+      { floor: 1, authorId: 'u1', authorName: '楼主', isOp: true, text: '这是楼主的第一段正文。' },
+      { floor: 2, authorId: 'u2', authorName: '阿明', isOp: false, text: '同意' },
+      { floor: 3, authorId: 'u3', authorName: '小雨', isOp: false, text: '补充一个不同作者的回复。' }
+    ]
+  );
+});
+
+test('parseFlarumApi removes forum controls and signature text from speech content', () => {
+  const { parseFlarumApi } = loadModules();
+  const spokenText = parseFlarumApi(readFixture('flarum-api.json')).map((segment) => segment.text).join('\n');
+
+  assert.equal(spokenText.includes('点赞'), false);
+  assert.equal(spokenText.includes('举报'), false);
+  assert.equal(spokenText.includes('签名档'), false);
+});
+
+test('Flarum keeps anonymous posts distinct and only treats the first anonymous post as OP', () => {
+  const { parseFlarumApi } = loadModules();
+  const segments = parseFlarumApi({
+    data: [
+      { type: 'posts', id: 'anon-1', attributes: { number: 1, contentHtml: '<p>匿名首帖</p>' } },
+      { type: 'posts', id: 'anon-2', attributes: { number: 2, contentHtml: '<p>匿名回复</p>' } }
+    ],
+    included: []
+  });
+
+  assert.equal(segments[0].isOp, true);
+  assert.equal(segments[1].isOp, false);
+  assert.notEqual(segments[0].authorId, segments[1].authorId);
+});
+
+test('forum API extraction removes bare quoted replies without removing the new reply', () => {
+  const { parseFlarumApi, parseNodebbTopicPages } = loadModules();
+  const flarum = parseFlarumApi({
+    data: [{
+      type: 'posts', id: '1',
+      attributes: { number: 1, contentHtml: '<blockquote>旧内容</blockquote><p>新内容</p>' },
+      relationships: { user: { data: { type: 'users', id: 'u1' } } }
+    }],
+    included: [{ type: 'users', id: 'u1', attributes: { username: 'owner' } }]
+  });
+  const nodebb = parseNodebbTopicPages([{
+    uid: 1,
+    posts: [{
+      pid: 10, uid: 1, index: 0,
+      content: '<blockquote>旧内容</blockquote><p>新内容</p>',
+      user: { uid: 1, username: 'owner' }
+    }]
+  }]);
+
+  assert.equal(flarum[0].text, '新内容');
+  assert.equal(nodebb[0].text, '新内容');
+});
+
+test('extractFlarum fetches a discussion page and returns posts in floor order', async () => {
+  const { extractFlarum } = loadModules();
+  const payload = readFixture('flarum-api.json');
+  const requestedUrls = [];
+  const document = {
+    location: { origin: 'https://bbs.viva-la-vita.org', pathname: '/d/23351' },
+    querySelectorAll: () => []
+  };
+
+  const segments = await extractFlarum(document, async (url) => {
+    requestedUrls.push(url);
+    return new Response(JSON.stringify(payload), { status: 200 });
+  });
+
+  assert.match(requestedUrls[0], /filter%5Bdiscussion%5D=23351/);
+  assert.deepEqual(segments.map((segment) => segment.floor), [1, 2, 3]);
+});
+
+test('Flarum adapter preserves a subdirectory base and follows same-origin pagination', async () => {
+  const { extractDocument } = loadModules();
+  const requested = [];
+  const firstPage = {
+    data: [{
+      type: 'posts', id: '1',
+      attributes: { number: 1, contentHtml: '<p>楼主首帖</p>' },
+      relationships: { user: { data: { type: 'users', id: 'u1' } } }
+    }],
+    included: [{ type: 'users', id: 'u1', attributes: { username: '楼主' } }],
+    links: { next: '/community/api/posts?page[offset]=50' }
+  };
+  const secondPage = {
+    data: [{
+      type: 'posts', id: '2',
+      attributes: { number: 2, contentHtml: '<p>楼主续帖</p>' },
+      relationships: { user: { data: { type: 'users', id: 'u1' } } }
+    }],
+    included: []
+  };
+  const document = makeLocationDocument('https://forum.example/community/d/123-topic');
+
+  const result = await extractDocument(document, {
+    fetchFn: async (url) => {
+      requested.push(String(url));
+      return jsonResponse(requested.length === 1 ? firstPage : secondPage, String(url));
+    }
+  });
+
+  assert.match(requested[0], /^https:\/\/forum\.example\/community\/api\/posts\?/u);
+  assert.equal(requested[1], 'https://forum.example/community/api/posts?page[offset]=50');
+  assert.deepEqual(result.blocks.map(({ text, isOp }) => ({ text, isOp })), [
+    { text: '楼主首帖', isOp: true },
+    { text: '楼主续帖', isOp: true }
+  ]);
+});
+
+test('Flarum DOM fallback derives stable authors without data-user-id and marks every OP post', () => {
+  const { extractFlarumDom } = loadModules();
+  const document = makeFlarumDocument([
+    { id: '11', floor: 1, author: '楼主', href: '/u/owner', text: '开场' },
+    { id: '12', floor: 2, author: '甲', href: '/u/a', text: '同意' },
+    { id: '13', floor: 3, author: '楼主', href: '/u/owner', text: '再次补充' }
+  ]);
+
+  const segments = extractFlarumDom(document);
+
+  assert.deepEqual(segments.map(({ authorId, isOp, text }) => ({ authorId, isOp, text })), [
+    { authorId: 'profile:/u/owner', isOp: true, text: '开场' },
+    { authorId: 'profile:/u/a', isOp: false, text: '同意' },
+    { authorId: 'profile:/u/owner', isOp: true, text: '再次补充' }
+  ]);
+});
+
+test('Discourse adapter fetches missing post ids in a subdirectory and marks later OP replies', async () => {
+  const { extractDocument } = loadModules();
+  const initial = readFixture('discourse-topic-initial.json');
+  const missing = readFixture('discourse-topic-missing.json');
+  const requested = [];
+  const document = makeLocationDocument('https://forum.example/community/t/a-topic/42/3', {
+    '#data-discourse-setup': { getAttribute: (name) => name === 'data-base-uri' ? '/community' : null }
+  });
+
+  const result = await extractDocument(document, {
+    fetchFn: async (url, init) => {
+      requested.push({ url: String(url), init });
+      return jsonResponse(requested.length === 1 ? initial : missing, String(url));
+    }
+  });
+
+  assert.equal(result.adapterId, 'discourse');
+  assert.deepEqual(result.blocks.map(({ floor, text, isOp }) => ({ floor, text, isOp })), [
+    { floor: 1, text: '楼主正文', isOp: true },
+    { floor: 2, text: '顶', isOp: false },
+    { floor: 3, text: '同意', isOp: false },
+    { floor: 4, text: '楼主再次补充', isOp: true }
+  ]);
+  assert.equal(requested[0].url, 'https://forum.example/community/t/42.json');
+  assert.match(requested[1].url, /^https:\/\/forum\.example\/community\/t\/42\/posts\.json\?/u);
+  assert.match(requested[1].url, /post_ids%5B%5D=102/u);
+  assert.match(requested[1].url, /post_ids%5B%5D=104/u);
+  assert.equal(requested[1].init.credentials, 'same-origin');
+});
+
+test('Discourse numeric topic URLs do not mistake the post-number suffix for the topic id', async () => {
+  const { extractDocument } = loadModules();
+  const requested = [];
+  const initial = readFixture('discourse-topic-initial.json');
+  initial.post_stream.stream = [101, 103];
+  const document = makeLocationDocument('https://forum.example/community/t/42/3');
+
+  await extractDocument(document, {
+    fetchFn: async (url) => {
+      requested.push(String(url));
+      return jsonResponse(initial, String(url));
+    }
+  });
+
+  assert.equal(requested[0], 'https://forum.example/community/t/42.json');
+});
+
+test('pageIdentity keeps Discourse and Flarum floor navigation inside the same discussion', () => {
+  const { pageIdentity } = loadModules();
+
+  assert.equal(
+    pageIdentity(makeLocationDocument('https://forum.example/community/t/a-topic/42/3')),
+    pageIdentity(makeLocationDocument('https://forum.example/community/t/a-topic/42/99'))
+  );
+  assert.notEqual(
+    pageIdentity(makeLocationDocument('https://forum.example/community/t/a-topic/42/3')),
+    pageIdentity(makeLocationDocument('https://forum.example/community/t/another-topic/43/3'))
+  );
+  assert.equal(
+    pageIdentity(makeLocationDocument('https://forum.example/community/d/23351-topic/4')),
+    pageIdentity(makeLocationDocument('https://forum.example/community/d/23351-topic/18'))
+  );
+  assert.notEqual(
+    pageIdentity(makeLocationDocument('https://forum.example/community/d/23351-topic/4')),
+    pageIdentity(makeLocationDocument('https://forum.example/community/d/23352-topic/4'))
+  );
+});
+
+test('pageIdentity preserves ordinary path, query and hash-router navigation', () => {
+  const { pageIdentity } = loadModules();
+
+  assert.notEqual(
+    pageIdentity(makeLocationDocument('https://article.example/chapter/1?mode=full')),
+    pageIdentity(makeLocationDocument('https://article.example/chapter/2?mode=full'))
+  );
+  assert.notEqual(
+    pageIdentity(makeLocationDocument('https://article.example/chapter/1?mode=full')),
+    pageIdentity(makeLocationDocument('https://article.example/chapter/1?mode=compact'))
+  );
+  assert.notEqual(
+    pageIdentity(makeLocationDocument('https://spa.example/#/topic/1')),
+    pageIdentity(makeLocationDocument('https://spa.example/#/topic/2'))
+  );
+});
+
+test('NodeBB adapter follows pagination under a subdirectory and deduplicates posts', async () => {
+  const { extractDocument } = loadModules();
+  const first = readFixture('nodebb-topic-page-1.json');
+  const second = readFixture('nodebb-topic-page-2.json');
+  const requested = [];
+  const document = makeLocationDocument('https://forum.example/community/topic/44/story');
+
+  const result = await extractDocument(document, {
+    fetchFn: async (url) => {
+      requested.push(String(url));
+      return jsonResponse(requested.length === 1 ? first : second, String(url));
+    }
+  });
+
+  assert.equal(result.adapterId, 'nodebb');
+  assert.deepEqual(result.blocks.map(({ floor, text, isOp }) => ({ floor, text, isOp })), [
+    { floor: 1, text: 'NodeBB 楼主正文', isOp: true },
+    { floor: 2, text: '同意', isOp: false },
+    { floor: 3, text: '楼主第二次发言', isOp: true }
+  ]);
+  assert.equal(requested[0], 'https://forum.example/community/api/topic/44/story');
+  assert.equal(requested[1], 'https://forum.example/community/api/topic/44/story?page=2');
+});
+
+test('NodeBB entered on page two still starts from the canonical topic API and fetches every page once', async () => {
+  const { extractDocument } = loadModules();
+  const first = readFixture('nodebb-topic-page-1.json');
+  const second = readFixture('nodebb-topic-page-2.json');
+  const requested = [];
+  const document = makeLocationDocument('https://forum.example/community/topic/44/story/2');
+
+  const result = await extractDocument(document, {
+    fetchFn: async (url) => {
+      requested.push(String(url));
+      return jsonResponse(requested.length === 1 ? first : second, String(url));
+    }
+  });
+
+  assert.deepEqual(requested, [
+    'https://forum.example/community/api/topic/44/story',
+    'https://forum.example/community/api/topic/44/story?page=2'
+  ]);
+  assert.deepEqual(result.blocks.map((item) => item.floor), [1, 2, 3]);
+  assert.equal(result.complete, true);
+});
+
+test('Discourse anonymous posts remain distinct while the first readable post is OP', () => {
+  const { parseDiscourseTopic } = loadModules();
+  const segments = parseDiscourseTopic({
+    post_stream: {
+      posts: [
+        { id: 1, post_number: 1, cooked: '<p>匿名首帖</p>', post_type: 1 },
+        { id: 2, post_number: 2, cooked: '<p>匿名回复</p>', post_type: 1 }
+      ]
+    }
+  }, []);
+
+  assert.equal(segments[0].isOp, true);
+  assert.equal(segments[1].isOp, false);
+  assert.notEqual(segments[0].authorId, segments[1].authorId);
+});
+
+test('Discourse removes image attachment metadata and bare URLs but keeps descriptive link text', () => {
+  const { parseDiscourseTopic } = loadModules();
+  const segments = parseDiscourseTopic({
+    post_stream: {
+      posts: [{
+        id: 31,
+        user_id: 7,
+        username: 'owner',
+        post_number: 1,
+        post_type: 1,
+        cooked: [
+          '<div class="lightbox-wrapper">',
+          '<a class="lightbox" href="https://cdn.example/full.png">',
+          '<img src="https://cdn.example/thumb.png" alt="image" width="350" height="318">',
+          '<div class="meta"><span class="filename">image</span><span class="informations">350×318 24.5 KB</span></div>',
+          '</a></div>',
+          '<aside class="onebox"><a href="https://example.com/card">网页预览标题</a><p>网页预览摘要</p></aside>',
+          '<p><a class="attachment" href="https://example.com/file.pdf">资料.pdf (2 MB)</a></p>',
+          '<p>感觉我的建议已经很中肯了</p>',
+          '<p><a href="https://example.com/raw">https://example.com/raw</a></p>',
+          '<p><a href="https://example.com/guide">补充说明</a></p>'
+        ].join('')
+      }]
+    }
+  }, []);
+
+  assert.equal(segments[0].text, '感觉我的建议已经很中肯了 补充说明');
+});
+
+test('NodeBB guest uid zero uses names instead of merging every guest into the OP', () => {
+  const { parseNodebbTopicPages } = loadModules();
+  const segments = parseNodebbTopicPages([{
+    uid: 0,
+    posts: [
+      { pid: 1, uid: 0, index: 0, content: '<p>首帖</p>', user: { uid: 0, username: 'guest-a' } },
+      { pid: 2, uid: 0, index: 1, content: '<p>回复</p>', user: { uid: 0, username: 'guest-b' } }
+    ]
+  }]);
+
+  assert.equal(segments[0].isOp, true);
+  assert.equal(segments[1].isOp, false);
+  assert.equal(segments[0].authorId, 'name:guest-a');
+  assert.equal(segments[1].authorId, 'name:guest-b');
+});
+
+test('NodeBB reports a pagination limit instead of claiming a capped topic is complete', async () => {
+  const { extractDocument } = loadModules();
+  const document = makeLocationDocument('https://forum.example/topic/44/story');
+  let calls = 0;
+
+  const result = await extractDocument(document, {
+    fetchFn: async (url) => {
+      calls += 1;
+      return jsonResponse({
+        title: '超长主题',
+        pagination: { pageCount: 101 },
+        posts: calls === 1 ? [{
+          pid: 1,
+          uid: 7,
+          index: 0,
+          content: '<p>第一页</p>',
+          user: { uid: 7, username: 'owner' }
+        }] : []
+      }, String(url));
+    }
+  });
+
+  assert.equal(calls, 100);
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.warnings, ['nodebb-pagination-limit']);
+});
+
+test('XenForo DOM adapter removes quotes, controls and signatures from current-page speech', async () => {
+  const { extractDocument } = loadModules();
+  const document = makeXenForoDocument();
+
+  const result = await extractDocument(document, {});
+
+  assert.equal(result.adapterId, 'xenforo');
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.warnings, ['xenforo-current-page-only']);
+  assert.deepEqual(result.blocks.map(({ floor, text }) => ({ floor, text })), [
+    { floor: 1, text: '真正正文' },
+    { floor: 2, text: '回复正文' }
+  ]);
+});
+
+test('Readability receives a cloned document and wins over the generic fallback', async () => {
+  const { extractDocument } = loadModules();
+  const original = makeGenericDocument(['通用回退不应被使用']);
+  original.location = makeLocation('https://article.example/story');
+  const clone = { marker: 'clone' };
+  original.cloneNode = () => clone;
+  let receivedDocument;
+  class FakeReadability {
+    constructor(document) {
+      receivedDocument = document;
+    }
+
+    parse() {
+      return { title: '文章标题', textContent: '第一段\n\n第二段' };
+    }
+  }
+
+  const result = await extractDocument(original, { ReadabilityCtor: FakeReadability });
+
+  assert.equal(receivedDocument, clone);
+  assert.equal(result.adapterId, 'readability');
+  assert.equal(result.title, '文章标题');
+  assert.deepEqual(result.blocks.map((block) => block.text), ['第一段', '第二段']);
+});
+
+test('a null Readability result falls through to the generic extractor', async () => {
+  const { extractDocument } = loadModules();
+  const document = makeGenericDocument(['通用正文']);
+  document.location = makeLocation('https://article.example/story');
+  document.cloneNode = () => ({ marker: 'clone' });
+  class NullReadability {
+    parse() {
+      return null;
+    }
+  }
+
+  const result = await extractDocument(document, { ReadabilityCtor: NullReadability });
+
+  assert.equal(result.adapterId, 'generic');
+  assert.deepEqual(result.blocks.map((block) => block.text), ['通用正文']);
+});
+
+test('a forum-shaped URL with no forum posts falls back to Readability instead of returning an empty queue', async () => {
+  const { extractDocument } = loadModules();
+  const document = makeGenericDocument(['通用正文不应优先']);
+  document.location = makeLocation('https://article.example/t/story/42');
+  document.cloneNode = () => ({ marker: 'clone' });
+  class FakeReadability {
+    parse() {
+      return { title: '实际长文章', textContent: '伪论坛路径下的真实正文' };
+    }
+  }
+
+  const result = await extractDocument(document, {
+    ReadabilityCtor: FakeReadability,
+    fetchFn: async () => new Response('{}', { status: 404 })
+  });
+
+  assert.equal(result.adapterId, 'readability');
+  assert.deepEqual(result.blocks.map((block) => block.text), ['伪论坛路径下的真实正文']);
+  assert.ok(result.warnings.includes('discourse-empty-fallback'));
+});
+
+test('page scanning ignores an incidental text selection while explicit selection mode uses it', async () => {
+  const { extractDocument } = loadModules();
+  const document = makeGenericDocument(['页面正文']);
+  document.location = makeLocation('https://article.example/selection-mode');
+  document.getSelection = () => ({
+    isCollapsed: false,
+    toString: () => '偶然选中的文字'
+  });
+
+  const page = await extractDocument(document, { mode: 'page' });
+  const selection = await extractDocument(document, { mode: 'selection' });
+
+  assert.equal(page.adapterId, 'generic');
+  assert.deepEqual(page.blocks.map((item) => item.text), ['页面正文']);
+  assert.equal(selection.adapterId, 'selection');
+  assert.deepEqual(selection.blocks.map((item) => item.text), ['偶然选中的文字']);
+});
+
+test('extractPage remains array-compatible while exposing normalized metadata', async () => {
+  const { extractPage } = loadModules();
+  const document = makeGenericDocument(['兼容旧播放器']);
+  document.location = makeLocation('https://article.example/compatibility');
+
+  const segments = await extractPage(document, {});
+
+  assert.equal(Array.isArray(segments), true);
+  assert.deepEqual(segments.map((segment) => segment.text), ['兼容旧播放器']);
+  assert.equal(segments.documentMeta.adapterId, 'generic');
+});
+
+test('forum adapters rethrow AbortError instead of silently using a partial DOM fallback', async () => {
+  const { extractDocument } = loadModules();
+  const document = makeLocationDocument('https://forum.example/community/t/topic/42');
+  const abortError = new Error('cancelled');
+  abortError.name = 'AbortError';
+
+  await assert.rejects(
+    extractDocument(document, { fetchFn: async () => { throw abortError; } }),
+    (error) => error === abortError
+  );
+});
+
+test('extractGeneric chooses readable article blocks instead of navigation controls', () => {
+  const { extractGeneric } = loadModules();
+  const fixture = readFixture('generic-page.json');
+  const article = makeCandidate('ARTICLE', fixture.articleBlocks, 1);
+  const navigation = makeCandidate('NAV', fixture.navigationBlocks, 8);
+  const document = { querySelectorAll: () => [navigation, article] };
+
+  const segments = extractGeneric(document);
+
+  assert.deepEqual(segments.map((segment) => segment.text), fixture.articleBlocks);
+});
+
+function makeCandidate(tagName, blocks, linkCount) {
+  const blockNodes = blocks.map((text) => ({
+    tagName: 'P',
+    textContent: text,
+    hidden: false,
+    getAttribute: () => null,
+    closest: () => null
+  }));
+  return {
+    tagName,
+    textContent: blocks.join(' '),
+    hidden: false,
+    getAttribute: () => null,
+    querySelectorAll(selector) {
+      return selector.includes('a') ? Array.from({ length: linkCount }, () => ({})) : blockNodes;
+    }
+  };
+}
+
+function makeLocation(href) {
+  const url = new URL(href);
+  return {
+    href: url.href,
+    origin: url.origin,
+    pathname: url.pathname,
+    search: url.search,
+    hash: url.hash,
+    hostname: url.hostname
+  };
+}
+
+function makeLocationDocument(href, selectors = {}) {
+  return {
+    location: makeLocation(href),
+    title: '测试主题',
+    documentElement: { id: '' },
+    getSelection: () => ({ isCollapsed: true, toString: () => '' }),
+    querySelector(selector) {
+      return selectors[selector] || null;
+    },
+    querySelectorAll: () => []
+  };
+}
+
+function jsonResponse(payload, url) {
+  return {
+    ok: true,
+    status: 200,
+    url,
+    headers: { get: () => 'application/json' },
+    json: async () => payload
+  };
+}
+
+function makeFlarumDocument(posts) {
+  const nodes = posts.map((post) => {
+    const body = makeRemovableBody(post.text, []);
+    const author = { textContent: post.author, getAttribute: () => post.href };
+    return {
+      id: `post-${post.id}`,
+      getAttribute(name) {
+        if (name === 'data-id') return post.id;
+        if (name === 'data-number') return String(post.floor);
+        return null;
+      },
+      querySelector(selector) {
+        if (selector.includes('.Post-body')) return body;
+        if (selector.includes('.PostUser-name')) return author;
+        if (selector.includes('a[href*="/u/"]')) return author;
+        return null;
+      }
+    };
+  });
+  return {
+    location: makeLocation('https://forum.example/community/d/123-topic'),
+    querySelectorAll(selector) {
+      return selector.includes('PostStream-item') || selector === '.Post' ? nodes : [];
+    }
+  };
+}
+
+function makeRemovableBody(text, removableTexts) {
+  return {
+    cloneNode() {
+      const removed = new Set();
+      return {
+        querySelectorAll() {
+          return removableTexts.map((value) => ({ remove: () => removed.add(value) }));
+        },
+        get textContent() {
+          return removableTexts.reduce((current, value) => current.replace(value, ''), text);
+        }
+      };
+    }
+  };
+}
+
+function makeXenForoDocument() {
+  const posts = [
+    makeXenForoPost('9001', '楼主', '#1', '真正正文 引用旧文 点赞 签名档', ['引用旧文', '点赞', '签名档']),
+    makeXenForoPost('9002', '回复者', '#2', '回复正文 操作按钮', ['操作按钮'])
+  ];
+  return {
+    location: makeLocation('https://xen.example/threads/topic.22/'),
+    title: 'XenForo 主题',
+    documentElement: {
+      id: 'XF',
+      getAttribute(name) {
+        if (name === 'data-template') return 'thread_view';
+        if (name === 'data-content-key') return 'thread-22';
+        return null;
+      }
+    },
+    getSelection: () => ({ isCollapsed: true, toString: () => '' }),
+    querySelector: () => null,
+    querySelectorAll(selector) {
+      return selector.includes('.message--post') ? posts : [];
+    }
+  };
+}
+
+function makeXenForoPost(id, author, floor, content, removable) {
+  const body = makeRemovableBody(content, removable);
+  return {
+    id: `js-post-${id}`,
+    getAttribute(name) {
+      if (name === 'data-content') return `post-${id}`;
+      if (name === 'data-author') return author;
+      return null;
+    },
+    querySelector(selector) {
+      if (selector.includes('.bbWrapper') || selector === '.message-body') return body;
+      if (selector.startsWith('.message-attribution-main')) return { textContent: '2026年7月31日 10:42' };
+      if (selector.includes('message-attribution-opposite') || selector.includes('message-attribution-gadget')) {
+        return { textContent: floor };
+      }
+      return null;
+    }
+  };
+}
+
+function makeGenericDocument(blocks) {
+  const article = makeCandidate('ARTICLE', blocks, 0);
+  return {
+    title: '普通文章',
+    documentElement: { id: '', getAttribute: () => null },
+    getSelection: () => ({ isCollapsed: true, toString: () => '' }),
+    querySelector: () => null,
+    querySelectorAll(selector) {
+      return selector.includes('article') ? [article] : [];
+    }
+  };
+}

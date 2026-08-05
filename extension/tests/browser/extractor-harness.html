@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Qwen Reader Extractor Harness</title>
+</head>
+<body>
+  <output id="result">RUNNING</output>
+  <script src="../../shared/text.js"></script>
+  <script src="../../vendor/readability/Readability.js"></script>
+  <script src="../../shared/normalized-document.js"></script>
+  <script src="../../shared/extractors.js"></script>
+  <script>
+    addEventListener("load", async () => {
+      const result = document.querySelector("#result");
+      try {
+        const novel = document.implementation.createHTMLDocument("小说章节");
+        novel.body.innerHTML = `
+          <nav><p>首页 下一页 登录</p></nav>
+          <div id="chaptercontent">
+            <h1>第十二章 再会</h1>
+            <p>夜色沿着窗棂慢慢落下来，屋内只剩一盏灯。</p>
+            <button>点赞</button>
+            <p>她放下书，认真听着门外的脚步声。</p>
+          </div>
+          <aside><p>相关推荐与广告内容</p></aside>
+        `;
+        const novelSegments = QwenReaderExtractors.extractGeneric(novel);
+        const novelText = novelSegments.map(segment => segment.text).join("\n");
+        window.testDebug = { novelText, novelSegments };
+        if (!novelText.includes("夜色沿着窗棂")) throw new Error("#chaptercontent was not detected");
+        if (novelText.includes("首页") || novelText.includes("相关推荐") || novelText.includes("点赞")) {
+          throw new Error("generic controls leaked into novel text");
+        }
+
+        const forum = document.implementation.createHTMLDocument("Flarum");
+        forum.body.innerHTML = `
+          <article class="Post" id="post-1" data-number="1" data-user-id="op">
+            <a class="PostUser-name">楼主</a>
+            <div class="Post-body">
+              <div class="lightbox-wrapper"><img alt="image"><div class="meta"><span>image</span><span>350×318 24.5 KB</span></div></div>
+              <p>楼主正文。</p>
+              <p><a href="https://example.com/raw">https://example.com/raw</a></p>
+              <p><a href="https://example.com/guide">补充说明</a></p>
+              <button class="Button item-like">点赞</button>
+            </div>
+          </article>
+          <article class="Post" id="post-2" data-number="2" data-user-id="reply">
+            <a class="PostUser-name">阿明</a>
+            <div class="Post-body"><p>同意</p><div class="Post-signature">签名档</div></div>
+          </article>
+        `;
+        const forumSegments = await QwenReaderExtractors.extractFlarum(forum);
+        if (forumSegments.length !== 2) throw new Error("short Flarum reply was lost");
+        const forumText = forumSegments.map(segment => segment.text).join("\n");
+        if (forumText.includes("点赞") || forumText.includes("签名档") || forumText.includes("350×318") || forumText.includes("24.5 KB")) {
+          throw new Error("Flarum controls leaked into speech text");
+        }
+        if (!forumText.includes("补充说明") || forumText.includes("https://example.com/raw")) {
+          throw new Error("forum link cleanup removed useful text or kept a bare URL");
+        }
+        if (!forumSegments[0].isOp || forumSegments[1].isOp) {
+          throw new Error("Flarum OP detection failed");
+        }
+
+        const article = document.implementation.createHTMLDocument("长文章");
+        article.body.innerHTML = `
+          <nav>首页 登录 热门推荐</nav>
+          <article>
+            <h1>一篇适合朗读的文章</h1>
+            <p>${"这是文章的主要内容，包含完整句子和清楚的上下文。".repeat(12)}</p>
+            <p>${"第二段继续说明事情的来龙去脉，不包含导航按钮。".repeat(12)}</p>
+          </article>
+          <aside>广告 推荐 点赞</aside>
+        `;
+        const readable = await QwenReaderExtractors.extractDocument(article, {
+          mode: "page",
+          ReadabilityCtor: Readability
+        });
+        if (readable.adapterId !== "readability") throw new Error("Mozilla Readability was not selected");
+        const readableText = readable.blocks.map(block => block.text).join("\n");
+        if (!readableText.includes("来龙去脉") || readableText.includes("热门推荐")) {
+          throw new Error("Readability article extraction leaked surrounding controls");
+        }
+        const chunks = QwenReaderDocument.toPlaybackSegments(readable, 80);
+        if (chunks.length < 2 || chunks.some(chunk => chunk.text.length > 80)) {
+          throw new Error("normalized playback chunking failed");
+        }
+
+        result.value = "PASS";
+        document.documentElement.dataset.testStatus = "pass";
+      } catch (error) {
+        result.value = "FAIL: " + error.message;
+        document.documentElement.dataset.testStatus = "fail";
+      }
+    });
+  </script>
+</body>
+</html>

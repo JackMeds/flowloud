@@ -1,0 +1,33 @@
+{
+  "post_stream": {
+    "posts": [
+      {
+        "id": 104,
+        "post_number": 4,
+        "user_id": 7,
+        "username": "owner",
+        "display_username": "楼主",
+        "cooked": "<p>楼主再次补充</p>",
+        "post_type": 1
+      },
+      {
+        "id": 102,
+        "post_number": 2,
+        "user_id": 9,
+        "username": "short",
+        "display_username": "短回复",
+        "cooked": "<p>顶</p>",
+        "post_type": 1
+      },
+      {
+        "id": 104,
+        "post_number": 4,
+        "user_id": 7,
+        "username": "owner",
+        "display_username": "楼主",
+        "cooked": "<p>重复项不应重复</p>",
+        "post_type": 1
+      }
+    ]
+  }
+}

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qwen 音色录制室</title>
+  <link rel="stylesheet" href="voice-studio.css">
+</head>
+<body>
+  <main class="studio-shell">
+    <header class="hero">
+      <span class="eyebrow">QWEN READER · LOCAL VOICE</span>
+      <h1>音色录制室</h1>
+      <p>录一段干净、自然的话，让本地 Qwen 服务记住这个声音。</p>
+    </header>
+
+    <section class="record-card" aria-labelledby="record-title">
+      <div class="section-heading">
+        <div>
+          <span class="step">01</span>
+          <h2 id="record-title">录制参考音频</h2>
+        </div>
+        <span id="duration" class="duration" aria-live="polite">00:00</span>
+      </div>
+      <p class="hint">建议在安静环境朗读 5–15 秒；不会上传到互联网。</p>
+      <div class="record-controls">
+        <button id="record-button" class="record-button" type="button" aria-pressed="false">
+          <span class="record-dot" aria-hidden="true"></span>
+          <span id="record-label">开始录音</span>
+        </button>
+        <span id="record-note" class="record-note">准备好后开始</span>
+      </div>
+      <audio id="preview" class="preview" controls hidden></audio>
+    </section>
+
+    <section class="save-card" aria-labelledby="save-title">
+      <div class="section-heading">
+        <div>
+          <span class="step">02</span>
+          <h2 id="save-title">命名并加入音色库</h2>
+        </div>
+      </div>
+      <label class="field-label" for="voice-name">音色名称</label>
+      <input id="voice-name" class="voice-input" maxlength="40" autocomplete="off" placeholder="例如：邵思萌">
+      <p class="field-help">保存后会在本机保留，并注册到 `127.0.0.1:7811`。</p>
+      <button id="save-button" class="save-button" type="button" disabled>保存并注册音色</button>
+    </section>
+
+    <section class="library-card" aria-labelledby="library-title">
+      <div class="section-heading">
+        <div>
+          <span class="step">03</span>
+          <h2 id="library-title">我的音色库</h2>
+        </div>
+        <button id="refresh-button" class="text-button" type="button">刷新</button>
+      </div>
+      <ul id="voice-list" class="voice-list" aria-live="polite"></ul>
+      <p id="empty-state" class="empty-state">还没有本地录制的音色。</p>
+    </section>
+
+  <p id="status" class="status" role="status" aria-live="polite">正在读取本地音色库…</p>
+  </main>
+  <script src="shared/wav.js"></script>
+  <script src="shared/recording-state.js"></script>
+  <script src="voice-studio.js"></script>
+</body>
+</html>
