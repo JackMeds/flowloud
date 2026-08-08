@@ -59,3 +59,45 @@ test('plain HTML fallback excludes controls and image metadata without reading a
     ['姝ｆ枃']
   );
 });
+
+test('string fallback never emits image attribute fragments containing greater-than characters', () => {
+  const content = loadForumContent();
+  assert.deepEqual(
+    content.semanticUnitsFromHtml('<p><img alt="image350 > 24.5 KB"></p><div>reply<img src="https://example.test/a>b.png"></div>').map((unit) => unit.text),
+    ['reply']
+  );
+});
+
+test('string fallback excludes ordinary controls and advertisement containers', () => {
+  const content = loadForumContent();
+  assert.deepEqual(
+    content.semanticUnitsFromHtml('<p><button>Like</button></p><aside class="advertisement"><p>Buy now</p></aside><p>Keep me</p>').map((unit) => unit.text),
+    ['Keep me']
+  );
+});
+
+test('semanticElements removes redundant three-level semantic parents while retaining live leaf nodes', () => {
+  const content = loadForumContent();
+  const leaf = makeSemanticElement('leaf');
+  const middle = makeSemanticElement('leaf', [leaf]);
+  const outer = makeSemanticElement('leaf', [middle, leaf]);
+  const root = { querySelectorAll: () => [outer, middle, leaf] };
+
+  assert.deepEqual(content.semanticElements(root), [leaf]);
+});
+
+function makeSemanticElement(text, descendants = []) {
+  return {
+    textContent: text,
+    closest: () => null,
+    cloneNode() {
+      return {
+        textContent: text,
+        querySelectorAll: () => []
+      };
+    },
+    querySelectorAll(selector) {
+      return selector === 'p,h1,h2,h3,h4,h5,h6,li' ? descendants : [];
+    }
+  };
+}
