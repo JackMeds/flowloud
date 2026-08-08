@@ -3,18 +3,25 @@
 
   const SEMANTIC_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li';
   const REMOVABLE_SELECTOR = [
-    'script', 'style', 'noscript', 'template', 'svg', 'figure',
-    '.Post-actions', '.Post-controls', '.signature', '.reactions', '.onebox',
-    '.link-preview', '.attachment', '.image-metadata', '.file-info',
-    '[role="toolbar"]', '[aria-hidden="true"]',
+    'script', 'style', 'noscript', 'template', 'svg', 'figure', 'nav', 'aside', 'footer',
+    '.Post-actions', '.Post-controls', '.Post-signature', '.Post-meta',
+    '.message-signature', '.message-attribution-opposite', '.message-footer',
+    '.bbCodeBlock--quote', '.quote', '.signature', '.reactions', '.reactionsBar',
+    '.item-like', '.item-reply', '.Button', '.dropdown', '.badge', '.toolbar',
+    '.onebox', '.link-preview', '.attachment', '.image-metadata', '.file-info',
+    '.lightbox-wrapper',
+    '[hidden]', '[role="button"]', '[role="toolbar"]', '[aria-hidden="true"]',
     'button', 'input', 'select', 'textarea', 'option', 'form',
     '.advertisement', '.advert', '.ad', '.ads', '.ad-container'
   ].join(',');
   const SEMANTIC_TAGS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li']);
   const REMOVABLE_CLASSES = new Set([
-    'post-actions', 'post-controls', 'signature', 'reactions', 'onebox',
-    'link-preview', 'attachment', 'image-metadata', 'file-info',
-    'advertisement', 'advert', 'ad', 'ads', 'ad-container'
+    'post-actions', 'post-controls', 'post-signature', 'post-meta',
+    'message-signature', 'message-attribution-opposite', 'message-footer',
+    'bbcodeblock--quote', 'quote', 'signature', 'reactions', 'reactionsbar',
+    'item-like', 'item-reply', 'button', 'dropdown', 'badge', 'toolbar',
+    'onebox', 'link-preview', 'attachment', 'image-metadata', 'file-info',
+    'lightbox-wrapper', 'advertisement', 'advert', 'ad', 'ads', 'ad-container'
   ]);
 
   function fingerprint(value) {
@@ -77,13 +84,17 @@
 
   function semanticUnitsFromElement(root, options) {
     const textOptions = Object.assign({}, options, { removeNestedSemanticElements: true });
-    return toUnits(semanticElements(root, options).map((element) => readableElementText(element, textOptions)));
+    const texts = semanticElements(root, options)
+      .map((element) => readableElementText(element, textOptions))
+      .filter(Boolean);
+    if (texts.length) return toUnits(texts);
+    return toUnits([readableElementText(root, options)]);
   }
 
   function isRemovableTag(tag, attributes, options) {
     if (tag === 'blockquote') return !options || options.removeBlockquotes !== false;
-    if (['script', 'style', 'noscript', 'template', 'svg', 'figure', 'button', 'input', 'select', 'textarea', 'option', 'form'].includes(tag)) return true;
-    if (/\b(?:role\s*=\s*["']?toolbar|aria-hidden\s*=\s*["']?true)\b/iu.test(attributes)) return true;
+    if (['script', 'style', 'noscript', 'template', 'svg', 'figure', 'nav', 'aside', 'footer', 'button', 'input', 'select', 'textarea', 'option', 'form'].includes(tag)) return true;
+    if (/\b(?:hidden(?:\s|=|$)|role\s*=\s*["']?(?:button|toolbar)|aria-hidden\s*=\s*["']?true)\b/iu.test(attributes)) return true;
     const classMatch = attributes.match(/\bclass\s*=\s*(["'])(.*?)\1/iu);
     return Boolean(classMatch && classMatch[2].split(/\s+/u).some((name) => REMOVABLE_CLASSES.has(name.toLowerCase())));
   }

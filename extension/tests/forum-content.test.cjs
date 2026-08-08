@@ -39,6 +39,42 @@ test('forum HTML falls back to one block when it has no semantic child tags', ()
   );
 });
 
+test('live DOM falls back to one block when it has no semantic child tags', () => {
+  const content = loadForumContent();
+  const root = {
+    querySelectorAll: () => [],
+    cloneNode() {
+      return { textContent: '短回复', querySelectorAll: () => [] };
+    }
+  };
+
+  assert.deepEqual(content.semanticUnitsFromElement(root).map((unit) => unit.text), ['短回复']);
+});
+
+test('live DOM excludes nested paragraphs inside known forum chrome', () => {
+  const content = loadForumContent();
+  const signatureParagraph = makeSemanticElement('签名内容');
+  signatureParagraph.closest = (selector) => selector.includes('.Post-signature') ? {} : null;
+  const root = { querySelectorAll: () => [signatureParagraph] };
+
+  assert.deepEqual(content.semanticUnitsFromElement(root), []);
+});
+
+test('string fallback excludes legacy forum signatures quotes reactions and lightboxes', () => {
+  const content = loadForumContent();
+  const html = [
+    '<div class="Post-signature"><p>签名内容</p></div>',
+    '<div class="message-signature"><p>另一个签名</p></div>',
+    '<div class="message-footer"><p>页脚操作</p></div>',
+    '<div class="bbCodeBlock--quote"><p>引用内容</p></div>',
+    '<div class="reactionsBar"><p>点赞信息</p></div>',
+    '<div class="lightbox-wrapper"><p>350×318 24.5 KB</p></div>',
+    '<p>保留正文</p>'
+  ].join('');
+
+  assert.deepEqual(content.semanticUnitsFromHtml(html).map((unit) => unit.text), ['保留正文']);
+});
+
 test('nested list markup keeps each list level without parent-child duplicate speech', () => {
   const content = loadForumContent();
   assert.deepEqual(

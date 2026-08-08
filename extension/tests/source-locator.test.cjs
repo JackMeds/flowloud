@@ -26,6 +26,25 @@ function node(text) {
   };
 }
 
+function nestedNode(ownText, childText) {
+  const child = node(childText);
+  return {
+    textContent: `${ownText} ${childText}`,
+    closest: () => null,
+    querySelectorAll: (selector) => selector === 'p,h1,h2,h3,h4,h5,h6,li' ? [child] : [],
+    cloneNode() {
+      let currentText = `${ownText} ${childText}`;
+      const nestedClone = { remove() { currentText = ownText; } };
+      return {
+        get textContent() { return currentText; },
+        querySelectorAll(selector) {
+          return selector === 'p,h1,h2,h3,h4,h5,h6,li' ? [nestedClone] : [];
+        }
+      };
+    }
+  };
+}
+
 function fakeDocument(nodes, containers = {}) {
   const post = { id: 'post-fallback' };
   const container = {
@@ -75,6 +94,24 @@ test('resolver chooses the duplicate fingerprint closest to the original unit in
   });
 
   assert.equal(resolved, second);
+});
+
+test('resolver fingerprints nested list parents with the same text rule as extraction', () => {
+  const locator = loadLocator();
+  const forumContent = globalThis.QwenReaderForumContent;
+  const inserted = node('inserted paragraph');
+  const parent = nestedNode('parent item', 'child item');
+  const child = node('child item');
+  const document = fakeDocument([inserted, parent, child]);
+
+  const resolved = locator.resolve(document, {
+    sourceLocator: {
+      containerSelector: '.post .Post-body', unitIndex: 0,
+      fingerprint: forumContent.fingerprint('parent item')
+    }
+  });
+
+  assert.equal(resolved, parent);
 });
 
 test('resolver falls back to the original unit index when no fingerprint matches', () => {

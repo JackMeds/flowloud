@@ -22,7 +22,10 @@
           const matches = nodes
             .map((node, index) => ({ node, index }))
             .filter(({ node }) => forumContent.fingerprint(
-              forumContent.readableElementText(node, { removeBlockquotes: true })
+              forumContent.readableElementText(node, {
+                removeBlockquotes: true,
+                removeNestedSemanticElements: true
+              })
             ) === locator.fingerprint);
           if (matches.length) {
             matches.sort((left, right) => Math.abs(left.index - locator.unitIndex) - Math.abs(right.index - locator.unitIndex));
