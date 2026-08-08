@@ -53,7 +53,7 @@
           </article>
         `;
         const forumSegments = await QwenReaderExtractors.extractFlarum(forum);
-        if (forumSegments.length !== 3) throw new Error("Flarum paragraph boundaries or short reply were lost");
+        if (forumSegments.length !== 4) throw new Error("Flarum paragraph boundaries, descriptive link text, or short reply were lost");
         const forumText = forumSegments.map(segment => segment.text).join("\n");
         if (forumText.includes("点赞") || forumText.includes("签名档") || forumText.includes("350×318") || forumText.includes("24.5 KB")) {
           throw new Error("Flarum controls leaked into speech text");
@@ -61,13 +61,13 @@
         if (!forumText.includes("补充说明") || forumText.includes("https://example.com/raw")) {
           throw new Error("forum link cleanup removed useful text or kept a bare URL");
         }
-        if (!forumSegments[0].isOp || forumSegments[2].isOp) {
+        if (!forumSegments[0].isOp || forumSegments[3].isOp) {
           throw new Error("Flarum OP detection failed");
         }
-        if (!forumSegments.slice(0, 2).every(segment => segment.authorId === "op" && segment.floor === 1 && segment.isOp)) {
+        if (!forumSegments.slice(0, 3).every(segment => segment.authorId === "op" && segment.floor === 1 && segment.isOp)) {
           throw new Error("Flarum paragraph speaker metadata changed inside one post");
         }
-        if (forumSegments[0].sourceLocator.unitIndex !== 0 || forumSegments[1].sourceLocator.unitIndex !== 1) {
+        if (forumSegments[0].sourceLocator.unitIndex !== 0 || forumSegments[1].sourceLocator.unitIndex !== 1 || forumSegments[2].sourceLocator.unitIndex !== 2) {
           throw new Error("Flarum paragraph locators were not emitted");
         }
 
