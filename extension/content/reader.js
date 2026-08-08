@@ -1,4 +1,4 @@
-/* global chrome, QwenReaderDefaults, QwenReaderText, QwenReaderDocument, QwenReaderExtractors, QwenReaderVoiceAssignment, QwenReaderPlayer, Readability */
+/* global chrome, QwenReaderDefaults, QwenReaderText, QwenReaderDocument, QwenReaderExtractors, QwenReaderSourceLocator, QwenReaderFollow, QwenReaderVoiceAssignment, QwenReaderPlayer, Readability */
 (function installQwenReader() {
   "use strict";
 
@@ -8,10 +8,12 @@
   const Text = globalThis.QwenReaderText;
   const DocumentModel = globalThis.QwenReaderDocument;
   const Extractors = globalThis.QwenReaderExtractors;
+  const SourceLocator = globalThis.QwenReaderSourceLocator;
+  const Follow = globalThis.QwenReaderFollow;
   const VoiceAssignment =
     globalThis.QwenReaderVoiceAssignment || globalThis.QwenReaderVoices;
   const Player = globalThis.QwenReaderPlayer;
-  if (!Text || !Extractors || !VoiceAssignment || !Player) {
+  if (!Text || !Extractors || !SourceLocator || !Follow || !VoiceAssignment || !Player) {
     console.error("Qwen Reader: shared modules are missing.");
     return;
   }
@@ -94,6 +96,7 @@
   let sessionCounter = 0;
   let activeSession = "";
   const playbackGate = Player.createInvocationGate();
+  const followController = Follow.createController();
   const clientId = createClientId();
   let scanCounter = 0;
   let activeScanController = null;
@@ -104,6 +107,7 @@
   let dynamicResumeIndex = null;
   const requestCache = Player.createRequestCache(cancelSessionById);
   let highlightedElement = null;
+  let lastScrolledLocatorKey = "";
   let toastTimer = null;
 
   bindEvents();
@@ -139,6 +143,11 @@
         await move(-1);
       } else if (action === "stop") {
         await stopPlayback();
+      } else if (action === "resume-follow") {
+        followController.resume();
+        lastScrolledLocatorKey = "";
+        highlightCurrent({ forceFollow: true });
+        renderNow();
       } else if (action === "open-studio") {
         const response = await chrome.runtime.sendMessage({
           type: "voice:studio:open",
@@ -211,6 +220,20 @@
       }
       render();
     });
+
+    const markManualScroll = (event) => {
+      if (!Follow.isScrollIntent(event, {
+        host,
+        viewportWidth: document.documentElement.clientWidth,
+      })) return;
+      if (!followController.canFollow()) return;
+      followController.markManual();
+      renderNow();
+    };
+    window.addEventListener("wheel", markManualScroll, { capture: true, passive: true });
+    window.addEventListener("touchmove", markManualScroll, { capture: true, passive: true });
+    window.addEventListener("keydown", markManualScroll, true);
+    window.addEventListener("pointerdown", markManualScroll, true);
 
     chrome.runtime.onMessage.addListener((message) => {
       if (message && message.type === "ui:toggle") {
@@ -384,6 +407,10 @@
         ? state.index
         : dynamicResumeIndex
       : 0;
+    if (!preserveDynamicQueue) {
+      followController.reset();
+      lastScrolledLocatorKey = "";
+    }
     dynamicResumeIndex = null;
     dynamicScanPending = false;
     clearTimeout(mutationTimer);
@@ -764,6 +791,8 @@
     lastObservedPageKey = pageKey;
     dynamicScanPending = false;
     dynamicResumeIndex = null;
+    followController.reset();
+    lastScrolledLocatorKey = "";
     clearTimeout(mutationTimer);
     if (activeScanController) activeScanController.abort();
     const invalidationId = ++scanCounter;
@@ -780,18 +809,14 @@
     }, 450);
   }
 
-  function highlightCurrent() {
-    clearHighlight();
+  function highlightCurrent(options) {
+    const settings = options || {};
     const segment = state.current;
-    if (!segment) return;
-    let element = null;
-    if (segment.sourceSelector) {
-      try {
-        element = document.querySelector(segment.sourceSelector);
-      } catch (_) {
-        element = null;
-      }
+    if (!segment) {
+      clearHighlight();
+      return;
     }
+    let element = SourceLocator.resolve(document, segment);
     if (!element && segment.sourceKey && segment.sourceKey.startsWith("dom:")) {
       const index = Number(segment.sourceKey.split(":")[1]) - 1;
       element = document.querySelectorAll(".Post")[index] || null;
@@ -815,10 +840,43 @@
         );
     }
     if (element) {
-      highlightedElement = element;
-      element.classList.add("qwen-reader-speaking");
-      element.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (highlightedElement !== element) {
+        clearHighlight();
+        highlightedElement = element;
+        element.classList.add("qwen-reader-speaking");
+      }
+      const locatorKey = sourceLocatorKey(segment);
+      const rect = typeof element.getBoundingClientRect === "function"
+        ? element.getBoundingClientRect()
+        : null;
+      const outsideSafeViewport = !Follow.isWithinSafeViewport(rect, window.innerHeight);
+      if (
+        followController.canFollow() &&
+        (settings.forceFollow || outsideSafeViewport) &&
+        (settings.forceFollow || locatorKey !== lastScrolledLocatorKey) &&
+        typeof element.scrollIntoView === "function"
+      ) {
+        element.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        lastScrolledLocatorKey = locatorKey;
+      }
+    } else {
+      clearHighlight();
     }
+  }
+
+  function sourceLocatorKey(segment) {
+    const locator = segment && segment.sourceLocator;
+    if (locator) {
+      return [
+        locator.adapter,
+        locator.containerSelector,
+        locator.unitIndex,
+        locator.fingerprint,
+      ].join(":");
+    }
+    return String(
+      (segment && (segment.sourceKey || segment.sourceSelector || segment.id)) || "",
+    );
   }
 
   function findReadableElement(spokenText) {
@@ -905,6 +963,9 @@
       ? '<span class="qr-pause-icon" aria-hidden="true"></span>'
       : '<span class="qr-play-icon" aria-hidden="true"></span>';
     const mainLabel = isPlaying ? "暂停" : state.status === "paused" ? "继续" : "播放";
+    const showResumeFollow = Boolean(current) &&
+      ["playing", "paused", "loading"].includes(state.status) &&
+      followController.mode === "manual";
     const queue = state.segments.slice(0, 40).map((segment, index) => `
       <button class="qr-queue-item ${index === state.index ? "is-current" : ""}" type="button" data-index="${index}">
         <span class="qr-mini-avatar">${escapeHtml(initials(segment.authorName || (segment.isOp ? "楼主" : "文")))}</span>
@@ -935,6 +996,7 @@
       <div class="qr-reading-box"><strong>${isBusy ? "正在准备：" : "当前句："}</strong> ${escapeHtml(current && current.text || "页面会自动识别，但不会自动发声。")}</div>
       <div class="qr-progress" aria-label="朗读进度"><span style="width:${progress}%"></span></div>
       <div class="qr-progress-labels"><span>${total ? state.index + 1 : 0}</span><span>${total}</span></div>
+      ${showResumeFollow ? '<div class="qr-follow-row"><button class="qr-follow-button" type="button" data-action="resume-follow" aria-label="回到当前朗读">回到当前朗读</button></div>' : ""}
       <div class="qr-controls">
         <button class="qr-control" type="button" data-action="previous" aria-label="上一段" ${!total || isBusy ? "disabled" : ""}><span class="qr-skip-icon is-back" aria-hidden="true"></span></button>
         <button class="qr-control is-main" type="button" data-action="play-toggle" aria-label="${mainLabel}" ${isBusy || !total ? "disabled" : ""}>${mainIcon}</button>
