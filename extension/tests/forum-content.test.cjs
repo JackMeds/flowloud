@@ -86,6 +86,16 @@ test('semanticElements removes redundant three-level semantic parents while reta
   assert.deepEqual(content.semanticElements(root), [leaf]);
 });
 
+test('semanticElements removes a parent fully represented by multiple semantic children', () => {
+  const content = loadForumContent();
+  const first = makeSemanticElement('one');
+  const second = makeSemanticElement('two');
+  const parent = makeSemanticElement('one two', [first, second]);
+  const root = { querySelectorAll: () => [parent, first, second] };
+
+  assert.deepEqual(content.semanticElements(root), [first, second]);
+});
+
 function makeSemanticElement(text, descendants = []) {
   return {
     textContent: text,

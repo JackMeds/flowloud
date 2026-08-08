@@ -67,7 +67,11 @@
         : [];
       if (!descendants.length) return Boolean(readableElementText(element, options));
       const elementText = readableElementText(element, options);
-      return !descendants.some((child) => readableElementText(child, options) === elementText);
+      const leafTexts = descendants
+        .filter((child) => !child.querySelectorAll(SEMANTIC_SELECTOR).length)
+        .map((child) => readableElementText(child, options))
+        .filter(Boolean);
+      return elementText !== cleanText(leafTexts.join(' '));
     });
   }
 
