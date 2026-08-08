@@ -7,6 +7,7 @@
 <body>
   <output id="result">RUNNING</output>
   <script src="../../shared/text.js"></script>
+  <script src="../../shared/forum-content.js"></script>
   <script src="../../vendor/readability/Readability.js"></script>
   <script src="../../shared/normalized-document.js"></script>
   <script src="../../shared/extractors.js"></script>
@@ -39,7 +40,8 @@
             <a class="PostUser-name">楼主</a>
             <div class="Post-body">
               <div class="lightbox-wrapper"><img alt="image"><div class="meta"><span>image</span><span>350×318 24.5 KB</span></div></div>
-              <p>楼主正文。</p>
+              <p>楼主第一段。</p>
+              <p>楼主第二段。</p>
               <p><a href="https://example.com/raw">https://example.com/raw</a></p>
               <p><a href="https://example.com/guide">补充说明</a></p>
               <button class="Button item-like">点赞</button>
@@ -51,7 +53,7 @@
           </article>
         `;
         const forumSegments = await QwenReaderExtractors.extractFlarum(forum);
-        if (forumSegments.length !== 2) throw new Error("short Flarum reply was lost");
+        if (forumSegments.length !== 3) throw new Error("Flarum paragraph boundaries or short reply were lost");
         const forumText = forumSegments.map(segment => segment.text).join("\n");
         if (forumText.includes("点赞") || forumText.includes("签名档") || forumText.includes("350×318") || forumText.includes("24.5 KB")) {
           throw new Error("Flarum controls leaked into speech text");
@@ -59,8 +61,30 @@
         if (!forumText.includes("补充说明") || forumText.includes("https://example.com/raw")) {
           throw new Error("forum link cleanup removed useful text or kept a bare URL");
         }
-        if (!forumSegments[0].isOp || forumSegments[1].isOp) {
+        if (!forumSegments[0].isOp || forumSegments[2].isOp) {
           throw new Error("Flarum OP detection failed");
+        }
+        if (!forumSegments.slice(0, 2).every(segment => segment.authorId === "op" && segment.floor === 1 && segment.isOp)) {
+          throw new Error("Flarum paragraph speaker metadata changed inside one post");
+        }
+        if (forumSegments[0].sourceLocator.unitIndex !== 0 || forumSegments[1].sourceLocator.unitIndex !== 1) {
+          throw new Error("Flarum paragraph locators were not emitted");
+        }
+
+        const xenforo = document.implementation.createHTMLDocument("XenForo");
+        xenforo.documentElement.id = "XF";
+        xenforo.body.innerHTML = `
+          <article class="message message--post" id="js-post-9001" data-content="post-9001" data-author="Owner">
+            <div class="message-attribution-opposite">#1</div>
+            <div class="message-body"><div class="bbWrapper"><p>XenForo first.</p><p>XenForo second.</p></div></div>
+          </article>
+        `;
+        const xenforoSegments = QwenReaderExtractors.extractXenForo(xenforo);
+        if (xenforoSegments.length !== 2 || xenforoSegments.map(segment => segment.text).join("|") !== "XenForo first.|XenForo second.") {
+          throw new Error("XenForo paragraph boundaries were lost");
+        }
+        if (!xenforoSegments.every(segment => segment.authorName === "Owner" && segment.floor === 1 && segment.isOp)) {
+          throw new Error("XenForo paragraph speaker metadata changed inside one post");
         }
 
         const article = document.implementation.createHTMLDocument("长文章");

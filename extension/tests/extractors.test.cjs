@@ -6,9 +6,10 @@ const vm = require('node:vm');
 
 function loadModules() {
   delete globalThis.QwenReaderText;
+  delete globalThis.QwenReaderForumContent;
   delete globalThis.QwenReaderNormalizedDocument;
   delete globalThis.QwenReaderExtractors;
-  for (const relativePath of ['shared/text.js', 'shared/normalized-document.js', 'shared/extractors.js']) {
+  for (const relativePath of ['shared/text.js', 'shared/forum-content.js', 'shared/normalized-document.js', 'shared/extractors.js']) {
     const absolutePath = path.join(__dirname, '..', relativePath);
     if (!fs.existsSync(absolutePath)) continue;
     const source = fs.readFileSync(absolutePath, 'utf8');
@@ -16,6 +17,26 @@ function loadModules() {
   }
   return globalThis.QwenReaderExtractors;
 }
+
+test('Flarum keeps paragraph boundaries and speaker metadata inside one post', () => {
+  const { parseFlarumApi } = loadModules();
+  const blocks = parseFlarumApi({
+    data: [{
+      type: 'posts', id: '48666-1',
+      attributes: { number: 1, contentHtml: '<p>First paragraph.</p><p>Second paragraph.</p><p>Agreed</p>' },
+      relationships: { user: { data: { type: 'users', id: 'op' } } }
+    }],
+    included: [{ type: 'users', id: 'op', attributes: { username: 'Owner' } }]
+  });
+
+  assert.deepEqual(blocks.map((block) => block.text), ['First paragraph.', 'Second paragraph.', 'Agreed']);
+  assert.ok(blocks.every((block) => block.authorId === 'op' && block.authorName === 'Owner' && block.floor === 1 && block.isOp));
+  assert.deepEqual(blocks.map((block) => block.sourceLocator), [
+    { adapter: 'flarum', containerSelector: '.PostStream-item[data-id="48666-1"] .Post-body', unitIndex: 0, fingerprint: '1qob6lf' },
+    { adapter: 'flarum', containerSelector: '.PostStream-item[data-id="48666-1"] .Post-body', unitIndex: 1, fingerprint: 'rjbkmf' },
+    { adapter: 'flarum', containerSelector: '.PostStream-item[data-id="48666-1"] .Post-body', unitIndex: 2, fingerprint: '13h5eh1' }
+  ]);
+});
 
 function readFixture(name) {
   return JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8'));
@@ -301,6 +322,29 @@ test('Discourse anonymous posts remain distinct while the first readable post is
   assert.notEqual(segments[0].authorId, segments[1].authorId);
 });
 
+test('Discourse keeps paragraph boundaries and speaker metadata inside one post', () => {
+  const { parseDiscourseTopic } = loadModules();
+  const blocks = parseDiscourseTopic({
+    post_stream: {
+      posts: [{
+        id: 91,
+        user_id: 7,
+        username: 'Owner',
+        post_number: 4,
+        post_type: 1,
+        cooked: '<p>Opening thought.</p><p>Supporting detail.</p>'
+      }]
+    }
+  }, []);
+
+  assert.deepEqual(blocks.map((block) => block.text), ['Opening thought.', 'Supporting detail.']);
+  assert.ok(blocks.every((block) => block.authorId === '7' && block.authorName === 'Owner' && block.floor === 4 && block.isOp));
+  assert.deepEqual(blocks.map((block) => block.sourceLocator), [
+    { adapter: 'discourse', containerSelector: 'article[data-post-id="91"] .cooked, article#post_91 .cooked', unitIndex: 0, fingerprint: '1rlycf8' },
+    { adapter: 'discourse', containerSelector: 'article[data-post-id="91"] .cooked, article#post_91 .cooked', unitIndex: 1, fingerprint: 'jywbul' }
+  ]);
+});
+
 test('Discourse removes image attachment metadata and bare URLs but keeps descriptive link text', () => {
   const { parseDiscourseTopic } = loadModules();
   const segments = parseDiscourseTopic({
@@ -327,7 +371,7 @@ test('Discourse removes image attachment metadata and bare URLs but keeps descri
     }
   }, []);
 
-  assert.equal(segments[0].text, '感觉我的建议已经很中肯了 补充说明');
+  assert.equal(segments.map((segment) => segment.text).join(' '), '感觉我的建议已经很中肯了 补充说明');
 });
 
 test('NodeBB guest uid zero uses names instead of merging every guest into the OP', () => {
@@ -344,6 +388,27 @@ test('NodeBB guest uid zero uses names instead of merging every guest into the O
   assert.equal(segments[1].isOp, false);
   assert.equal(segments[0].authorId, 'name:guest-a');
   assert.equal(segments[1].authorId, 'name:guest-b');
+});
+
+test('NodeBB keeps paragraph boundaries and speaker metadata inside one post', () => {
+  const { parseNodebbTopicPages } = loadModules();
+  const blocks = parseNodebbTopicPages([{
+    uid: 12,
+    posts: [{
+      pid: 501,
+      uid: 12,
+      index: 0,
+      content: '<p>NodeBB first.</p><p>NodeBB second.</p>',
+      user: { uid: 12, username: 'Owner' }
+    }]
+  }]);
+
+  assert.deepEqual(blocks.map((block) => block.text), ['NodeBB first.', 'NodeBB second.']);
+  assert.ok(blocks.every((block) => block.authorId === '12' && block.authorName === 'Owner' && block.floor === 1 && block.isOp));
+  assert.deepEqual(blocks.map((block) => block.sourceLocator), [
+    { adapter: 'nodebb', containerSelector: '[component="post"][data-pid="501"] [component="post/content"]', unitIndex: 0, fingerprint: '1wcxwvb' },
+    { adapter: 'nodebb', containerSelector: '[component="post"][data-pid="501"] [component="post/content"]', unitIndex: 1, fingerprint: 'sx67nn' }
+  ]);
 });
 
 test('NodeBB reports a pagination limit instead of claiming a capped topic is complete', async () => {
@@ -385,6 +450,22 @@ test('XenForo DOM adapter removes quotes, controls and signatures from current-p
   assert.deepEqual(result.blocks.map(({ floor, text }) => ({ floor, text })), [
     { floor: 1, text: '真正正文' },
     { floor: 2, text: '回复正文' }
+  ]);
+});
+
+test('XenForo keeps paragraph boundaries and speaker metadata inside one post', () => {
+  const { extractXenForo } = loadModules();
+  const document = makeXenForoDocument([
+    makeXenForoPost('9001', 'Owner', '#1', ['First XenForo paragraph.', 'Second XenForo paragraph.'])
+  ]);
+
+  const blocks = extractXenForo(document);
+
+  assert.deepEqual(blocks.map((block) => block.text), ['First XenForo paragraph.', 'Second XenForo paragraph.']);
+  assert.ok(blocks.every((block) => block.authorName === 'Owner' && block.floor === 1 && block.isOp));
+  assert.deepEqual(blocks.map((block) => block.sourceLocator), [
+    { adapter: 'xenforo', containerSelector: '.message--post[data-content="post-9001"] .message-body .bbWrapper, #js-post-9001 .message-body .bbWrapper', unitIndex: 0, fingerprint: '9a6va2' },
+    { adapter: 'xenforo', containerSelector: '.message--post[data-content="post-9001"] .message-body .bbWrapper, #js-post-9001 .message-body .bbWrapper', unitIndex: 1, fingerprint: 'lsa0t2' }
   ]);
 });
 
@@ -587,7 +668,14 @@ function makeFlarumDocument(posts) {
 }
 
 function makeRemovableBody(text, removableTexts) {
+  const readableText = removableTexts.reduce((current, value) => current.replace(value, ''), text).trim();
+  const semantic = makeSemanticBody([readableText]);
   return {
+    textContent: text,
+    querySelectorAll(selector) {
+      if (selector === 'p,h1,h2,h3,h4,h5,h6,li') return semantic.querySelectorAll(selector);
+      return [];
+    },
     cloneNode() {
       const removed = new Set();
       return {
@@ -595,18 +683,17 @@ function makeRemovableBody(text, removableTexts) {
           return removableTexts.map((value) => ({ remove: () => removed.add(value) }));
         },
         get textContent() {
-          return removableTexts.reduce((current, value) => current.replace(value, ''), text);
+          return readableText;
         }
       };
     }
   };
 }
 
-function makeXenForoDocument() {
-  const posts = [
+function makeXenForoDocument(posts = [
     makeXenForoPost('9001', '楼主', '#1', '真正正文 引用旧文 点赞 签名档', ['引用旧文', '点赞', '签名档']),
     makeXenForoPost('9002', '回复者', '#2', '回复正文 操作按钮', ['操作按钮'])
-  ];
+  ]) {
   return {
     location: makeLocation('https://xen.example/threads/topic.22/'),
     title: 'XenForo 主题',
@@ -627,7 +714,9 @@ function makeXenForoDocument() {
 }
 
 function makeXenForoPost(id, author, floor, content, removable) {
-  const body = makeRemovableBody(content, removable);
+  const body = Array.isArray(content)
+    ? makeSemanticBody(content)
+    : makeRemovableBody(content, removable || []);
   return {
     id: `js-post-${id}`,
     getAttribute(name) {
@@ -642,6 +731,26 @@ function makeXenForoPost(id, author, floor, content, removable) {
         return { textContent: floor };
       }
       return null;
+    }
+  };
+}
+
+function makeSemanticBody(paragraphs) {
+  const elements = paragraphs.map((textContent) => ({
+    textContent,
+    closest: () => null,
+    querySelectorAll: () => [],
+    cloneNode() {
+      return { textContent, querySelectorAll: () => [] };
+    }
+  }));
+  return {
+    textContent: paragraphs.join(' '),
+    querySelectorAll(selector) {
+      return selector === 'p,h1,h2,h3,h4,h5,h6,li' ? elements : [];
+    },
+    cloneNode() {
+      return { textContent: paragraphs.join(' '), querySelectorAll: () => [] };
     }
   };
 }

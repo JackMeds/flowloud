@@ -3,6 +3,7 @@
 
   const text = global.QwenReaderText;
   const model = global.QwenReaderNormalizedDocument;
+  const ForumContent = global.QwenReaderForumContent;
   const MAX_PAGES = 100;
   const MAX_POSTS = 5000;
   const REMOVABLE_SELECTOR = [
@@ -63,6 +64,23 @@
 
   function block(input) {
     return requireModel().createBlock(Object.assign({ type: 'forum-post' }, input));
+  }
+
+  function expandForumPost(meta, contentSource, options) {
+    if (!ForumContent) throw new Error('QwenReaderForumContent must load before extractors.js');
+    const units = contentSource && typeof contentSource === 'object'
+      ? ForumContent.semanticUnitsFromElement(contentSource, options)
+      : ForumContent.semanticUnitsFromHtml(contentSource, options);
+    return units.map((unit) => block(Object.assign({}, meta, {
+      id: `${meta.id}:unit:${unit.unitIndex}`,
+      text: unit.text,
+      sourceLocator: {
+        adapter: meta.adapter,
+        containerSelector: meta.containerSelector,
+        unitIndex: unit.unitIndex,
+        fingerprint: unit.fingerprint
+      }
+    })));
   }
 
   function documentResult(document, input) {
@@ -196,26 +214,24 @@
       ? forumAuthor(firstAuthorId, userNames.get(firstAuthorId), firstPostId)
       : null;
 
-    return posts.map((post) => {
+    return posts.flatMap((post) => {
       const id = String(post.id);
       const rawAuthorId = getPostAuthorId(post);
       const author = forumAuthor(rawAuthorId, userNames.get(rawAuthorId), `flarum:${id}`);
-      return block({
+      const sourceSelector = `.PostStream-item[data-id="${cssString(id)}"]`;
+      return expandForumPost({
         id: `flarum:post:${id}`,
+        adapter: 'flarum',
+        containerSelector: `${sourceSelector} .Post-body`,
         postId: id,
         floor: postNumber(post),
         authorId: author.id,
         authorName: author.name,
         isOp: id === firstPostId || Boolean(opAuthor && opAuthor.stable && author.stable && author.id === opAuthor.id),
-        text: htmlToReadableText(
-          (post.attributes || {}).contentHtml || '',
-          options && options.DOMParserCtor,
-          { removeBlockquotes: true }
-        ),
         sourceKey: `flarum:${id}`,
-        sourceSelector: `.PostStream-item[data-id="${cssString(id)}"]`
-      });
-    }).filter((item) => item.text.length > 0);
+        sourceSelector
+      }, (post.attributes || {}).contentHtml || '', Object.assign({}, options, { removeBlockquotes: true }));
+    });
   }
 
   function cssString(value) {
@@ -271,17 +287,21 @@
     });
     const first = normalized.find((item) => elementReadableText(item.body, { removeBlockquotes: true }));
     const opKey = first && first.author.id;
-    return normalized.map((item) => block({
+    return normalized.flatMap((item) => {
+      const sourceSelector = `.PostStream-item[data-id="${cssString(item.postId)}"]`;
+      return expandForumPost({
       id: `flarum:post:${item.postId}`,
+      adapter: 'flarum',
+      containerSelector: `${sourceSelector} .Post-body`,
       postId: item.postId,
       floor: item.floor,
       authorId: item.author.id,
       authorName: item.author.name,
       isOp: Boolean(opKey) && item.author.id === opKey,
-      text: elementReadableText(item.body, { removeBlockquotes: true }),
       sourceKey: `flarum:${item.postId}`,
-      sourceSelector: `.PostStream-item[data-id="${cssString(item.postId)}"]`
-    })).filter((item) => item.text.length > 0);
+      sourceSelector
+      }, item.body, { removeBlockquotes: true });
+    });
   }
 
   async function extractFlarumDocument(document, options) {
@@ -400,21 +420,23 @@
     ));
     const firstId = first && first.id != null ? String(first.id) : '';
     const opAuthor = first ? discourseAuthor(first) : null;
-    return posts.map((post) => {
+    return posts.flatMap((post) => {
       const id = String(post.id);
       const author = discourseAuthor(post);
-      return block({
+      const sourceSelector = `article[data-post-id="${cssString(id)}"], article#post_${cssString(id)}`;
+      return expandForumPost({
         id: `discourse:post:${id}`,
+        adapter: 'discourse',
+        containerSelector: `article[data-post-id="${cssString(id)}"] .cooked, article#post_${cssString(id)} .cooked`,
         postId: id,
         floor: Number(post.post_number),
         authorId: author.id,
         authorName: author.name,
         isOp: id === firstId || Boolean(opAuthor && opAuthor.stable && author.stable && author.id === opAuthor.id),
-        text: htmlToReadableText(post.cooked, options && options.DOMParserCtor, { removeBlockquotes: true }),
         sourceKey: `discourse:${id}`,
-        sourceSelector: `article[data-post-id="${cssString(id)}"], article#post_${cssString(id)}`
-      });
-    }).filter((item) => item.text.length > 0);
+        sourceSelector
+      }, post.cooked, Object.assign({}, options, { removeBlockquotes: true }));
+    });
   }
 
   function extractDiscourseDom(document) {
@@ -428,20 +450,24 @@
       const postId = String((post.getAttribute && post.getAttribute('data-post-id')) || post.id || index + 1).replace(/^post_/u, '');
       const floorNode = post.querySelector && post.querySelector('.post-number, a.post-date');
       const floorMatch = clean(floorNode && floorNode.textContent).match(/(\d+)/u);
-      return { postId, floor: floorMatch ? Number(floorMatch[1]) : index + 1, authorId, authorName, text: elementReadableText(content, { removeBlockquotes: true }) };
-    }).filter((item) => item.text);
+      return { postId, floor: floorMatch ? Number(floorMatch[1]) : index + 1, authorId, authorName, content };
+    }).filter((item) => ForumContent.semanticUnitsFromElement(item.content, { removeBlockquotes: true }).length);
     const first = mapped.slice().sort((a, b) => a.floor - b.floor)[0];
-    return mapped.sort((a, b) => a.floor - b.floor).map((item) => block({
+    return mapped.sort((a, b) => a.floor - b.floor).flatMap((item) => {
+      const sourceSelector = `article[data-post-id="${cssString(item.postId)}"], article#post_${cssString(item.postId)}`;
+      return expandForumPost({
       id: `discourse:post:${item.postId}`,
+      adapter: 'discourse',
+      containerSelector: `article[data-post-id="${cssString(item.postId)}"] .cooked, article#post_${cssString(item.postId)} .cooked`,
       postId: item.postId,
       floor: item.floor,
       authorId: item.authorId,
       authorName: item.authorName,
       isOp: Boolean(first) && first.authorId === item.authorId,
-      text: item.text,
       sourceKey: `discourse:${item.postId}`,
-      sourceSelector: `article[data-post-id="${cssString(item.postId)}"], article#post_${cssString(item.postId)}`
-    }));
+      sourceSelector
+      }, item.content, { removeBlockquotes: true });
+    });
   }
 
   async function extractDiscourseDocument(document, options) {
@@ -541,7 +567,7 @@
       : null;
     const rootOpKey = authorKey(root.uid, '');
     const opKey = rootOpKey || (firstAuthor && firstAuthor.stable ? firstAuthor.id : '');
-    return posts.map((post) => {
+    return posts.flatMap((post) => {
       const id = String(post.pid);
       const user = post.user || {};
       const authorName = clean(user.displayname || user.username || post.username) || '匿名用户';
@@ -551,18 +577,20 @@
         `nodebb:${id}`
       );
       const index = Number(post.index);
-      return block({
+      const sourceSelector = `[component="post"][data-pid="${cssString(id)}"]`;
+      return expandForumPost({
         id: `nodebb:post:${id}`,
+        adapter: 'nodebb',
+        containerSelector: `${sourceSelector} [component="post/content"]`,
         postId: id,
         floor: Number.isFinite(index) ? index + 1 : null,
         authorId: author.id,
         authorName,
         isOp: post.topicOwnerPost === true || id === firstId || Boolean(opKey && author.stable && author.id === opKey),
-        text: htmlToReadableText(post.content, options && options.DOMParserCtor, { removeBlockquotes: true }),
         sourceKey: `nodebb:${id}`,
-        sourceSelector: `[component="post"][data-pid="${cssString(id)}"]`
-      });
-    }).filter((item) => item.text.length > 0);
+        sourceSelector
+      }, post.content, Object.assign({}, options, { removeBlockquotes: true }));
+    });
   }
 
   function extractNodebbDom(document) {
@@ -579,20 +607,24 @@
         `nodebb:${postId}`
       );
       const indexValue = Number(post.getAttribute && post.getAttribute('data-index'));
-      return { postId, floor: Number.isFinite(indexValue) ? indexValue + 1 : index + 1, authorId: author.id, authorName, text: elementReadableText(content, { removeBlockquotes: true }) };
-    }).filter((item) => item.text);
+      return { postId, floor: Number.isFinite(indexValue) ? indexValue + 1 : index + 1, authorId: author.id, authorName, content };
+    }).filter((item) => ForumContent.semanticUnitsFromElement(item.content, { removeBlockquotes: true }).length);
     const first = mapped.slice().sort((a, b) => a.floor - b.floor)[0];
-    return mapped.sort((a, b) => a.floor - b.floor).map((item) => block({
+    return mapped.sort((a, b) => a.floor - b.floor).flatMap((item) => {
+      const sourceSelector = `[component="post"][data-pid="${cssString(item.postId)}"]`;
+      return expandForumPost({
       id: `nodebb:post:${item.postId}`,
+      adapter: 'nodebb',
+      containerSelector: `${sourceSelector} [component="post/content"]`,
       postId: item.postId,
       floor: item.floor,
       authorId: item.authorId,
       authorName: item.authorName,
       isOp: Boolean(first) && first.authorId === item.authorId,
-      text: item.text,
       sourceKey: `nodebb:${item.postId}`,
-      sourceSelector: `[component="post"][data-pid="${cssString(item.postId)}"]`
-    }));
+      sourceSelector
+      }, item.content, { removeBlockquotes: true });
+    });
   }
 
   async function extractNodebbDocument(document, options) {
@@ -709,14 +741,18 @@
         authorName: author.name,
         authorStable: author.stable,
         starterMarker,
-        text: elementReadableText(content, { removeBlockquotes: true })
+        content
       };
-    }).filter((item) => item.text).sort((left, right) => left.floor - right.floor);
+    }).filter((item) => ForumContent.semanticUnitsFromElement(item.content, { removeBlockquotes: true }).length).sort((left, right) => left.floor - right.floor);
     const markedStarter = mapped.find((item) => item.starterMarker);
     const visibleFirst = mapped.find((item) => item.floor === 1);
     const op = markedStarter || visibleFirst;
-    return mapped.map((item) => block({
+    return mapped.flatMap((item) => {
+      const sourceSelector = `.message--post[data-content="post-${cssString(item.postId)}"], #js-post-${cssString(item.postId)}`;
+      return expandForumPost({
       id: `xenforo:post:${item.postId}`,
+      adapter: 'xenforo',
+      containerSelector: `.message--post[data-content="post-${cssString(item.postId)}"] .message-body .bbWrapper, #js-post-${cssString(item.postId)} .message-body .bbWrapper`,
       postId: item.postId,
       floor: item.floor,
       authorId: item.authorId,
@@ -725,10 +761,10 @@
         item.postId === op.postId ||
         Boolean(op.authorStable && item.authorStable && item.authorId === op.authorId)
       ),
-      text: item.text,
       sourceKey: `xenforo:${item.postId}`,
-      sourceSelector: `.message--post[data-content="post-${cssString(item.postId)}"], #js-post-${cssString(item.postId)}`
-    }));
+      sourceSelector
+      }, item.content, { removeBlockquotes: true });
+    });
   }
 
   function splitArticleText(value) {

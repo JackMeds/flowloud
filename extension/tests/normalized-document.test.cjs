@@ -60,7 +60,8 @@ test('createBlock preserves a non-empty one-character forum reply', () => {
     isOp: false,
     postId: '',
     sourceKey: '',
-    sourceSelector: ''
+    sourceSelector: '',
+    sourceLocator: null
   });
 });
 
@@ -87,6 +88,12 @@ test('createDocument filters only empty blocks and records extraction metadata',
 
 test('toPlaybackSegments is the single chunking point and preserves speaker metadata', () => {
   const model = loadNormalizedDocument();
+  const locator = {
+    adapter: 'discourse',
+    containerSelector: 'article[data-post-id="9"] .cooked, article#post_9 .cooked',
+    unitIndex: 3,
+    fingerprint: 'abc123'
+  };
   const document = model.createDocument({
     url: 'https://forum.example/t/42',
     adapterId: 'discourse',
@@ -97,7 +104,8 @@ test('toPlaybackSegments is the single chunking point and preserves speaker meta
       authorName: '楼主',
       isOp: true,
       floor: 9,
-      sourceSelector: '[data-post-id="9"]'
+      sourceSelector: '[data-post-id="9"]',
+      sourceLocator: locator
     }]
   });
 
@@ -112,4 +120,20 @@ test('toPlaybackSegments is the single chunking point and preserves speaker meta
   assert.equal(chunks[1].authorId, 'op');
   assert.equal(chunks[1].isOp, true);
   assert.equal(chunks[1].sourceSelector, '[data-post-id="9"]');
+  assert.deepEqual(chunks[0].sourceLocator, locator);
+  assert.deepEqual(chunks[1].sourceLocator, locator);
+  assert.notEqual(chunks[0].sourceLocator, locator);
+  assert.notEqual(chunks[0].sourceLocator, chunks[1].sourceLocator);
+});
+
+test('createBlock rejects malformed source locators without retaining caller objects', () => {
+  const model = loadNormalizedDocument();
+  const locator = { adapter: 'flarum', containerSelector: '.Post-body', unitIndex: 0, fingerprint: 'abc123' };
+
+  const valid = model.createBlock({ id: 'valid', text: 'Text', sourceLocator: locator });
+  const invalid = model.createBlock({ id: 'invalid', text: 'Text', sourceLocator: { ...locator, unitIndex: false } });
+
+  assert.deepEqual(valid.sourceLocator, locator);
+  assert.notEqual(valid.sourceLocator, locator);
+  assert.equal(invalid.sourceLocator, null);
 });

@@ -35,6 +35,24 @@
     }
   }
 
+  function normalizeSourceLocator(input) {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+    const keys = ['adapter', 'containerSelector', 'unitIndex', 'fingerprint'];
+    if (!keys.every((key) => {
+      const value = input[key];
+      return (typeof value === 'string' || typeof value === 'number') &&
+        (typeof value !== 'number' || Number.isFinite(value));
+    })) return null;
+    const unitIndex = Number(input.unitIndex);
+    if (!Number.isFinite(unitIndex)) return null;
+    return {
+      adapter: String(input.adapter),
+      containerSelector: String(input.containerSelector),
+      unitIndex,
+      fingerprint: String(input.fingerprint)
+    };
+  }
+
   function createBlock(input) {
     const source = input || {};
     const floorValue = Number(source.floor);
@@ -48,7 +66,8 @@
       isOp: Boolean(source.isOp),
       postId: String(source.postId == null ? '' : source.postId),
       sourceKey: String(source.sourceKey == null ? '' : source.sourceKey),
-      sourceSelector: String(source.sourceSelector == null ? '' : source.sourceSelector)
+      sourceSelector: String(source.sourceSelector == null ? '' : source.sourceSelector),
+      sourceLocator: normalizeSourceLocator(source.sourceLocator)
     };
   }
 
