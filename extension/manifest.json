@@ -30,6 +30,8 @@
         "vendor/readability/Readability.js",
         "shared/normalized-document.js",
         "shared/extractors.js",
+        "shared/source-locator.js",
+        "shared/follow-controller.js",
         "shared/voice-assignment.js",
         "shared/player-state.js",
         "content/reader.js"
