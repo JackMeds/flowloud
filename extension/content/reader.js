@@ -30,6 +30,7 @@
 
   const host = document.createElement("div");
   host.id = "qwen-reader-host";
+  host.style.setProperty("display", "none", "important");
   document.documentElement.appendChild(host);
   const TEST_MODE = globalThis.__QWEN_READER_TEST__ === true;
   const shadow = host.attachShadow({ mode: "closed" });
@@ -37,14 +38,23 @@
   const stylesheet = document.createElement("link");
   stylesheet.rel = "stylesheet";
   stylesheet.href = chrome.runtime.getURL("content/reader.css");
+  stylesheet.addEventListener("load", () => {
+    host.style.removeProperty("display");
+  }, { once: true });
+  stylesheet.addEventListener("error", () => {
+    console.error("Qwen Reader: failed to load the reader stylesheet.");
+    host.remove();
+  }, { once: true });
   shadow.append(stylesheet);
 
+  const logoUrl = chrome.runtime.getURL("assets/qwen-reader-128.png");
   const shell = document.createElement("div");
   shell.innerHTML = `
     <button class="qr-orb" type="button" data-action="toggle-panel" aria-label="打开 Qwen 网页朗读">
-      <span class="qr-orb-mark" aria-hidden="true">Q</span>
+      <img class="qr-orb-logo" src="${logoUrl}" alt="" aria-hidden="true">
     </button>
     <aside class="qr-panel" aria-label="Qwen 网页朗读侧栏">
+      <div class="qr-resize-handle" data-role="panel-resize" role="separator" aria-label="拖动调整侧栏宽度" aria-orientation="vertical"></div>
       <div class="qr-panel-inner">
         <header class="qr-header">
           <div>
@@ -76,10 +86,25 @@
   pageStyle.id = "qwen-reader-page-style";
   pageStyle.textContent = `
     .qwen-reader-speaking {
-      outline: 3px solid rgba(118, 87, 232, .48) !important;
-      outline-offset: 5px !important;
-      border-radius: 8px !important;
-      transition: outline-color .2s ease !important;
+      background-image: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(104, 73, 226, .24) 8%,
+        rgba(126, 86, 255, .98) 38%,
+        rgba(70, 159, 255, .94) 72%,
+        transparent 100%
+      ) !important;
+      background-repeat: no-repeat !important;
+      background-position: 0 100% !important;
+      background-size: 100% 3px !important;
+      box-shadow: 0 10px 22px -18px rgba(87, 102, 255, .9) !important;
+      text-shadow:
+        0 0 2px rgba(255, 255, 255, .92),
+        0 0 10px rgba(118, 87, 232, .28) !important;
+      transition:
+        background-size .24s ease,
+        text-shadow .24s ease,
+        box-shadow .24s ease !important;
     }
   `;
   (document.head || document.documentElement).appendChild(pageStyle);
@@ -87,6 +112,8 @@
   let state = Player.createInitialState();
   let settings = Object.assign({}, DEFAULT_SETTINGS, {
     replyVoices: (DEFAULT_SETTINGS.replyVoices || []).slice(),
+    panelWidth: clampPanelWidth(DEFAULT_SETTINGS.panelWidth || 376),
+    clickToRead: Boolean(DEFAULT_SETTINGS.clickToRead),
   });
   let knownVoices = unique([
     settings.opVoice,
@@ -170,7 +197,19 @@
     shadow.addEventListener("change", async (event) => {
       if (!event.isTrusted && !TEST_MODE) return;
       const control = event.target;
-      if (control.dataset.setting === "preset") {
+      if (control.dataset.setting === "panelWidth") {
+        settings.panelWidth = clampPanelWidth(control.value);
+        applyPanelWidth();
+        await saveSettings();
+        renderNow();
+        return;
+      } else if (control.dataset.setting === "clickToRead") {
+        settings.clickToRead = Boolean(control.checked);
+        await saveSettings();
+        renderNow();
+        showToast(settings.clickToRead ? "网页点读已开启：点击正文即可从该段朗读。" : "网页点读已关闭。");
+        return;
+      } else if (control.dataset.setting === "preset") {
         settings.preset = control.value;
       } else if (control.dataset.setting === "opVoice") {
         const nextOpVoice = control.value;
@@ -221,6 +260,42 @@
       render();
     });
 
+    shadow.addEventListener("input", (event) => {
+      const control = event.target;
+      if (!control || control.dataset.setting !== "panelWidth") return;
+      settings.panelWidth = clampPanelWidth(control.value);
+      applyPanelWidth();
+      const output = shadow.querySelector('[data-role="panel-width-value"]');
+      if (output) output.textContent = `${settings.panelWidth}px`;
+    });
+
+    let resizePointerId = null;
+    shadow.addEventListener("pointerdown", (event) => {
+      const handle = event.target.closest('[data-role="panel-resize"]');
+      if (!handle || (!event.isTrusted && !TEST_MODE)) return;
+      resizePointerId = event.pointerId;
+      handle.setPointerCapture?.(event.pointerId);
+      host.classList.add("is-resizing");
+      event.preventDefault();
+    });
+    shadow.addEventListener("pointermove", (event) => {
+      if (resizePointerId == null || event.pointerId !== resizePointerId) return;
+      settings.panelWidth = clampPanelWidth(window.innerWidth - event.clientX - 14);
+      applyPanelWidth();
+      const range = shadow.querySelector('[data-setting="panelWidth"]');
+      const output = shadow.querySelector('[data-role="panel-width-value"]');
+      if (range) range.value = String(settings.panelWidth);
+      if (output) output.textContent = `${settings.panelWidth}px`;
+    });
+    const finishResize = async (event) => {
+      if (resizePointerId == null || event.pointerId !== resizePointerId) return;
+      resizePointerId = null;
+      host.classList.remove("is-resizing");
+      await saveSettings();
+    };
+    shadow.addEventListener("pointerup", finishResize);
+    shadow.addEventListener("pointercancel", finishResize);
+
     const markManualScroll = (event) => {
       if (!Follow.isScrollIntent(event, {
         host,
@@ -234,6 +309,7 @@
     window.addEventListener("touchmove", markManualScroll, { capture: true, passive: true });
     window.addEventListener("keydown", markManualScroll, true);
     window.addEventListener("pointerdown", markManualScroll, true);
+    document.addEventListener("click", handlePageClick, true);
 
     chrome.runtime.onMessage.addListener((message) => {
       if (message && message.type === "ui:toggle") {
@@ -287,6 +363,8 @@
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
     const before = JSON.stringify(settings);
     const next = Object.assign({}, settings, value);
+    next.panelWidth = clampPanelWidth(next.panelWidth);
+    next.clickToRead = Boolean(next.clickToRead);
     next.opVoice = String(next.opVoice || DEFAULT_SETTINGS.opVoice || "邵思萌").trim();
     const requestedReplies = Array.isArray(value.replyVoices)
       ? value.replyVoices
@@ -316,6 +394,61 @@
 
   async function saveSettings() {
     await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
+  }
+
+  function clampPanelWidth(value) {
+    const viewportLimit = Math.max(300, Math.min(640, (window.innerWidth || 1024) - 48));
+    const width = Number.isFinite(Number(value)) ? Math.round(Number(value)) : 376;
+    return Math.max(300, Math.min(viewportLimit, width));
+  }
+
+  function applyPanelWidth() {
+    settings.panelWidth = clampPanelWidth(settings.panelWidth);
+    host.style.setProperty("--qr-panel-width", `${settings.panelWidth}px`);
+  }
+
+  async function handlePageClick(event) {
+    if ((!event.isTrusted && !TEST_MODE) || !settings.clickToRead || !state.segments.length) return;
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    if (path.includes(host)) return;
+    const target = event.target;
+    if (!target || target.nodeType !== 1) return;
+    if (target.closest("a, button, input, select, textarea, label, summary, [contenteditable='true'], [role='button']")) return;
+    const contentNode = target.closest([
+      "p",
+      "li",
+      "blockquote",
+      "pre",
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+      ".Post-body",
+      ".cooked",
+      ".message-body",
+      ".message-content",
+      "article",
+    ].join(",")) || target;
+    let matchingIndex = -1;
+    for (let index = 0; index < state.segments.length; index += 1) {
+      const segment = state.segments[index];
+      const element = SourceLocator.resolve(document, segment);
+      if (
+        element &&
+        (element === contentNode ||
+          element.contains(contentNode) ||
+          contentNode.contains(element))
+      ) {
+        matchingIndex = index;
+        break;
+      }
+    }
+    if (matchingIndex < 0) return;
+    followController.resume();
+    lastScrolledLocatorKey = "";
+    await seek(matchingIndex);
   }
 
   async function checkService() {
@@ -846,17 +979,16 @@
         element.classList.add("qwen-reader-speaking");
       }
       const locatorKey = sourceLocatorKey(segment);
-      const rect = typeof element.getBoundingClientRect === "function"
-        ? element.getBoundingClientRect()
-        : null;
-      const outsideSafeViewport = !Follow.isWithinSafeViewport(rect, window.innerHeight);
       if (
         followController.canFollow() &&
-        (settings.forceFollow || outsideSafeViewport) &&
         (settings.forceFollow || locatorKey !== lastScrolledLocatorKey) &&
         typeof element.scrollIntoView === "function"
       ) {
-        element.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        element.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+          inline: "nearest",
+        });
         lastScrolledLocatorKey = locatorKey;
       }
     } else {
@@ -930,6 +1062,7 @@
   function renderShell() {
     const panel = shadow.querySelector(".qr-panel");
     const orb = shadow.querySelector(".qr-orb");
+    applyPanelWidth();
     panel.classList.toggle("is-open", state.panelOpen);
     orb.classList.toggle("is-shifted", state.panelOpen);
     orb.setAttribute(
@@ -1011,6 +1144,14 @@
             <option value="round-robin" ${settings.preset === "round-robin" ? "selected" : ""}>顺序轮换</option>
           </select>
         </div>
+        <label class="qr-toggle-row">
+          <span><strong>网页点读</strong><small>点击正文，从对应段落开始朗读</small></span>
+          <input type="checkbox" data-setting="clickToRead" ${settings.clickToRead ? "checked" : ""}>
+        </label>
+        <label class="qr-width-row">
+          <span><strong>侧栏宽度</strong><output data-role="panel-width-value">${settings.panelWidth}px</output></span>
+          <input type="range" min="300" max="640" step="8" value="${settings.panelWidth}" data-setting="panelWidth" aria-label="调整侧栏宽度">
+        </label>
       </div>
       <div class="qr-section">
         <div class="qr-section-head"><h4 class="qr-section-title">即将朗读</h4><button class="qr-icon-button" type="button" data-action="stop" aria-label="停止朗读">■</button></div>

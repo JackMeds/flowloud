@@ -1,12 +1,22 @@
 {
   "manifest_version": 3,
   "name": "Qwen 网页朗读",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "自动识别论坛、小说与长文章，并使用本机 Qwen3-TTS 多音色朗读。",
   "permissions": ["storage", "offscreen"],
   "host_permissions": ["http://127.0.0.1:7811/*"],
+  "icons": {
+    "16": "assets/qwen-reader-16.png",
+    "32": "assets/qwen-reader-32.png",
+    "48": "assets/qwen-reader-48.png",
+    "128": "assets/qwen-reader-128.png"
+  },
   "action": {
-    "default_title": "Qwen 网页朗读"
+    "default_title": "Qwen 网页朗读",
+    "default_icon": {
+      "16": "assets/qwen-reader-16.png",
+      "32": "assets/qwen-reader-32.png"
+    }
   },
   "background": {
     "service_worker": "background.js"
@@ -40,7 +50,13 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["content/reader.css"],
+      "resources": [
+        "content/reader.css",
+        "assets/qwen-reader-16.png",
+        "assets/qwen-reader-32.png",
+        "assets/qwen-reader-48.png",
+        "assets/qwen-reader-128.png"
+      ],
       "matches": ["http://*/*", "https://*/*"]
     }
   ],

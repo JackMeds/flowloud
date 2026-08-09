@@ -129,14 +129,23 @@
       try {
         const host = document.querySelector("#qwen-reader-host");
         if (!host) throw new Error("Shadow DOM host missing");
+        if (host.style.getPropertyValue("display")) throw new Error("reader host remained hidden after stylesheet load");
         if (host.shadowRoot !== null) throw new Error("production Shadow DOM must be closed");
         const root = window.__QWEN_READER_TEST_ROOT__;
         if (!root) throw new Error("test-only Shadow DOM hook missing");
         const orb = root.querySelector('[data-action="toggle-panel"]');
         if (!orb) throw new Error("floating orb missing");
+        if (!orb.querySelector(".qr-orb-logo")) throw new Error("generated orb logo missing");
         orb.click();
         await new Promise(resolve => setTimeout(resolve, 20));
         if (!root.querySelector(".qr-panel.is-open")) throw new Error("panel did not open");
+        const widthControl = root.querySelector('[data-setting="panelWidth"]');
+        if (!widthControl) throw new Error("panel width control missing");
+        widthControl.value = "508";
+        widthControl.dispatchEvent(new Event("input", { bubbles: true }));
+        widthControl.dispatchEvent(new Event("change", { bubbles: true }));
+        await new Promise(resolve => setTimeout(resolve, 20));
+        if (host.style.getPropertyValue("--qr-panel-width") !== "508px") throw new Error("panel width did not update");
         if (root.textContent.includes("Ⅱ")) throw new Error("Roman numeral pause glyph is present");
         if (window.__qrHarness.extractCalls !== 1) throw new Error("initial page scan should run exactly once");
         if (window.__qrHarness.synthCalls !== 0) throw new Error("initial page scan must not synthesize audio");
@@ -151,7 +160,7 @@
         const firstParagraph = document.querySelector('[data-test-paragraph="1"]');
         const secondParagraph = document.querySelector('[data-test-paragraph="2"]');
         if (!firstParagraph.classList.contains("qwen-reader-speaking")) throw new Error("first paragraph was not highlighted");
-        if (window.__qrHarness.scrollCalls.length !== 1 || window.__qrHarness.scrollCalls[0].block !== "nearest") throw new Error("first paragraph did not use one nearest scroll");
+        if (window.__qrHarness.scrollCalls.length !== 1 || window.__qrHarness.scrollCalls[0].block !== "center") throw new Error("first paragraph did not use one centered scroll");
         window.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -120 }));
         root.querySelector('.qr-queue-item[data-index="1"]').click();
         await new Promise(resolve => setTimeout(resolve, 40));
@@ -161,7 +170,7 @@
         if (!resumeFollow) throw new Error("resume-follow button missing in manual mode");
         resumeFollow.click();
         await new Promise(resolve => setTimeout(resolve, 20));
-        if (window.__qrHarness.scrollCalls.length !== 2 || window.__qrHarness.scrollCalls[1].block !== "nearest") throw new Error("explicit resume did not return once with nearest scrolling");
+        if (window.__qrHarness.scrollCalls.length !== 2 || window.__qrHarness.scrollCalls[1].block !== "center") throw new Error("explicit resume did not return once with centered scrolling");
         if (root.querySelector('[data-action="resume-follow"]')) throw new Error("resume-follow button remained after resuming");
         root.querySelector('.qr-queue-item[data-index="2"]').click();
         await new Promise(resolve => setTimeout(resolve, 40));
@@ -169,7 +178,7 @@
         firstParagraph.getBoundingClientRect = () => ({ top: 300, bottom: 360 });
         root.querySelector('.qr-queue-item[data-index="0"]').click();
         await new Promise(resolve => setTimeout(resolve, 40));
-        if (window.__qrHarness.scrollCalls.length !== 2) throw new Error("already visible paragraph triggered scrolling");
+        if (window.__qrHarness.scrollCalls.length !== 3 || window.__qrHarness.scrollCalls[2].block !== "center") throw new Error("new visible paragraph was not centered");
         root.querySelector('[data-action="stop"]').click();
         await new Promise(resolve => setTimeout(resolve, 20));
         window.__qrHarness.synthCalls = 0;
@@ -230,6 +239,19 @@
         const authorVoiceValues = Array.from(root.querySelectorAll('[data-view="authors"] option, [data-view="authors"] input[data-setting="replyVoice"]'))
           .map(node => node.value);
         if (authorVoiceValues.includes("音色D")) throw new Error("deleted unused voice remained selectable for authors");
+        tabs[0].click();
+        const clickToRead = root.querySelector('[data-setting="clickToRead"]');
+        if (!clickToRead) throw new Error("page click-to-read control missing");
+        clickToRead.checked = true;
+        clickToRead.dispatchEvent(new Event("change", { bubbles: true }));
+        await new Promise(resolve => setTimeout(resolve, 30));
+        const synthBeforePageClick = window.__qrHarness.synthCalls;
+        firstParagraph.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+        await new Promise(resolve => setTimeout(resolve, 50));
+        const currentAfterPageClick = root.querySelector('.qr-queue-item.is-current');
+        if (!currentAfterPageClick || currentAfterPageClick.dataset.index !== "0") throw new Error("page click did not seek the matching paragraph");
+        if (window.__qrHarness.synthCalls <= synthBeforePageClick) throw new Error("page click did not start reading");
+        root.querySelector('[data-action="stop"]').click();
         result.value = "PASS";
         result.style.background = "#d9fbe7";
         document.documentElement.dataset.testStatus = "pass";
