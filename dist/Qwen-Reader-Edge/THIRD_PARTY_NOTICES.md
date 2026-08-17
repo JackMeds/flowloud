@@ -11,3 +11,13 @@
 
 The complete upstream license is included at
 `vendor/readability/LICENSE.md`.
+
+## Lucide Icons
+
+- Project: `lucide-icons/lucide`
+- Source: https://github.com/lucide-icons/lucide
+- Files: `assets/icons/*.svg`
+- Local modifications: fixed presentation colors for the isolated reader controls
+- License: ISC
+
+The complete upstream license is included at `assets/icons/LICENSE.md`.

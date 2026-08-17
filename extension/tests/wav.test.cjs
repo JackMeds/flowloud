@@ -60,3 +60,18 @@ test('encodeMono16 retains samples at the target sample rate', () => {
   assert.equal(view.getInt16(44, true), 32767);
   assert.equal(view.getInt16(46, true), -32768);
 });
+
+test('resample is exposed for imported audio processing', () => {
+  const output = loadWavEncoder().resample(new Float32Array([0, 1, 0, -1]), 4, 8);
+
+  assert.deepEqual([...output], [0, 0.5, 1, 0.5, 0, -0.5, -1, -1]);
+});
+
+test('exports the WAV API to CommonJS consumers', () => {
+  const modulePath = path.join(__dirname, '..', 'shared', 'wav.js');
+  delete require.cache[require.resolve(modulePath)];
+  const wav = require(modulePath);
+
+  assert.equal(typeof wav.encodeMono16, 'function');
+  assert.equal(typeof wav.resample, 'function');
+});

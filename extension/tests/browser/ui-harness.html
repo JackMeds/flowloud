@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Qwen Reader UI Harness</title>
+  <link rel="stylesheet" href="../../content/page-highlight.css">
   <style>
     body { margin: 0; font: 16px/1.7 system-ui, sans-serif; background: #f5f6fa; }
     main { max-width: 760px; margin: 56px auto; padding: 28px; background: white; border-radius: 18px; }
@@ -16,11 +17,14 @@
     <h1>女生开发记录 &amp; 各种碎碎念</h1>
     <article class="Post" data-qwen-source="post-1">
       <h3>oprin</h3>
-      <div class="Post-body">今天继续记录一下最近的变化，也当作留给未来的备忘。</div>
+      <div class="Post-body"><p data-test-paragraph="1">今天继续记录一下最近的变化。第二句话用来验证精确点读。</p><a data-test-link href="#safe-link">普通链接</a></div>
     </article>
     <article class="Post" data-qwen-source="post-2">
       <h3>LeR</h3>
-      <div class="Post-body">很短的回复。</div>
+      <div class="Post-body"><p data-test-paragraph="2">很短的回复。</p></div>
+    </article>
+    <article class="mm-post" id="mirror-post">
+      <div class="card-body" data-test-br-content>First mirror line.<br>Second mirror line.<br>短</div>
     </article>
   </main>
   <script>
@@ -30,10 +34,22 @@
       audioPlays: 0,
       holdSynthesis: false,
       pendingSynthesis: null,
+      streamMode: false,
+      streamIdentity: null,
+      controlMessages: [],
+      queueStreamControls: false,
+      runtimeMessageListener: null,
+      scrollCalls: [],
       storageListener: null,
+      savedSettings: null,
       voiceNames: ["邵思萌", "音色B", "音色C", "音色D"]
     };
     window.__QWEN_READER_TEST__ = true;
+    // Edge --dump-dom does not advance compositor frames reliably. Drive the
+    // same queued callback boundary with timers so pointer/overlay assertions
+    // remain deterministic in the isolated headless release harness.
+    window.requestAnimationFrame = (callback) => setTimeout(() => callback(performance.now()), 0);
+    window.cancelAnimationFrame = (handle) => clearTimeout(handle);
     window.Audio = class HarnessAudio {
       constructor(src) {
         this.src = src;
@@ -50,19 +66,44 @@
       DEFAULT_SETTINGS: {
         preset: "op-exclusive",
         opVoice: "邵思萌",
-        replyVoices: ["音色B", "音色C"]
+        replyVoices: ["音色B", "音色C"],
+        clickToRead: true,
+        orbEdge: "right",
+        orbY: 0.82,
+        interactionVersion: 2
       }
     };
     window.QwenReaderText = {
-      splitText(text) { return [text]; }
+      splitText(text) { return [text]; },
+      buildSpeechWords(prepared) {
+        const text = String(prepared?.speechText || "");
+        const segmenter = new Intl.Segmenter("zh-CN", { granularity: "word" });
+        return Array.from(segmenter.segment(text))
+          .filter(part => part.isWordLike)
+          .map(part => ({
+            text: part.segment,
+            kind: "word",
+            speechStart: part.index,
+            speechEnd: part.index + part.segment.length,
+            sourceStart: part.index,
+            sourceEnd: part.index + part.segment.length
+          }));
+      }
     };
     window.QwenReaderExtractors = {
       async extractPage() {
         window.__qrHarness.extractCalls += 1;
         const segments = [
-          {id:"p1", floor:1, authorId:"op", authorName:"oprin", isOp:true, text:"今天继续记录一下最近的变化。", sourceKey:"post-1"},
-          {id:"p2", floor:2, authorId:"ler", authorName:"LeR", isOp:false, text:"很短的回复。", sourceKey:"post-2"}
+          {id:"p1", floor:1, authorId:"op", authorName:"oprin", isOp:true, text:"今天继续记录一下最近的变化。", sourceKey:"post-1", sourceSelector:'[data-qwen-source="post-1"]', sourceLocator:{adapter:"flarum",containerSelector:'[data-qwen-source="post-1"] .Post-body',unitIndex:0,fingerprint:QwenReaderForumContent.fingerprint(document.querySelector('[data-test-paragraph="1"]').textContent)}},
+          {id:"p2", floor:2, authorId:"ler", authorName:"LeR", isOp:false, text:"很短的回复。", sourceKey:"post-2", sourceSelector:'[data-qwen-source="post-2"]', sourceLocator:{adapter:"flarum",containerSelector:'[data-qwen-source="post-2"] .Post-body',unitIndex:0,fingerprint:QwenReaderForumContent.fingerprint(document.querySelector('[data-test-paragraph="2"]').textContent)}},
+          {id:"p2:chunk", floor:2, authorId:"ler", authorName:"LeR", isOp:false, text:"同一段落的后续音频切片。", sourceKey:"post-2", sourceSelector:'[data-qwen-source="post-2"]', sourceLocator:{adapter:"flarum",containerSelector:'[data-qwen-source="post-2"] .Post-body',unitIndex:0,fingerprint:QwenReaderForumContent.fingerprint(document.querySelector('[data-test-paragraph="2"]').textContent)}},
+          {id:"p1:second", floor:1, authorId:"op", authorName:"oprin", isOp:true, text:"第二句话用来验证精确点读。", sourceKey:"post-1", sourceSelector:'[data-qwen-source="post-1"]', sourceLocator:{adapter:"flarum",containerSelector:'[data-qwen-source="post-1"] .Post-body',unitIndex:0,fingerprint:QwenReaderForumContent.fingerprint(document.querySelector('[data-test-paragraph="1"]').textContent)}}
         ];
+        segments.push(
+          {id:"mirror:1", floor:1, authorId:"mirror", authorName:"Mirror", isOp:false, text:"First mirror line.", sourceKey:"readability:first"},
+          {id:"mirror:2", floor:2, authorId:"mirror", authorName:"Mirror", isOp:false, text:"Second mirror line.", sourceKey:"readability:second"},
+          {id:"mirror:3", floor:3, authorId:"mirror", authorName:"Mirror", isOp:false, text:"短", sourceKey:"readability:short"}
+        );
         if (document.querySelector('[data-dynamic-reply]')) {
           segments.push({id:"p3", floor:3, authorId:"new", authorName:"新回复", isOp:false, text:"播放期间动态加载的回复", sourceKey:"post-3"});
         }
@@ -82,12 +123,38 @@
         sendMessage(message) {
           if (message.type === "tts:synthesize") {
             window.__qrHarness.synthCalls += 1;
+            if (window.__qrHarness.streamMode && message.stream === true) {
+              window.__qrHarness.streamIdentity = {
+                clientId: message.clientId,
+                playbackId: message.playbackId,
+                requestId: message.requestId,
+                sessionId: message.sessionId
+              };
+              return Promise.resolve({
+                ok: true,
+                requestId: message.requestId,
+                streaming: true,
+                progressivePlayback: true,
+                mimeType: "audio/wav"
+              });
+            }
             if (window.__qrHarness.holdSynthesis) {
               return new Promise(resolve => { window.__qrHarness.pendingSynthesis = resolve; });
             }
             return Promise.resolve({ok:true, audioBase64:"UklGRg==", mimeType:"audio/wav"});
           }
           if (message.type === "tts:status") return Promise.resolve({ok:true, status:{backend:"unloaded"}});
+          if (message.type === "tts:pause" || message.type === "tts:resume") {
+            window.__qrHarness.controlMessages.push(message);
+            if (window.__qrHarness.queueStreamControls) {
+              return Promise.resolve(message.type === "tts:pause"
+                ? {ok:true, paused:false, resumed:false, queued:true, cancelledQueued:false, count:1}
+                : {ok:true, paused:false, resumed:false, queued:false, cancelledQueued:true, count:1});
+            }
+            return Promise.resolve(message.type === "tts:pause"
+              ? {ok:true, paused:true, resumed:false, queued:false, cancelledQueued:false, count:1}
+              : {ok:true, paused:false, resumed:true, queued:false, cancelledQueued:false, count:1});
+          }
           if (message.type === "tts:voices" || message.type === "voice:list") {
             return Promise.resolve({ok:true, voices:window.__qrHarness.voiceNames.map(name => ({
               name, kind:"registered"
@@ -95,7 +162,9 @@
           }
           return Promise.resolve({ok:true});
         },
-        onMessage: { addListener() {} }
+        onMessage: {
+          addListener(listener) { window.__qrHarness.runtimeMessageListener = listener; }
+        }
       },
       storage: {
         onChanged: {
@@ -103,38 +172,357 @@
         },
         local: {
           get() { return Promise.resolve({}); },
-          set() { return Promise.resolve(); }
+          set(value) {
+            if (value && value.qwenReaderSettings) window.__qrHarness.savedSettings = value.qwenReaderSettings;
+            return Promise.resolve();
+          }
         }
       }
     };
   </script>
+  <script src="../../shared/forum-content.js?v=0.4.2"></script>
   <script src="../../shared/normalized-document.js"></script>
   <script src="../../shared/player-state.js"></script>
-  <script src="../../content/reader.js"></script>
+  <script src="../../shared/sentence-range.js?v=0.4.2"></script>
+  <script src="../../shared/marker-placement.js?v=0.4.2"></script>
+  <script src="../../shared/source-locator.js?v=0.4.2"></script>
+  <script src="../../shared/follow-controller.js"></script>
+  <script src="../../shared/word-timeline.js"></script>
+  <script>
+    document.querySelectorAll('[data-test-paragraph]').forEach((paragraph) => {
+      paragraph.getBoundingClientRect = () => ({ top: 1200, bottom: 1260 });
+      paragraph.scrollIntoView = (options) => window.__qrHarness.scrollCalls.push(options);
+    });
+    window.scrollBy = (options) => window.__qrHarness.scrollCalls.push(options);
+  </script>
+  <script src="../../content/reader.js?v=0.4.2"></script>
   <script>
     addEventListener("load", async () => {
       await new Promise(resolve => setTimeout(resolve, 250));
       const result = document.querySelector("#test-result");
+      const auditState = new URLSearchParams(location.search).get("audit");
       try {
         const host = document.querySelector("#qwen-reader-host");
         if (!host) throw new Error("Shadow DOM host missing");
+        if (host.style.getPropertyValue("display")) throw new Error("reader host remained hidden after stylesheet load");
         if (host.shadowRoot !== null) throw new Error("production Shadow DOM must be closed");
         const root = window.__QWEN_READER_TEST_ROOT__;
         if (!root) throw new Error("test-only Shadow DOM hook missing");
         const orb = root.querySelector('[data-action="toggle-panel"]');
         if (!orb) throw new Error("floating orb missing");
-        orb.click();
-        await new Promise(resolve => setTimeout(resolve, 20));
-        if (!root.querySelector(".qr-panel.is-open")) throw new Error("panel did not open");
-        if (root.textContent.includes("Ⅱ")) throw new Error("Roman numeral pause glyph is present");
+        if (!orb.querySelector(".qr-orb-logo")) throw new Error("generated orb logo missing");
+        const orbStyle = getComputedStyle(orb);
+        const orbLogoStyle = getComputedStyle(orb.querySelector(".qr-orb-logo"));
+        if (orbStyle.backgroundColor !== "rgba(0, 0, 0, 0)") throw new Error("floating logo still has a background circle");
+        if (parseFloat(orbStyle.borderTopWidth) !== 0) throw new Error("floating logo still has a border circle");
+        if (orbStyle.boxShadow !== "none") throw new Error("floating logo still has button shadow chrome");
+        if (!orbLogoStyle.filter.includes("drop-shadow")) throw new Error("naked logo is missing its restrained shadow");
+        if (getComputedStyle(orb).touchAction !== "none") throw new Error("floating logo is not prepared for touch dragging");
+        const orbPointerId = 37;
+        const orbRect = orb.getBoundingClientRect();
+        orb.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: orbPointerId, button: 0, clientX: orbRect.left + 17, clientY: orbRect.top + 17 }));
+        orb.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: orbPointerId, button: 0, clientX: 18, clientY: 190 }));
+        orb.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: orbPointerId, button: 0, clientX: 18, clientY: 190 }));
+        await new Promise(resolve => setTimeout(resolve, 150));
+        if (window.__qrHarness.savedSettings?.orbEdge !== "left") throw new Error("floating logo did not persist its snapped edge");
+        if (parseFloat(orb.style.left) > 16 || orb.style.right !== "auto") throw new Error("floating logo did not snap to the left viewport edge");
+        if (root.querySelector(".qr-panel.is-open")) throw new Error("dragging the floating logo accidentally opened the panel");
         if (window.__qrHarness.extractCalls !== 1) throw new Error("initial page scan should run exactly once");
         if (window.__qrHarness.synthCalls !== 0) throw new Error("initial page scan must not synthesize audio");
+        const synthBeforeOrb = window.__qrHarness.synthCalls;
+        orb.click();
+        await new Promise(resolve => setTimeout(resolve, 40));
+        if (window.__qrHarness.synthCalls <= synthBeforeOrb) throw new Error("collapsed orb did not start playback");
+        if (orb.getAttribute("aria-pressed") !== "true" || orb.getAttribute("aria-label") !== "暂停朗读") throw new Error("playing orb semantics are not exposed");
+        orb.click();
+        await new Promise(resolve => setTimeout(resolve, 20));
+        if (orb.getAttribute("aria-pressed") !== "false" || orb.getAttribute("aria-label") !== "继续朗读") throw new Error("paused orb semantics are not exposed");
+        orb.click();
+        await new Promise(resolve => setTimeout(resolve, 20));
+        if (orb.getAttribute("aria-pressed") !== "true") throw new Error("paused orb did not resume playback");
+        root.querySelector('[data-action="stop"]').click();
+        await new Promise(resolve => setTimeout(resolve, 20));
+
+        window.__qrHarness.holdSynthesis = true;
+        window.__qrHarness.queueStreamControls = true;
+        window.__qrHarness.pendingSynthesis = null;
+        window.__qrHarness.controlMessages.length = 0;
+        orb.click();
+        if (orb.getAttribute("aria-label") !== "暂停朗读") throw new Error("loading orb did not expose queued pause");
+        const loadingMain = root.querySelector('[data-action="play-toggle"]');
+        if (!loadingMain || loadingMain.disabled) throw new Error("main pause control remained disabled while synthesis was loading");
+        orb.click();
+        await new Promise(resolve => setTimeout(resolve, 30));
+        if (!root.querySelector('[data-role="orb-status-label"]')?.textContent.includes("暂停已排队")) throw new Error("queued loading pause was presented as already paused");
+        const queuedMain = root.querySelector('[data-action="play-toggle"]');
+        if (!queuedMain || queuedMain.disabled || queuedMain.getAttribute("aria-label") !== "继续") throw new Error("queued pause could not be cancelled from the main control");
+        queuedMain.click();
+        await new Promise(resolve => setTimeout(resolve, 30));
+        if (!window.__qrHarness.controlMessages.some(message => message.type === "tts:pause")) throw new Error("loading pause never reached the offscreen control route");
+        if (!window.__qrHarness.controlMessages.some(message => message.type === "tts:resume")) throw new Error("loading resume never cancelled the queued pause");
+        if (!window.__qrHarness.pendingSynthesis) throw new Error("loading synthesis was not held for the pause test");
+        window.__qrHarness.holdSynthesis = false;
+        window.__qrHarness.queueStreamControls = false;
+        window.__qrHarness.pendingSynthesis({ok:true, audioBase64:"UklGRg==", mimeType:"audio/wav"});
+        await new Promise(resolve => setTimeout(resolve, 40));
+        if (orb.getAttribute("aria-label") !== "暂停朗读") throw new Error("cancelled queued pause did not return to playing");
+        root.querySelector('[data-action="stop"]').click();
+        await new Promise(resolve => setTimeout(resolve, 20));
+
+        root.querySelector('[data-role="orb-status"]').click();
+        await new Promise(resolve => setTimeout(resolve, 20));
+        if (!root.querySelector(".qr-panel.is-open")) throw new Error("status label did not open panel");
+        const widthControl = root.querySelector('[data-setting="panelWidth"]');
+        if (widthControl) throw new Error("duplicate panel width range control is still present");
+        const resizeHandle = root.querySelector('[data-role="panel-resize"]');
+        if (!resizeHandle) throw new Error("panel resize handle missing");
+        const pointerId = 41;
+        const resizeClientX = Math.max(0, window.innerWidth - 508 - 14);
+        resizeHandle.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId, clientX: resizeClientX }));
+        resizeHandle.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId, clientX: resizeClientX }));
+        resizeHandle.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId, clientX: resizeClientX }));
+        await new Promise(resolve => setTimeout(resolve, 20));
+        const expectedPanelWidth = Math.max(300, Math.min(640, window.innerWidth - 48, 508));
+        if (host.style.getPropertyValue("--qr-panel-width") !== `${expectedPanelWidth}px`) throw new Error("drag resize did not update panel width");
+        const tabsStyle = getComputedStyle(root.querySelector('.qr-tabs'));
+        const selectedTabStyle = getComputedStyle(root.querySelector('.qr-tab[aria-selected="true"]'));
+        if (tabsStyle.backgroundColor !== "rgba(0, 0, 0, 0)") throw new Error("sidebar tabs still use a pill background");
+        if (selectedTabStyle.borderRadius !== "0px" || selectedTabStyle.boxShadow !== "none") throw new Error("selected sidebar tab is still a card pill");
+        if (root.textContent.includes("Ⅱ")) throw new Error("Roman numeral pause glyph is present");
         const scanButton = root.querySelector('[data-action="scan-page"]');
         if (!scanButton || !scanButton.textContent.includes("重新读取")) throw new Error("rescan button missing after automatic scan");
+        const synthBeforeRescan = window.__qrHarness.synthCalls;
         scanButton.click();
         await new Promise(resolve => setTimeout(resolve, 80));
         if (window.__qrHarness.extractCalls !== 2) throw new Error("manual rescan did not run once");
-        if (window.__qrHarness.synthCalls !== 0) throw new Error("manual rescan must not synthesize audio");
+        if (window.__qrHarness.synthCalls !== synthBeforeRescan) throw new Error("manual rescan must not synthesize audio");
+        window.__qrHarness.scrollCalls.length = 0;
+        let firstParagraph = document.querySelector('[data-test-paragraph="1"]');
+        const secondParagraph = document.querySelector('[data-test-paragraph="2"]');
+        const hoverRange = document.createRange();
+        hoverRange.setStart(firstParagraph.firstChild, 0);
+        hoverRange.setEnd(firstParagraph.firstChild, firstParagraph.firstChild.data.indexOf("第二句话"));
+        const hoverRect = hoverRange.getBoundingClientRect();
+        const hoverX = hoverRect.left + Math.max(1, hoverRect.width / 2);
+        const hoverY = hoverRect.top + Math.max(1, hoverRect.height / 2);
+        let pointSwitch = root.querySelector('[data-setting="clickToRead"]');
+        if (!pointSwitch || pointSwitch.getAttribute("role") !== "switch" || !pointSwitch.nextElementSibling?.classList.contains("qr-switch-track")) throw new Error("point-reading is not rendered as an accessible switch");
+        pointSwitch.checked = false;
+        pointSwitch.dispatchEvent(new Event("change", { bubbles: true }));
+        await new Promise(resolve => setTimeout(resolve, 30));
+        firstParagraph.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, composed: true, clientX: hoverX, clientY: hoverY }));
+        await new Promise(resolve => setTimeout(resolve, 30));
+        if (root.querySelector('.qr-reading-marker.is-visible')) throw new Error("disabled point-reading still exposed a hover marker");
+        pointSwitch = root.querySelector('[data-setting="clickToRead"]');
+        pointSwitch.checked = true;
+        pointSwitch.dispatchEvent(new Event("change", { bubbles: true }));
+        await new Promise(resolve => setTimeout(resolve, 30));
+        firstParagraph.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, composed: true, clientX: hoverX, clientY: hoverY }));
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        await new Promise(resolve => setTimeout(resolve, 30));
+        const hoverController = root.querySelector('.qr-reading-marker.is-visible');
+        if (!hoverController) {
+          const marker = root.querySelector('.qr-reading-marker');
+          throw new Error(`paragraph hover did not reveal the reading marker (rect=${hoverRect.left},${hoverRect.top},${hoverRect.width},${hoverRect.height}; point=${hoverX},${hoverY}; switch=${pointSwitch.checked}; marker=${marker?.className || 'missing'})`);
+        }
+        if (!hoverController.querySelector('.qr-marker-voice') || !hoverController.querySelector('.qr-marker-progress')) throw new Error("reading marker metadata is incomplete");
+        if (hoverController.querySelector('.qr-inline-author, .qr-inline-speaker-copy')) throw new Error("reading marker still contains bulky author card content");
+        const markerStyle = getComputedStyle(hoverController);
+        if (markerStyle.backgroundColor !== "rgba(0, 0, 0, 0)" || parseFloat(markerStyle.borderTopWidth) !== 0 || markerStyle.boxShadow !== "none") throw new Error("reading marker is still a floating card");
+        root.querySelector('.qr-queue-item[data-index="0"]').click();
+        await new Promise(resolve => setTimeout(resolve, 40));
+        if (root.querySelector('.qr-highlight-band, [data-role="highlight-layer"]')) throw new Error("current sentence still uses a rectangular highlight overlay");
+        const pageHighlightSheet = Array.from(document.styleSheets).find(sheet => /content\/page-highlight\.css(?:$|\?)/.test(sheet.href || ''));
+        const pageHighlightStyle = Array.from(pageHighlightSheet?.cssRules || []).map(rule => rule.cssText).join('\n');
+        if (!pageHighlightSheet) throw new Error("extension-declared page highlight stylesheet is missing");
+        if (!/::highlight\(qwen-reader-current\)\s*\{[^}]*background-color\s*:/s.test(pageHighlightStyle)) throw new Error("current sentence is missing its restrained focus wash");
+        if (/qwen-reader-text-bloom/.test(pageHighlightStyle)) throw new Error("current sentence still uses the old bloom effect");
+        document.body.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, composed: true, clientX: 4, clientY: 4 }));
+        await new Promise(resolve => setTimeout(resolve, 20));
+        const activeController = root.querySelector('.qr-reading-marker.is-visible [data-action="marker-play"][data-index="0"]');
+        if (!activeController) throw new Error("reading marker did not remain attached to the active sentence");
+        if (window.__qrHarness.scrollCalls.length !== 1 || window.__qrHarness.scrollCalls[0].behavior !== "smooth") throw new Error("first sentence did not use one centered scroll");
+        window.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -120 }));
+        root.querySelector('.qr-queue-item[data-index="1"]').click();
+        await new Promise(resolve => setTimeout(resolve, 40));
+        if (!/::highlight\(qwen-reader-current\)\s*\{[^}]*background-color\s*:/s.test(pageHighlightStyle)) throw new Error("manual browsing stopped sentence highlighting");
+        if (window.__qrHarness.scrollCalls.length !== 1) throw new Error("reader fought manual scrolling");
+        const resumeFollow = root.querySelector('.qr-follow-chip[data-action="resume-follow"].is-visible');
+        if (!resumeFollow) throw new Error("resume-follow button missing in manual mode");
+        resumeFollow.click();
+        await new Promise(resolve => setTimeout(resolve, 20));
+        if (window.__qrHarness.scrollCalls.length !== 2 || window.__qrHarness.scrollCalls[1].behavior !== "smooth") throw new Error("explicit resume did not return once with centered scrolling");
+        if (root.querySelector('.qr-follow-chip.is-visible')) throw new Error("resume-follow button remained after resuming");
+        root.querySelector('.qr-queue-item[data-index="2"]').click();
+        await new Promise(resolve => setTimeout(resolve, 40));
+        if (window.__qrHarness.scrollCalls.length !== 3) throw new Error("a later sentence was not independently centered");
+        firstParagraph.getBoundingClientRect = () => ({ top: 300, bottom: 360 });
+        root.querySelector('.qr-queue-item[data-index="0"]').click();
+        await new Promise(resolve => setTimeout(resolve, 40));
+        if (window.__qrHarness.scrollCalls.length !== 4 || window.__qrHarness.scrollCalls[3].behavior !== "smooth") throw new Error("new visible sentence was not centered");
+        root.querySelector('[data-action="stop"]').click();
+        await new Promise(resolve => setTimeout(resolve, 20));
+
+        if (typeof window.__qrHarness.runtimeMessageListener !== "function") throw new Error("runtime stream listener missing");
+        window.__qrHarness.streamMode = true;
+        window.__qrHarness.streamIdentity = null;
+        root.querySelector('.qr-queue-item[data-index="0"]').click();
+        await new Promise(resolve => setTimeout(resolve, 50));
+        const streamIdentity = window.__qrHarness.streamIdentity;
+        if (!streamIdentity?.playbackId || !streamIdentity?.requestId || !streamIdentity?.sessionId) throw new Error("stream identity was not captured");
+        window.__qrHarness.runtimeMessageListener(Object.assign({
+          type: "tts:stream:event",
+          event: "started",
+          playedSeconds: 0,
+          durationSeconds: 10,
+          sequence: 1
+        }, streamIdentity));
+        await new Promise(resolve => setTimeout(resolve, 30));
+        const wordMotionLayer = root.querySelector('[data-role="word-motion-layer"]');
+        const firstMotionWord = wordMotionLayer?.querySelector('.qr-word-motion-cursor');
+        if (!firstMotionWord) throw new Error("stream progress did not create the current-word motion overlay");
+        const firstMotionIndex = firstMotionWord.dataset.wordIndex;
+        window.__qrHarness.runtimeMessageListener(Object.assign({
+          type: "tts:stream:event",
+          event: "paused",
+          playedSeconds: 0,
+          durationSeconds: 10,
+          sequence: 2,
+          paused: true
+        }, streamIdentity));
+        await new Promise(resolve => setTimeout(resolve, 20));
+        if (!wordMotionLayer.classList.contains("is-paused")) throw new Error("paused stream did not freeze word motion");
+        if (wordMotionLayer.querySelector('.qr-word-motion-cursor')?.dataset.wordIndex !== firstMotionIndex) throw new Error("paused stream changed the highlighted word");
+        if (auditState === "paused") {
+          result.value = "AUDIT READY · 流式暂停已确认，当前词保持冻结";
+          result.style.background = "#ede9fe";
+          document.documentElement.dataset.testStatus = "pass";
+          document.documentElement.dataset.auditReady = "paused";
+          return;
+        }
+        window.__qrHarness.runtimeMessageListener(Object.assign({
+          type: "tts:stream:event",
+          event: "progress",
+          playedSeconds: 6,
+          durationSeconds: 10,
+          sequence: 3,
+          paused: true
+        }, streamIdentity));
+        await new Promise(resolve => setTimeout(resolve, 20));
+        if (wordMotionLayer.querySelector('.qr-word-motion-cursor')?.dataset.wordIndex !== firstMotionIndex) throw new Error("paused stream progress advanced the highlighted word");
+        window.__qrHarness.runtimeMessageListener(Object.assign({
+          type: "tts:stream:event",
+          event: "resumed",
+          playedSeconds: 0,
+          durationSeconds: 10,
+          sequence: 4,
+          paused: false
+        }, streamIdentity));
+        window.__qrHarness.runtimeMessageListener(Object.assign({
+          type: "tts:stream:event",
+          event: "progress",
+          playedSeconds: 6,
+          durationSeconds: 10,
+          sequence: 5
+        }, streamIdentity));
+        await new Promise(resolve => setTimeout(resolve, 30));
+        const resumedMotionWord = wordMotionLayer.querySelector('.qr-word-motion-cursor');
+        if (wordMotionLayer.classList.contains("is-paused")) throw new Error("resumed stream left word motion frozen");
+        if (!resumedMotionWord || resumedMotionWord.dataset.wordIndex === firstMotionIndex) throw new Error("resumed stream did not advance the animated word focus");
+        if (resumedMotionWord !== firstMotionWord) throw new Error("word switching replaced the shared kinetic cursor");
+        if (auditState === "playing") {
+          result.value = "AUDIT READY · 流式朗读与逐词动效正在运行";
+          result.style.background = "#dcfce7";
+          document.documentElement.dataset.testStatus = "pass";
+          document.documentElement.dataset.auditReady = "playing";
+          return;
+        }
+        window.__qrHarness.runtimeMessageListener({ type: "tts:stream:event", event: "ended" });
+        await new Promise(resolve => setTimeout(resolve, 30));
+        if (root.querySelector('.qr-queue-item.is-current')?.dataset.index !== "0") throw new Error("identity-free stream end advanced the queue");
+        window.__qrHarness.runtimeMessageListener(Object.assign({
+          type: "tts:stream:event",
+          event: "ended"
+        }, streamIdentity, {
+          playbackId: `${streamIdentity.playbackId}-stale`,
+          requestId: `${streamIdentity.requestId}-stale`,
+          sessionId: `${streamIdentity.sessionId}-stale`
+        }));
+        await new Promise(resolve => setTimeout(resolve, 30));
+        if (root.querySelector('.qr-queue-item.is-current')?.dataset.index !== "0") throw new Error("stale stream identity advanced the queue");
+        window.__qrHarness.runtimeMessageListener(Object.assign({
+          type: "tts:stream:event",
+          event: "ended"
+        }, streamIdentity));
+        await new Promise(resolve => setTimeout(resolve, 80));
+        if (wordMotionLayer.querySelector('.qr-word-motion-cursor')) throw new Error("completed stream left the word-motion cursor behind");
+        if (document.documentElement.classList.contains("qwen-reader-word-motion-paused")) throw new Error("completed stream left the page motion state behind");
+        if (root.querySelector('.qr-queue-item.is-current')?.dataset.index !== "1") throw new Error("matching stream identity did not advance exactly once");
+        window.__qrHarness.runtimeMessageListener(Object.assign({
+          type: "tts:stream:event",
+          event: "ended"
+        }, streamIdentity));
+        await new Promise(resolve => setTimeout(resolve, 30));
+        if (root.querySelector('.qr-queue-item.is-current')?.dataset.index !== "1") throw new Error("duplicate stream end advanced the queue twice");
+        const cleanupTargetIndex = root.querySelector('.qr-queue-item.is-current')?.dataset.index;
+        if (cleanupTargetIndex == null) throw new Error("auto-next target was unavailable for cleanup testing");
+        root.querySelector('[data-action="stop"]').click();
+        await new Promise(resolve => setTimeout(resolve, 20));
+        if (wordMotionLayer.querySelector('.qr-word-motion-cursor')) throw new Error("auto-next stop left the word-motion cursor behind");
+        if (wordMotionLayer.classList.contains("is-paused") || document.documentElement.classList.contains("qwen-reader-word-motion-paused")) throw new Error("auto-next stop left word-motion state classes behind");
+
+        window.__qrHarness.streamIdentity = null;
+        const stopTarget = Array.from(root.querySelectorAll('.qr-queue-item'))
+          .find(item => item.dataset.index === cleanupTargetIndex);
+        if (!stopTarget) throw new Error("cleanup target was unavailable after stop");
+        stopTarget.click();
+        await new Promise(resolve => setTimeout(resolve, 50));
+        const stopIdentity = window.__qrHarness.streamIdentity;
+        if (!stopIdentity?.playbackId || stopIdentity.playbackId === streamIdentity.playbackId) throw new Error("fresh stop-test stream identity was not captured");
+        window.__qrHarness.runtimeMessageListener(Object.assign({
+          type: "tts:stream:event",
+          event: "started",
+          playedSeconds: 0,
+          durationSeconds: 10,
+          sequence: 1
+        }, stopIdentity));
+        await new Promise(resolve => setTimeout(resolve, 30));
+        if (!wordMotionLayer.querySelector('.qr-word-motion-cursor')) throw new Error("stop cleanup precondition has no active word motion");
+        root.querySelector('[data-action="stop"]').click();
+        await new Promise(resolve => setTimeout(resolve, 20));
+        if (wordMotionLayer.querySelector('.qr-word-motion-cursor')) throw new Error("stop left the word-motion cursor behind");
+        if (wordMotionLayer.classList.contains("is-paused") || document.documentElement.classList.contains("qwen-reader-word-motion-paused")) throw new Error("stop left word-motion state classes behind");
+
+        window.__qrHarness.streamIdentity = null;
+        const errorTarget = Array.from(root.querySelectorAll('.qr-queue-item'))
+          .find(item => item.dataset.index === cleanupTargetIndex);
+        if (!errorTarget) throw new Error("error cleanup target was unavailable after stop");
+        errorTarget.click();
+        await new Promise(resolve => setTimeout(resolve, 50));
+        const errorIdentity = window.__qrHarness.streamIdentity;
+        if (!errorIdentity?.playbackId || errorIdentity.playbackId === stopIdentity.playbackId) throw new Error("fresh error-test stream identity was not captured");
+        window.__qrHarness.runtimeMessageListener(Object.assign({
+          type: "tts:stream:event",
+          event: "started",
+          playedSeconds: 0,
+          durationSeconds: 10,
+          sequence: 1
+        }, errorIdentity));
+        await new Promise(resolve => setTimeout(resolve, 30));
+        if (!wordMotionLayer.querySelector('.qr-word-motion-cursor')) throw new Error("error cleanup precondition has no active word motion");
+        window.__qrHarness.runtimeMessageListener(Object.assign({
+          type: "tts:stream:event",
+          event: "error",
+          error: { code: "stream_failed", message: "test stream failure" }
+        }, errorIdentity));
+        await new Promise(resolve => setTimeout(resolve, 30));
+        if (wordMotionLayer.querySelector('.qr-word-motion-cursor')) throw new Error("stream error left the word-motion cursor behind");
+        if (wordMotionLayer.classList.contains("is-paused") || document.documentElement.classList.contains("qwen-reader-word-motion-paused")) throw new Error("stream error left word-motion state classes behind");
+        root.querySelector('[data-action="stop"]').click();
+        await new Promise(resolve => setTimeout(resolve, 20));
+        window.__qrHarness.streamMode = false;
+        window.__qrHarness.streamIdentity = null;
+        window.__qrHarness.synthCalls = 0;
         const tabs = root.querySelectorAll('[role="tab"]');
         if (tabs.length !== 3) throw new Error("expected three tabs");
         tabs[1].click();
@@ -192,6 +580,63 @@
         const authorVoiceValues = Array.from(root.querySelectorAll('[data-view="authors"] option, [data-view="authors"] input[data-setting="replyVoice"]'))
           .map(node => node.value);
         if (authorVoiceValues.includes("音色D")) throw new Error("deleted unused voice remained selectable for authors");
+        tabs[0].click();
+        const clickToRead = root.querySelector('[data-setting="clickToRead"]');
+        if (!clickToRead) throw new Error("page click-to-read control missing");
+        if (!clickToRead.checked) throw new Error("page click-to-read should default on after the interaction upgrade");
+        const synthBeforePageClick = window.__qrHarness.synthCalls;
+        const replacementParagraph = firstParagraph.cloneNode(true);
+        firstParagraph.replaceWith(replacementParagraph);
+        firstParagraph = replacementParagraph;
+        const unrelatedSelection = window.getSelection();
+        const unrelatedRange = document.createRange();
+        unrelatedRange.selectNodeContents(secondParagraph);
+        unrelatedSelection.removeAllRanges();
+        unrelatedSelection.addRange(unrelatedRange);
+        const textNode = firstParagraph.firstChild;
+        const secondStart = textNode.data.indexOf("第二句话");
+        const secondRange = document.createRange();
+        secondRange.setStart(textNode, secondStart);
+        secondRange.setEnd(textNode, textNode.data.length);
+        const secondRect = secondRange.getBoundingClientRect();
+        firstParagraph.dispatchEvent(new MouseEvent("click", {
+          bubbles: true,
+          composed: true,
+          clientX: secondRect.left + Math.max(1, secondRect.width / 2),
+          clientY: secondRect.top + Math.max(1, secondRect.height / 2)
+        }));
+        await new Promise(resolve => setTimeout(resolve, 50));
+        unrelatedSelection.removeAllRanges();
+        const currentAfterPageClick = root.querySelector('.qr-queue-item.is-current');
+        if (!currentAfterPageClick || currentAfterPageClick.dataset.index !== "3") throw new Error("page click did not seek the exact sentence");
+        if (window.__qrHarness.synthCalls <= synthBeforePageClick) throw new Error("page click did not start reading");
+        root.querySelector('[data-action="stop"]').click();
+        await new Promise(resolve => setTimeout(resolve, 20));
+        const brContent = document.querySelector('[data-test-br-content]');
+        const secondBrText = brContent.childNodes[2];
+        const secondBrRange = document.createRange();
+        secondBrRange.selectNodeContents(secondBrText);
+        const secondBrRect = secondBrRange.getBoundingClientRect();
+        brContent.dispatchEvent(new MouseEvent("click", {
+          bubbles: true,
+          composed: true,
+          clientX: secondBrRect.left + Math.max(1, secondBrRect.width / 2),
+          clientY: secondBrRect.top + Math.max(1, secondBrRect.height / 2)
+        }));
+        await new Promise(resolve => setTimeout(resolve, 50));
+        const currentAfterBrClick = root.querySelector('.qr-queue-item.is-current');
+        if (!currentAfterBrClick || currentAfterBrClick.dataset.index !== "5") throw new Error("br-only forum line did not seek its exact segment");
+        const nativeGlow = globalThis.CSS?.highlights?.get("qwen-reader-current");
+        if (!nativeGlow && !brContent.classList.contains("qwen-reader-speaking")) throw new Error("br-only forum line has no visible playback highlight");
+        root.querySelector('[data-action="stop"]').click();
+        await new Promise(resolve => setTimeout(resolve, 20));
+        const synthBeforeLink = window.__qrHarness.synthCalls;
+        const safeLink = document.querySelector('[data-test-link]');
+        safeLink.addEventListener("click", event => event.preventDefault(), { once: true });
+        safeLink.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+        await new Promise(resolve => setTimeout(resolve, 30));
+        if (window.__qrHarness.synthCalls !== synthBeforeLink) throw new Error("clicking a normal link triggered point reading");
+        root.querySelector('[data-action="stop"]').click();
         result.value = "PASS";
         result.style.background = "#d9fbe7";
         document.documentElement.dataset.testStatus = "pass";

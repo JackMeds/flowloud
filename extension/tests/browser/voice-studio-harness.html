@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qwen Reader 音色工作室 Browser Harness</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, "Segoe UI", "Microsoft YaHei UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f4f3f7; color: #242330; }
+    .harness-bar { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 16px; border-bottom: 1px solid #dedce4; background: #fff; }
+    .harness-bar strong { white-space: nowrap; }
+    #test-result { flex: 1; min-height: 34px; padding: 7px 10px; border: 1px solid #d7d4df; border-radius: 6px; resize: none; font: 12px/1.45 ui-monospace, Consolas, monospace; }
+    #studio-frame { display: block; width: 100%; height: calc(100vh - 52px); border: 0; background: #fff; }
+  </style>
+</head>
+<body>
+  <div class="harness-bar">
+    <strong>音色工作室冒烟测试</strong>
+    <textarea id="test-result" readonly>RUNNING</textarea>
+  </div>
+  <iframe id="studio-frame" title="真实音色工作室页面"></iframe>
+
+  <script>
+    const harness = {
+      messages: [],
+      storage: {},
+      decodeCalls: 0,
+      decodeActive: 0,
+      maxDecodeActive: 0,
+      decodeHolds: new Map(),
+      transcriptionCalls: 0,
+      transcriptionAborts: 0,
+      transcriptionPlans: [],
+      failSaveNames: new Map(),
+      objectUrls: [],
+      revokedUrls: [],
+      voices: [
+        {
+          name: '浏览器样本',
+          local: true,
+          editable: true,
+          wavB64: 'UklGRg==',
+          sourceFileName: 'browser-sample.wav',
+          durationSeconds: 8.2,
+        },
+        {
+          name: '后端内置样本',
+          local: false,
+          editable: false,
+          kind: 'builtin',
+        },
+      ],
+    };
+    harness.holdDecode = function holdDecode(marker) {
+      let release;
+      const promise = new Promise((resolve) => { release = resolve; });
+      const gate = { promise, release };
+      harness.decodeHolds.set(marker, gate);
+      return gate;
+    };
+    harness.planTranscription = function planTranscription(text, held) {
+      let release;
+      const plan = { text, held: Boolean(held), started: false, promise: null, release: null };
+      if (plan.held) {
+        plan.promise = new Promise((resolve) => { release = resolve; });
+        plan.release = (nextText) => release({ text: nextText === undefined ? text : nextText });
+      }
+      harness.transcriptionPlans.push(plan);
+      return plan;
+    };
+    window.__voiceStudioHarness = harness;
+
+    function clone(value) {
+      return JSON.parse(JSON.stringify(value));
+    }
+
+    window.installVoiceStudioHarnessMocks = function installVoiceStudioHarnessMocks(target) {
+      class HarnessAudioContext {
+        constructor() {
+          this.state = 'running';
+          this.sampleRate = 1000;
+        }
+
+        async resume() {}
+        async close() {}
+
+        async decodeAudioData(buffer) {
+          const marker = new Uint8Array(buffer)[0] || 0;
+          harness.decodeCalls += 1;
+          harness.decodeActive += 1;
+          harness.maxDecodeActive = Math.max(harness.maxDecodeActive, harness.decodeActive);
+          try {
+            const gate = harness.decodeHolds.get(marker);
+            if (gate) await gate.promise;
+            const samples = new Float32Array(11000);
+            for (let index = 500; index < samples.length - 500; index += 1) {
+              samples[index] = 0.22 * Math.sin(index * Math.PI / 8);
+            }
+            return {
+              numberOfChannels: 1,
+              sampleRate: 1000,
+              getChannelData() { return samples; },
+            };
+          } finally {
+            harness.decodeActive -= 1;
+          }
+        }
+      }
+
+      target.AudioContext = HarnessAudioContext;
+      target.webkitAudioContext = HarnessAudioContext;
+      target.confirm = () => true;
+      target.requestAnimationFrame = (callback) => target.setTimeout(callback, 0);
+      let objectUrlSequence = 0;
+      Object.defineProperty(target.URL, 'createObjectURL', {
+        configurable: true,
+        value() {
+          const url = 'blob:voice-studio-harness/' + (++objectUrlSequence);
+          harness.objectUrls.push(url);
+          return url;
+        },
+      });
+      Object.defineProperty(target.URL, 'revokeObjectURL', {
+        configurable: true,
+        value(url) { harness.revokedUrls.push(url); },
+      });
+      target.chrome = {
+        runtime: {
+          lastError: null,
+          getURL(path) { return new URL('../../' + path, location.href).href; },
+          sendMessage(message, callback) {
+            harness.messages.push(clone(message));
+            let response = { ok: true };
+            if (message.type === 'voice:list') {
+              response = { ok: true, voices: clone(harness.voices) };
+            } else if (message.type === 'voice:rename') {
+              const voice = harness.voices.find((item) => item.name === message.oldName);
+              if (!voice || !voice.local) {
+                response = { ok: false, error: { code: 'voice_read_only', message: '只读音色不能重命名' } };
+              } else {
+                voice.name = message.newName;
+              }
+            } else if (message.type === 'voice:save') {
+              const failures = harness.failSaveNames.get(message.profile.name) || 0;
+              if (failures > 0) {
+                harness.failSaveNames.set(message.profile.name, failures - 1);
+                response = { ok: false, error: { code: 'mock_save_failure', message: '模拟保存失败' } };
+              } else {
+                const saved = Object.assign({}, clone(message.profile), { local: true, editable: true });
+                const index = harness.voices.findIndex((item) => item.name === saved.name);
+                if (index >= 0) harness.voices[index] = saved;
+                else harness.voices.push(saved);
+              }
+            } else if (message.type === 'voice:delete') {
+              harness.voices = harness.voices.filter((item) => item.name !== message.name);
+            }
+            target.setTimeout(() => callback(response), 0);
+          },
+          onMessage: { addListener() {} },
+        },
+        storage: {
+          onChanged: { addListener() {}, removeListener() {} },
+          local: {
+            get(keys, callback) {
+              const result = clone(harness.storage);
+              if (typeof callback === 'function') callback(result);
+              return Promise.resolve(result);
+            },
+            set(values, callback) {
+              Object.assign(harness.storage, clone(values));
+              if (typeof callback === 'function') callback();
+              return Promise.resolve();
+            },
+          },
+        },
+      };
+    };
+
+    window.installVoiceStudioScenarioMocks = function installVoiceStudioScenarioMocks(target) {
+      const original = target.QwenReaderTranscription;
+      target.QwenReaderTranscription = Object.assign({}, original, {
+        createEdgeSpeechProvider() { return { harness: true }; },
+        transcribeWithRetry(provider, request) {
+          harness.transcriptionCalls += 1;
+          const plan = harness.transcriptionPlans.shift() || { text: '', held: false };
+          plan.started = true;
+          if (!plan.held) return Promise.resolve({ text: plan.text });
+          return new Promise((resolve, reject) => {
+            let settled = false;
+            const finish = (callback, value) => {
+              if (settled) return;
+              settled = true;
+              if (request.signal) request.signal.removeEventListener('abort', onAbort);
+              callback(value);
+            };
+            const onAbort = () => {
+              harness.transcriptionAborts += 1;
+              const error = new Error('aborted');
+              error.name = 'AbortError';
+              finish(reject, error);
+            };
+            if (request.signal) request.signal.addEventListener('abort', onAbort, { once: true });
+            plan.promise.then((result) => finish(resolve, result), (error) => finish(reject, error));
+          });
+        },
+      });
+    };
+
+    function waitFor(predicate, timeout = 4000) {
+      const startedAt = performance.now();
+      return new Promise((resolve, reject) => {
+        function poll() {
+          let value;
+          try { value = predicate(); } catch (_) { value = null; }
+          if (value) { resolve(value); return; }
+          if (performance.now() - startedAt >= timeout) {
+            reject(new Error('等待页面状态超时'));
+            return;
+          }
+          setTimeout(poll, 25);
+        }
+        poll();
+      });
+    }
+
+    function dropFiles(child, doc, files) {
+      const transfer = new child.DataTransfer();
+      for (const file of files) transfer.items.add(file);
+      doc.querySelector('[data-role="audio-dropzone"]').dispatchEvent(new child.DragEvent('drop', {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: transfer,
+      }));
+    }
+
+    function audioFile(child, marker, name) {
+      return new child.File([new Uint8Array([marker, 2, 3])], name, { type: 'audio/wav' });
+    }
+
+    async function runSmokeTest(frame) {
+      const doc = frame.contentDocument;
+      const child = frame.contentWindow;
+      await waitFor(() => doc.querySelector('#voice-list .voice-row'));
+
+      for (const moduleName of [
+        'QwenReaderAudioImport',
+        'QwenReaderVoiceNaming',
+        'QwenReaderVoiceLibrary',
+        'QwenReaderTranscription',
+      ]) {
+        if (!child[moduleName]) throw new Error('未加载真实模块：' + moduleName);
+      }
+
+      const importTab = doc.querySelector('[data-action="show-import"]');
+      const importPane = doc.querySelector('#import-pane');
+      if (!importTab || !importPane) throw new Error('导入页签或面板缺失');
+      importTab.click();
+      await waitFor(() => !importPane.hidden);
+      if (doc.querySelector('#record-pane')?.hidden !== true) throw new Error('导入页签没有切换真实面板');
+
+      const localRow = [...doc.querySelectorAll('#voice-list .voice-row')]
+        .find((row) => row.textContent.includes('浏览器样本'));
+      if (!localRow) throw new Error('浏览器本地音色没有进入可编辑列表');
+      const renameStart = localRow.querySelector('[data-action="rename-start"]');
+      if (!renameStart) throw new Error('本地音色缺少重命名入口');
+
+      const backendRow = [...doc.querySelectorAll('#backend-voice-list .voice-row')]
+        .find((row) => row.textContent.includes('后端内置样本'));
+      if (!backendRow) throw new Error('后端音色没有进入只读列表');
+      if (!backendRow.querySelector('.readonly-label')) throw new Error('后端音色缺少只读标记');
+      if (backendRow.querySelector('[data-action^="rename"]')) throw new Error('后端只读音色错误显示了重命名入口');
+
+      renameStart.click();
+      const renameInput = await waitFor(() => doc.querySelector('#voice-list [data-role="rename-input"]'));
+      renameInput.value = '浏览器样本·已改名';
+      doc.querySelector('#voice-list [data-action="rename-confirm"]').click();
+      await waitFor(() => [...doc.querySelectorAll('#voice-list .voice-name')]
+        .some((node) => node.textContent === '浏览器样本·已改名'));
+      const renameCall = harness.messages.find((message) => message.type === 'voice:rename');
+      if (!renameCall || renameCall.oldName !== '浏览器样本' || renameCall.newName !== '浏览器样本·已改名') {
+        throw new Error('重命名没有调用真实 voice:rename 流程');
+      }
+
+      const dropZone = doc.querySelector('[data-role="audio-dropzone"]');
+      const transfer = new child.DataTransfer();
+      transfer.items.add(new child.File([new Uint8Array([1, 2, 3])], '批量样本.wav', { type: 'audio/wav' }));
+      dropZone.dispatchEvent(new child.DragEvent('drop', {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: transfer,
+      }));
+      const importRow = await waitFor(() => doc.querySelector('#import-batch-list .import-item'));
+      await waitFor(() => !doc.querySelector('#save-all-button').disabled);
+      if (!importRow.querySelector('[data-action="import-name"]')) throw new Error('导入队列缺少逐项音色名称');
+      if (!importRow.querySelector('[data-action="import-ref-text"]')) throw new Error('导入队列缺少可编辑参考台词');
+
+      doc.querySelector('#save-all-button').click();
+      await waitFor(() => harness.messages.some((message) => (
+        message.type === 'voice:save' && message.profile?.sourceFileName === '批量样本.wav'
+      )));
+      await waitFor(() => [...doc.querySelectorAll('#voice-list .voice-name')]
+        .some((node) => node.textContent === '批量样本'));
+      // Two files must share one worker. The first may be ready while the second
+      // decode is deliberately held, but Save All must remain unavailable.
+      const heldSecondDecode = harness.holdDecode(12);
+      harness.planTranscription('第一份自动台词', false);
+      harness.planTranscription('第二份自动台词', false);
+      dropFiles(child, doc, [
+        audioFile(child, 11, '单工一.wav'),
+        audioFile(child, 12, '单工二.wav'),
+      ]);
+      await waitFor(() => harness.decodeCalls >= 3 && harness.decodeActive === 1);
+      if (harness.maxDecodeActive !== 1) throw new Error('批处理同时解码了多个文件');
+      if (!doc.querySelector('#save-all-button').disabled) throw new Error('仍有文件处理中时错误允许了部分保存');
+      heldSecondDecode.release();
+      await waitFor(() => !doc.querySelector('#save-all-button').disabled);
+
+      // A manual edit made while recognition is pending must win over a late result.
+      const latePlan = harness.planTranscription('迟到的自动识别', true);
+      dropFiles(child, doc, [audioFile(child, 13, '手改台词.wav')]);
+      await waitFor(() => latePlan.started);
+      const lateRow = [...doc.querySelectorAll('#import-batch-list .import-item')]
+        .find((row) => row.textContent.includes('手改台词.wav'));
+      const lateText = lateRow && lateRow.querySelector('[data-action="import-ref-text"]');
+      if (!lateText) throw new Error('待识别项目缺少参考台词编辑框');
+      lateText.value = '用户手动填写的台词';
+      lateText.dispatchEvent(new child.Event('input', { bubbles: true }));
+      latePlan.release();
+      await waitFor(() => !doc.querySelector('#save-all-button').disabled);
+      const lateRowAfter = [...doc.querySelectorAll('#import-batch-list .import-item')]
+        .find((row) => row.textContent.includes('手改台词.wav'));
+      if (lateRowAfter.querySelector('[data-action="import-ref-text"]').value !== '用户手动填写的台词') {
+        throw new Error('迟到的识别结果覆盖了用户手改台词');
+      }
+
+      // Removing work during decode must prevent its later transcription or save.
+      const heldRemovedDecode = harness.holdDecode(14);
+      const transcriptionBeforeRemove = harness.transcriptionCalls;
+      dropFiles(child, doc, [audioFile(child, 14, '处理中移除.wav')]);
+      await waitFor(() => harness.decodeCalls >= 5 && harness.decodeActive === 1);
+      const removingRow = [...doc.querySelectorAll('#import-batch-list .import-item')]
+        .find((row) => row.textContent.includes('处理中移除.wav'));
+      removingRow.querySelector('[data-action="remove-import"]').click();
+      heldRemovedDecode.release();
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      if (harness.transcriptionCalls !== transcriptionBeforeRemove) throw new Error('已移除文件仍继续识别');
+      if ([...doc.querySelectorAll('#import-batch-list .import-item')]
+        .some((row) => row.textContent.includes('处理中移除.wav'))) throw new Error('已移除文件重新回到队列');
+
+      // Clearing must cancel the active item and discard the queued remainder.
+      const heldClearedDecode = harness.holdDecode(15);
+      const transcriptionBeforeClear = harness.transcriptionCalls;
+      dropFiles(child, doc, [
+        audioFile(child, 15, '清空活动.wav'),
+        audioFile(child, 16, '清空排队.wav'),
+      ]);
+      await waitFor(() => harness.decodeCalls >= 6 && harness.decodeActive === 1);
+      doc.querySelector('#clear-imports').click();
+      heldClearedDecode.release();
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      if (harness.transcriptionCalls !== transcriptionBeforeClear) throw new Error('清空后仍继续识别');
+      if (doc.querySelectorAll('#import-batch-list .import-item').length !== 0) throw new Error('清空后队列重新出现');
+
+      // A failed save keeps its prepared payload so the same Save All action can retry.
+      const retryUrlStart = harness.objectUrls.length;
+      harness.planTranscription('重试样本台词', false);
+      dropFiles(child, doc, [audioFile(child, 17, '保存重试.wav')]);
+      await waitFor(() => !doc.querySelector('#save-all-button').disabled);
+      const retryName = '保存重试';
+      harness.failSaveNames.set(retryName, 1);
+      const firstSaveCount = harness.messages.filter((message) => (
+        message.type === 'voice:save' && message.profile?.name === retryName
+      )).length;
+      doc.querySelector('#save-all-button').click();
+      await waitFor(() => harness.messages.filter((message) => (
+        message.type === 'voice:save' && message.profile?.name === retryName
+      )).length === firstSaveCount + 1);
+      await waitFor(() => !doc.querySelector('#save-all-button').disabled);
+      doc.querySelector('#save-all-button').click();
+      await waitFor(() => harness.messages.filter((message) => (
+        message.type === 'voice:save' && message.profile?.name === retryName
+      )).length === firstSaveCount + 2);
+      await waitFor(() => [...doc.querySelectorAll('#voice-list .voice-name')]
+        .some((node) => node.textContent === retryName));
+      const retryUrls = harness.objectUrls.slice(retryUrlStart);
+      if (!retryUrls.length || retryUrls.some((url) => !harness.revokedUrls.includes(url))) {
+        throw new Error('保存成功后没有释放音频 ObjectURL');
+      }
+    }
+
+    async function boot() {
+      const result = document.querySelector('#test-result');
+      const frame = document.querySelector('#studio-frame');
+      try {
+        const pageUrl = new URL('../../voice-studio.html', location.href);
+        const response = await fetch(pageUrl);
+        if (!response.ok) throw new Error('无法读取真实 voice-studio.html：HTTP ' + response.status);
+        let html = await response.text();
+        const base = new URL('../../', location.href).href;
+        html = html.replace(/<head>/i, '<head><base href="' + base + '">');
+        html = html.replace(
+          /<script\s+src=["']shared\/wav\.js(?:\?[^"']*)?["']><\/script>/i,
+          '<script>parent.installVoiceStudioHarnessMocks(window);<\/script>$&',
+        );
+        html = html.replace(
+          /<script\s+src=["']voice-studio\.js(?:\?[^"']*)?["']><\/script>/i,
+          '<script>parent.installVoiceStudioScenarioMocks(window);<\/script>$&',
+        );
+        frame.addEventListener('load', async () => {
+          try {
+            await runSmokeTest(frame);
+            result.value = 'PASS · 导入、本地重命名、后端只读均通过真实 DOM 冒烟测试';
+            result.style.background = '#d9fbe7';
+            document.documentElement.dataset.testStatus = 'pass';
+          } catch (error) {
+            result.value = 'FAIL · ' + error.message;
+            result.style.background = '#ffe0e0';
+            document.documentElement.dataset.testStatus = 'fail';
+          }
+        }, { once: true });
+        frame.srcdoc = html;
+      } catch (error) {
+        result.value = 'FAIL · ' + error.message;
+        result.style.background = '#ffe0e0';
+        document.documentElement.dataset.testStatus = 'fail';
+      }
+    }
+
+    boot();
+  </script>
+</body>
+</html>

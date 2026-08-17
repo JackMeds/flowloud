@@ -14,6 +14,7 @@ namespace QwenTrayGateway
         private readonly GatewayConfig config;
         private readonly BackendController backend;
         private readonly GatewayLogger logger;
+        private readonly SpeechStreamRegistry speechStreams;
         private readonly Timer idleTimer;
         private TcpListener listener;
         private Thread acceptThread;
@@ -28,6 +29,7 @@ namespace QwenTrayGateway
             this.config = config;
             this.backend = backend;
             this.logger = logger;
+            speechStreams = new SpeechStreamRegistry();
             lastActivityUtc = DateTime.UtcNow;
             idleTimer = new Timer(CheckIdle, null, Timeout.Infinite, Timeout.Infinite);
         }
@@ -85,6 +87,21 @@ namespace QwenTrayGateway
             result["autoUnload"] = config.AutoUnload;
             result["idleMinutes"] = config.IdleMinutes;
             result["lastActivityUtc"] = lastActivityUtc.ToString("o");
+            Dictionary<string, object> capabilities = new Dictionary<string, object>();
+            capabilities["transportStreaming"] = true;
+            capabilities["backendIncrementalGeneration"] = false;
+            capabilities["cancel"] = true;
+            capabilities["status"] = true;
+            capabilities["endpoint"] = "/v1/audio/speech/stream";
+            capabilities["mode"] = "wav-transport-chunked";
+            result["capabilities"] = capabilities;
+            result["limits"] = new Dictionary<string, object>
+            {
+                { "maxConcurrentRequests", config.MaxConcurrentRequests },
+                { "requestTimeoutSeconds", config.RequestTimeoutSeconds },
+                { "maxStreamBytes", config.MaxStreamBytes },
+                { "streamChunkBytes", config.StreamChunkBytes }
+            };
             if (!string.IsNullOrEmpty(backend.LastError))
             {
                 result["lastError"] = backend.LastError;
@@ -120,8 +137,9 @@ namespace QwenTrayGateway
         {
             using (TcpClient client = (TcpClient)state)
             {
-                client.ReceiveTimeout = 120000;
-                client.SendTimeout = 120000;
+                int ioTimeout = Math.Max(1000, Math.Min(Int32.MaxValue / 2, config.RequestTimeoutSeconds * 1000));
+                client.ReceiveTimeout = ioTimeout;
+                client.SendTimeout = ioTimeout;
                 using (NetworkStream stream = client.GetStream())
                 {
                     try
@@ -144,7 +162,7 @@ namespace QwenTrayGateway
             bool requiresBackend = GatewayProtocol.RequiresBackend(
                 request.Method,
                 request.PathAndQuery);
-            if (requiresBackend &&
+            if (GatewayProtocol.RequiresTrustedClient(request.Method, request.PathAndQuery) &&
                 !GatewayProtocol.IsTrustedBackendClient(
                     request.Header("X-Qwen-Reader-Client")))
             {
@@ -167,6 +185,16 @@ namespace QwenTrayGateway
                 WriteJson(output, 200, "OK", BuildStatusJson());
                 return;
             }
+            if (GatewayProtocol.IsSpeechCancel(request.Method, request.PathAndQuery))
+            {
+                HandleSpeechCancel(request, output);
+                return;
+            }
+            if (GatewayProtocol.IsSpeechStatus(request.Method, request.PathAndQuery))
+            {
+                HandleSpeechStatus(request, path, output);
+                return;
+            }
             if (path.StartsWith("/gateway/", StringComparison.Ordinal))
             {
                 HandleManagement(request, path, output);
@@ -178,19 +206,63 @@ namespace QwenTrayGateway
                 return;
             }
 
-            Interlocked.Increment(ref activeRequests);
+            if (!TryEnterRequest())
+            {
+                WriteJson(output, 429, "Too Many Requests", ErrorJson("rate_limited", "Too many active speech requests."));
+                return;
+            }
+            SpeechStreamSession streamSession = null;
+            bool streamRegistered = false;
             try
             {
+                if (GatewayProtocol.IsSpeechStream(request.Method, request.PathAndQuery))
+                {
+                    streamSession = CreateSpeechStreamSession(request);
+                    if (!speechStreams.TryRegister(streamSession))
+                    {
+                        WriteJson(output, 409, "Conflict", ErrorJson("duplicate_request_id", "The request or playback ID is already active."));
+                        return;
+                    }
+                    streamRegistered = true;
+                }
                 backend.EnsureStarted();
-                Proxy(request, output);
+                if (streamSession != null && streamRegistered)
+                {
+                    ProxyStream(request, output, streamSession);
+                }
+                else
+                {
+                    Proxy(request, output);
+                }
             }
             catch (Exception ex)
             {
                 logger.Write("proxy_failed path=" + path + " type=" + ex.GetType().Name);
-                WriteJson(output, 503, "Service Unavailable", ErrorJson("backend_unavailable", ex.Message));
+                if (streamSession != null) { streamSession.SetError(ex.Message); }
+                // Before a streaming response starts, preserve a normal JSON error status.
+                // Once chunked headers are out, ProxyStream owns the terminal trailer.
+                if (streamSession == null || !streamSession.ResponseStarted)
+                {
+                    bool invalidId = ex is SpeechRequestIdException;
+                    WriteJson(output,
+                        invalidId ? 400 : 503,
+                        invalidId ? "Bad Request" : "Service Unavailable",
+                        ErrorJson(
+                            invalidId ? "invalid_request_id" : (streamSession != null && streamSession.IsCancellationRequested ? "cancelled" : "backend_unavailable"),
+                            ex.Message));
+                }
             }
             finally
             {
+                if (streamSession != null && streamRegistered)
+                {
+                    string resultState = streamSession.IsCancellationRequested ? "cancelled" : streamSession.State;
+                    if (resultState == "active") { resultState = "failed"; }
+                    if (speechStreams.Find(streamSession.RequestId) != null)
+                    {
+                        speechStreams.Complete(streamSession, resultState, resultState == "failed" ? streamSession.Error : string.Empty);
+                    }
+                }
                 lastActivityUtc = DateTime.UtcNow;
                 Interlocked.Decrement(ref activeRequests);
             }
@@ -243,20 +315,191 @@ namespace QwenTrayGateway
             WriteJson(output, 404, "Not Found", ErrorJson("not_found", "Unknown management endpoint."));
         }
 
+        private void HandleSpeechCancel(HttpRequestData request, Stream output)
+        {
+            SpeechRequestIds ids;
+            try
+            {
+                ids = ResolveSpeechRequestIds(request, false);
+            }
+            catch (Exception ex)
+            {
+                WriteJson(output, 400, "Bad Request", ErrorJson("invalid_request_id", ex.Message));
+                return;
+            }
+            if (string.IsNullOrEmpty(ids.RequestId) && string.IsNullOrEmpty(ids.PlaybackId))
+            {
+                WriteJson(output, 400, "Bad Request", ErrorJson("missing_request_id", "request_id or playback_id is required."));
+                return;
+            }
+            SpeechStreamSession active = speechStreams.FindActive(ids.RequestId, ids.PlaybackId);
+            if (active == null)
+            {
+                bool mismatch = !string.IsNullOrEmpty(ids.RequestId) &&
+                                !string.IsNullOrEmpty(ids.PlaybackId) &&
+                                speechStreams.FindActive(ids.RequestId, null) != null &&
+                                speechStreams.FindActive(null, ids.PlaybackId) != null;
+                WriteJson(output,
+                    mismatch ? 409 : 404,
+                    mismatch ? "Conflict" : "Not Found",
+                    ErrorJson(
+                        mismatch ? "request_id_mismatch" : "request_not_found",
+                        mismatch ? "request_id and playback_id belong to different active requests." : "No active speech request matches the supplied ID."));
+                return;
+            }
+            active.Cancel();
+
+            Dictionary<string, object> result = new Dictionary<string, object>();
+            result["status"] = "cancellation_requested";
+            result["request_id"] = active.RequestId;
+            result["playback_id"] = active.PlaybackId;
+            WriteJson(output, 202, "Accepted", new JavaScriptSerializer().Serialize(result));
+        }
+
+        private void HandleSpeechStatus(HttpRequestData request, string path, Stream output)
+        {
+            string prefix = "/v1/audio/speech/status/";
+            string id = path.Substring(prefix.Length);
+            try { id = Uri.UnescapeDataString(id); } catch { }
+            if (!GatewayProtocol.IsSafeRequestId(id))
+            {
+                WriteJson(output, 400, "Bad Request", ErrorJson("invalid_request_id", "The request ID contains unsupported characters."));
+                return;
+            }
+            string requestId = request.Header("X-Qwen-Request-Id");
+            string playbackId = request.Header("X-Qwen-Playback-Id");
+            if ((!string.IsNullOrEmpty(requestId) && !GatewayProtocol.IsSafeRequestId(requestId)) ||
+                (!string.IsNullOrEmpty(playbackId) && !GatewayProtocol.IsSafeRequestId(playbackId)))
+            {
+                WriteJson(output, 400, "Bad Request", ErrorJson("invalid_request_id", "A supplied status ID contains unsupported characters."));
+                return;
+            }
+
+            SpeechStreamSnapshot snapshot;
+            bool pairedLookup = false;
+            if (!string.IsNullOrEmpty(requestId) && !string.IsNullOrEmpty(playbackId))
+            {
+                if (!string.Equals(id, requestId, StringComparison.Ordinal) && !string.Equals(id, playbackId, StringComparison.Ordinal))
+                {
+                    WriteJson(output, 409, "Conflict", ErrorJson("request_id_mismatch", "The path ID does not match the supplied request/playback pair."));
+                    return;
+                }
+                snapshot = speechStreams.FindByIds(requestId, playbackId);
+                pairedLookup = true;
+            }
+            else if (!string.IsNullOrEmpty(requestId) && !string.Equals(id, requestId, StringComparison.Ordinal))
+            {
+                snapshot = speechStreams.FindByIds(requestId, id);
+                pairedLookup = true;
+            }
+            else if (!string.IsNullOrEmpty(playbackId) && !string.Equals(id, playbackId, StringComparison.Ordinal))
+            {
+                snapshot = speechStreams.FindByIds(id, playbackId);
+                pairedLookup = true;
+            }
+            else
+            {
+                snapshot = speechStreams.Find(id);
+            }
+            if (snapshot == null)
+            {
+                WriteJson(output,
+                    pairedLookup ? 409 : 404,
+                    pairedLookup ? "Conflict" : "Not Found",
+                    ErrorJson(
+                        pairedLookup ? "request_id_mismatch" : "request_not_found",
+                        pairedLookup ? "request_id and playback_id do not identify the same speech request." : "No speech request matches the supplied ID."));
+                return;
+            }
+            Dictionary<string, object> result = new Dictionary<string, object>();
+            result["status"] = snapshot.State;
+            result["request_id"] = snapshot.RequestId;
+            result["playback_id"] = snapshot.PlaybackId;
+            result["bytes"] = snapshot.Bytes;
+            result["backend_incremental_generation"] = false;
+            if (!string.IsNullOrEmpty(snapshot.Error)) { result["error"] = snapshot.Error; }
+            WriteJson(output, 200, "OK", new JavaScriptSerializer().Serialize(result));
+        }
+
+        private bool TryEnterRequest()
+        {
+            while (true)
+            {
+                int current = Interlocked.CompareExchange(ref activeRequests, 0, 0);
+                if (current >= config.MaxConcurrentRequests) { return false; }
+                if (Interlocked.CompareExchange(ref activeRequests, current + 1, current) == current)
+                {
+                    return true;
+                }
+            }
+        }
+
+        private static SpeechStreamSession CreateSpeechStreamSession(HttpRequestData request)
+        {
+            SpeechRequestIds ids = ResolveSpeechRequestIds(request, true);
+            return new SpeechStreamSession(ids.RequestId, ids.PlaybackId);
+        }
+
+        private sealed class SpeechRequestIds
+        {
+            public string RequestId;
+            public string PlaybackId;
+        }
+
+        private static SpeechRequestIds ResolveSpeechRequestIds(HttpRequestData request, bool generateMissing)
+        {
+            string requestId = request.Header("X-Qwen-Request-Id");
+            string playbackId = request.Header("X-Qwen-Playback-Id");
+            IDictionary<string, object> body = ReadJsonObject(request.Body);
+            if (string.IsNullOrEmpty(requestId)) { requestId = ReadJsonId(body, "request_id", "requestId"); }
+            if (string.IsNullOrEmpty(playbackId)) { playbackId = ReadJsonId(body, "playback_id", "playbackId"); }
+            if (!string.IsNullOrEmpty(requestId) && !GatewayProtocol.IsSafeRequestId(requestId))
+            {
+                throw new SpeechRequestIdException("X-Qwen-Request-Id is invalid.");
+            }
+            if (!string.IsNullOrEmpty(playbackId) && !GatewayProtocol.IsSafeRequestId(playbackId))
+            {
+                throw new SpeechRequestIdException("X-Qwen-Playback-Id is invalid.");
+            }
+            if (generateMissing)
+            {
+                if (string.IsNullOrEmpty(requestId)) { requestId = Guid.NewGuid().ToString("N"); }
+                if (string.IsNullOrEmpty(playbackId)) { playbackId = Guid.NewGuid().ToString("N"); }
+            }
+            return new SpeechRequestIds { RequestId = requestId, PlaybackId = playbackId };
+        }
+
+        private static IDictionary<string, object> ReadJsonObject(byte[] bytes)
+        {
+            if (bytes == null || bytes.Length == 0) { return null; }
+            string text = Encoding.UTF8.GetString(bytes).Trim();
+            if (text.Length == 0 || text[0] != '{') { return null; }
+            try
+            {
+                return new JavaScriptSerializer().DeserializeObject(text) as IDictionary<string, object>;
+            }
+            catch
+            {
+                // The backend will produce the authoritative malformed-body error. IDs are
+                // optional metadata, so do not make legacy requests fail at this layer.
+                return null;
+            }
+        }
+
+        private static string ReadJsonId(IDictionary<string, object> body, string first, string second)
+        {
+            if (body == null) { return null; }
+            object value;
+            if (body.TryGetValue(first, out value) || body.TryGetValue(second, out value))
+            {
+                return value as string;
+            }
+            return null;
+        }
+
         private void Proxy(HttpRequestData request, Stream output)
         {
-            string url = "http://127.0.0.1:" + config.BackendPort + request.PathAndQuery;
-            HttpWebRequest backendRequest = (HttpWebRequest)WebRequest.Create(url);
-            backendRequest.Method = request.Method;
-            backendRequest.Timeout = 120000;
-            backendRequest.ReadWriteTimeout = 120000;
-            backendRequest.AllowAutoRedirect = false;
-            string contentType = request.Header("Content-Type");
-            if (!string.IsNullOrEmpty(contentType)) { backendRequest.ContentType = contentType; }
-            string accept = request.Header("Accept");
-            if (!string.IsNullOrEmpty(accept)) { backendRequest.Accept = accept; }
-            string authorization = request.Header("Authorization");
-            if (!string.IsNullOrEmpty(authorization)) { backendRequest.Headers["Authorization"] = authorization; }
+            HttpWebRequest backendRequest = CreateBackendRequest(request);
             if (request.Body.Length > 0)
             {
                 backendRequest.ContentLength = request.Body.Length;
@@ -281,7 +524,7 @@ namespace QwenTrayGateway
             using (Stream body = backendResponse.GetResponseStream())
             using (MemoryStream copy = new MemoryStream())
             {
-                body.CopyTo(copy);
+                CopyResponseBody(body, copy, config.MaxStreamBytes);
                 WriteResponse(
                     output,
                     (int)backendResponse.StatusCode,
@@ -289,6 +532,182 @@ namespace QwenTrayGateway
                     backendResponse.ContentType,
                     copy.ToArray(),
                     backendResponse.Headers);
+            }
+        }
+
+        private HttpWebRequest CreateBackendRequest(HttpRequestData request)
+        {
+            string backendPath = request.PathAndQuery;
+            if (GatewayProtocol.IsSpeechStream(request.Method, request.PathAndQuery))
+            {
+                int queryIndex = backendPath.IndexOf('?');
+                backendPath = "/v1/audio/speech" + (queryIndex < 0 ? string.Empty : backendPath.Substring(queryIndex));
+            }
+            string url = "http://127.0.0.1:" + config.BackendPort + backendPath;
+            HttpWebRequest backendRequest = (HttpWebRequest)WebRequest.Create(url);
+            backendRequest.Method = request.Method;
+            int timeout = Math.Max(1000, Math.Min(Int32.MaxValue / 2, config.RequestTimeoutSeconds * 1000));
+            backendRequest.Timeout = timeout;
+            backendRequest.ReadWriteTimeout = timeout;
+            backendRequest.AllowAutoRedirect = false;
+            string contentType = request.Header("Content-Type");
+            if (!string.IsNullOrEmpty(contentType)) { backendRequest.ContentType = contentType; }
+            string accept = request.Header("Accept");
+            if (!string.IsNullOrEmpty(accept)) { backendRequest.Accept = accept; }
+            string authorization = request.Header("Authorization");
+            if (!string.IsNullOrEmpty(authorization)) { backendRequest.Headers["Authorization"] = authorization; }
+            return backendRequest;
+        }
+
+        private void ProxyStream(HttpRequestData request, Stream output, SpeechStreamSession session)
+        {
+            HttpWebRequest backendRequest = CreateBackendRequest(request);
+            session.AttachBackendRequest(backendRequest);
+            if (request.Body.Length > 0)
+            {
+                backendRequest.ContentLength = request.Body.Length;
+                using (Stream body = backendRequest.GetRequestStream())
+                {
+                    body.Write(request.Body, 0, request.Body.Length);
+                }
+            }
+
+            HttpWebResponse backendResponse = null;
+            bool headersSent = false;
+            string terminalStatus = "completed";
+            string terminalError = string.Empty;
+            try
+            {
+                try
+                {
+                    backendResponse = (HttpWebResponse)backendRequest.GetResponse();
+                }
+                catch (WebException ex)
+                {
+                    backendResponse = ex.Response as HttpWebResponse;
+                    if (backendResponse == null) { throw; }
+                }
+
+                using (backendResponse)
+                using (Stream body = backendResponse.GetResponseStream())
+                {
+                    if ((int)backendResponse.StatusCode < 200 || (int)backendResponse.StatusCode >= 300)
+                    {
+                        using (MemoryStream errorBody = new MemoryStream())
+                        {
+                            CopyResponseBody(body, errorBody, config.MaxStreamBytes);
+                            WriteResponse(
+                                output,
+                                (int)backendResponse.StatusCode,
+                                backendResponse.StatusDescription,
+                                backendResponse.ContentType,
+                                errorBody.ToArray(),
+                                backendResponse.Headers);
+                        }
+                        terminalStatus = "failed";
+                        terminalError = "backend_http_" + (int)backendResponse.StatusCode;
+                        return;
+                    }
+
+                    string contentType = string.IsNullOrEmpty(backendResponse.ContentType) ? "audio/wav" : backendResponse.ContentType;
+                    try
+                    {
+                        WriteChunkedHeaders(output, contentType, session.RequestId, session.PlaybackId);
+                    }
+                    catch (IOException)
+                    {
+                        session.Cancel();
+                        logger.Write("stream_client_disconnected request_id=" + Safe(session.RequestId));
+                        throw;
+                    }
+                    session.ResponseStarted = true;
+                    headersSent = true;
+                    byte[] buffer = new byte[config.StreamChunkBytes];
+                    long total = 0;
+                    DateTime deadline = DateTime.UtcNow.AddSeconds(config.RequestTimeoutSeconds);
+                    while (true)
+                    {
+                        if (session.IsCancellationRequested)
+                        {
+                            terminalStatus = "cancelled";
+                            break;
+                        }
+                        if (DateTime.UtcNow > deadline)
+                        {
+                            session.Cancel();
+                            terminalStatus = "failed";
+                            terminalError = "timeout";
+                            break;
+                        }
+                        int count = body.Read(buffer, 0, buffer.Length);
+                        if (count <= 0) { break; }
+                        total += count;
+                        if (total > config.MaxStreamBytes)
+                        {
+                            session.Cancel();
+                            terminalStatus = "failed";
+                            terminalError = "stream_too_large";
+                            break;
+                        }
+                        try
+                        {
+                            WriteChunk(output, buffer, count);
+                        }
+                        catch (IOException)
+                        {
+                            session.Cancel();
+                            logger.Write("stream_client_disconnected request_id=" + Safe(session.RequestId));
+                            terminalStatus = "cancelled";
+                            break;
+                        }
+                        session.AddBytes(count);
+                    }
+                    if (session.IsCancellationRequested && terminalStatus == "completed")
+                    {
+                        terminalStatus = "cancelled";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                if (session.IsCancellationRequested)
+                {
+                    terminalStatus = "cancelled";
+                    terminalError = string.Empty;
+                }
+                else if (headersSent)
+                {
+                    terminalStatus = "failed";
+                    terminalError = Safe(ex.Message);
+                }
+                else
+                {
+                    throw;
+                }
+            }
+            finally
+            {
+                session.SetError(terminalError);
+                if (headersSent)
+                {
+                    try { WriteChunkedEnd(output, terminalStatus, terminalError); } catch { }
+                }
+            }
+        }
+
+        private static void CopyResponseBody(Stream input, Stream output, int maximumBytes)
+        {
+            byte[] buffer = new byte[32 * 1024];
+            long total = 0;
+            int count;
+            while ((count = input.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                total += count;
+                if (total > maximumBytes)
+                {
+                    throw new InvalidDataException("Backend response exceeds the configured stream limit.");
+                }
+                output.Write(buffer, 0, count);
             }
         }
 
@@ -356,6 +775,60 @@ namespace QwenTrayGateway
             output.Write(headerBytes, 0, headerBytes.Length);
             if (body.Length > 0) { output.Write(body, 0, body.Length); }
             output.Flush();
+        }
+
+        private static void WriteChunkedHeaders(
+            Stream output,
+            string contentType,
+            string requestId,
+            string playbackId)
+        {
+            StringBuilder header = new StringBuilder();
+            header.Append("HTTP/1.1 200 OK\r\n");
+            header.Append("Content-Type: ").Append(string.IsNullOrEmpty(contentType) ? "audio/wav" : contentType).Append("\r\n");
+            header.Append("Transfer-Encoding: chunked\r\n");
+            header.Append("Connection: close\r\n");
+            header.Append("Cache-Control: no-store\r\n");
+            header.Append("X-Qwen-Request-Id: ").Append(requestId).Append("\r\n");
+            header.Append("X-Qwen-Playback-Id: ").Append(playbackId).Append("\r\n");
+            header.Append("X-Qwen-Stream-Mode: wav-transport-chunked\r\n");
+            header.Append("X-Qwen-Backend-Incremental-Generation: false\r\n");
+            header.Append("Trailer: X-Qwen-Stream-Status, X-Qwen-Stream-Error\r\n");
+            header.Append("\r\n");
+            byte[] bytes = Encoding.ASCII.GetBytes(header.ToString());
+            output.Write(bytes, 0, bytes.Length);
+            output.Flush();
+        }
+
+        private static void WriteChunk(Stream output, byte[] buffer, int count)
+        {
+            byte[] prefix = Encoding.ASCII.GetBytes(count.ToString("X") + "\r\n");
+            output.Write(prefix, 0, prefix.Length);
+            output.Write(buffer, 0, count);
+            byte[] suffix = Encoding.ASCII.GetBytes("\r\n");
+            output.Write(suffix, 0, suffix.Length);
+            output.Flush();
+        }
+
+        private static void WriteChunkedEnd(Stream output, string status, string error)
+        {
+            StringBuilder trailer = new StringBuilder();
+            trailer.Append("0\r\n");
+            trailer.Append("X-Qwen-Stream-Status: ").Append(SafeHeaderValue(status)).Append("\r\n");
+            if (!string.IsNullOrEmpty(error))
+            {
+                trailer.Append("X-Qwen-Stream-Error: ").Append(SafeHeaderValue(error)).Append("\r\n");
+            }
+            trailer.Append("\r\n");
+            byte[] bytes = Encoding.ASCII.GetBytes(trailer.ToString());
+            output.Write(bytes, 0, bytes.Length);
+            output.Flush();
+        }
+
+        private static string SafeHeaderValue(string value)
+        {
+            if (string.IsNullOrEmpty(value)) { return string.Empty; }
+            return value.Replace("\r", " ").Replace("\n", " ");
         }
 
         private static string Safe(string value)

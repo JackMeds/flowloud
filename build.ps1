@@ -18,6 +18,7 @@ New-Item -ItemType Directory -Force -Path $buildDirectory | Out-Null
     "$PSScriptRoot\src\Core.cs" `
     "$PSScriptRoot\src\HttpRequestData.cs" `
     "$PSScriptRoot\src\BackendController.cs" `
+    "$PSScriptRoot\src\Streaming.cs" `
     "$PSScriptRoot\src\TcpGateway.cs" `
     "$PSScriptRoot\src\TrayApplication.cs" `
     "$PSScriptRoot\src\Program.cs"
@@ -35,4 +36,3 @@ if ($LASTEXITCODE -ne 0) {
 if ($LASTEXITCODE -ne 0) {
     throw "Gateway test compilation failed."
 }
-

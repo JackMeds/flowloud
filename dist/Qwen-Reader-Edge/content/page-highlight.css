@@ -1,0 +1,162 @@
+::highlight(qwen-reader-current) {
+  color: inherit;
+  /* Contract fallback for browsers that do not expose the style class yet;
+     every selectable focus style below overrides this with a neutral tone. */
+  background-color: rgba(116, 88, 232, .075);
+  text-shadow: none;
+}
+
+html.qwen-reader-focus-style-soft-glow ::highlight(qwen-reader-current) {
+  background-color: rgba(185, 197, 213, .085);
+  text-shadow:
+    0 0 .32em rgba(231, 237, 245, .48),
+    0 0 .72em rgba(145, 160, 179, .12);
+}
+
+html.qwen-reader-focus-style-edge-glow ::highlight(qwen-reader-current) {
+  background-color: transparent;
+  text-shadow:
+    0 0 .18em rgba(229, 236, 245, .56),
+    0 0 .48em rgba(132, 150, 171, .20);
+}
+
+html.qwen-reader-focus-style-paper-wash ::highlight(qwen-reader-current) {
+  background-color: rgba(159, 170, 185, .105);
+  text-shadow: none;
+}
+
+html.qwen-reader-focus-style-underline-guide ::highlight(qwen-reader-current) {
+  background-color: transparent;
+  text-decoration: underline rgba(126, 145, 168, .42) .075em;
+  text-underline-offset: .18em;
+}
+
+::highlight(qwen-reader-current-word) {
+  color: color-mix(in srgb, currentColor 72%, #5d4d78 28%);
+  text-shadow: none;
+}
+
+html.qwen-reader-word-style-classic-glow ::highlight(qwen-reader-current-word) {
+  color: var(--qwen-reader-word-accent, #6f58bd);
+  text-shadow:
+    0 0 5px color-mix(in srgb, var(--qwen-reader-word-accent, #6f58bd) 42%, transparent),
+    0 0 11px color-mix(in srgb, var(--qwen-reader-word-accent, #6f58bd) 18%, transparent);
+}
+
+html.qwen-reader-word-ink-overlay ::highlight(qwen-reader-current-word) {
+  color: transparent;
+  text-shadow: none;
+}
+
+.qwen-reader-speaking {
+  border-radius: .42em;
+  background: transparent !important;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  box-shadow: none !important;
+  outline: 0 !important;
+  text-shadow: none !important;
+}
+
+html.qwen-reader-focus-style-soft-glow .qwen-reader-speaking {
+  background: radial-gradient(ellipse at center, rgba(217, 226, 237, .18), rgba(172, 187, 205, .065) 72%, transparent) !important;
+  box-shadow: 0 0 .9em rgba(140, 156, 176, .10) !important;
+  text-shadow: 0 0 .34em rgba(227, 235, 244, .42) !important;
+}
+
+html.qwen-reader-focus-style-edge-glow .qwen-reader-speaking {
+  text-shadow:
+    0 0 .18em rgba(230, 237, 245, .54),
+    0 0 .5em rgba(130, 149, 171, .19) !important;
+}
+
+html.qwen-reader-focus-style-paper-wash .qwen-reader-speaking {
+  background: rgba(159, 170, 185, .10) !important;
+}
+
+html.qwen-reader-focus-style-underline-guide .qwen-reader-speaking {
+  text-decoration: underline rgba(126, 145, 168, .42) .075em !important;
+  text-underline-offset: .18em;
+}
+
+@property --qwen-reader-beam-x {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: -22%;
+}
+
+.qwen-reader-speaking-word {
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  box-shadow: none !important;
+  outline: 0 !important;
+  pointer-events: none !important;
+  text-decoration: none !important;
+  transform: none !important;
+}
+
+html.qwen-reader-word-style-classic-glow .qwen-reader-speaking-word {
+  color: var(--qwen-reader-word-accent, #6f58bd) !important;
+  -webkit-text-fill-color: currentColor !important;
+  background: none !important;
+  filter:
+    drop-shadow(0 0 4px color-mix(in srgb, var(--qwen-reader-word-accent, #6f58bd) 48%, transparent))
+    drop-shadow(0 0 9px color-mix(in srgb, var(--qwen-reader-word-accent, #6f58bd) 20%, transparent));
+}
+
+html.qwen-reader-word-style-edge-dissolve .qwen-reader-speaking-word,
+html.qwen-reader-word-style-custom .qwen-reader-speaking-word {
+  --qwen-reader-beam-x: -22%;
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+  background:
+    radial-gradient(ellipse 46% 80% at var(--qwen-reader-beam-x) 47%, #fff 0 12%, rgba(241,246,255,.84) 24%, rgba(192,209,232,.34) 47%, transparent 72%),
+    linear-gradient(#39353f, #39353f) !important;
+  background-clip: text !important;
+  -webkit-background-clip: text !important;
+  animation: qwen-reader-edge-position var(--qwen-reader-word-motion-duration, 1370ms) linear both !important;
+}
+
+html.qwen-reader-word-style-custom .qwen-reader-speaking-word {
+  background:
+    radial-gradient(ellipse 46% 80% at var(--qwen-reader-beam-x) 47%, #fff 0 12%, color-mix(in srgb, var(--qwen-reader-word-accent, #6f58bd) 24%, #f1f6ff) 24%, color-mix(in srgb, var(--qwen-reader-word-accent, #6f58bd) 28%, transparent) 47%, transparent 72%),
+    linear-gradient(color-mix(in srgb, #39353f 74%, var(--qwen-reader-word-accent, #6f58bd) 26%), color-mix(in srgb, #39353f 74%, var(--qwen-reader-word-accent, #6f58bd) 26%)) !important;
+  filter: drop-shadow(0 0 var(--qwen-reader-word-glow-radius, 7px) color-mix(in srgb, var(--qwen-reader-word-accent, #6f58bd) 58%, transparent));
+}
+
+html.qwen-reader-word-style-aurora-tide .qwen-reader-speaking-word {
+  --qwen-reader-beam-x: -18%;
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+  background:
+    radial-gradient(ellipse 38% 78% at var(--qwen-reader-beam-x) 47%, #fff 0 10%, rgba(215,240,249,.75) 24%, transparent 67%),
+    linear-gradient(105deg, #41364f 0%, #6e55bd 34%, #3d8fa9 55%, #7256c0 76%, #41364f 100%) !important;
+  background-size: 100% 100%, 220% 100% !important;
+  background-clip: text !important;
+  -webkit-background-clip: text !important;
+  animation: qwen-reader-aurora-pass var(--qwen-reader-word-motion-duration, 1370ms) cubic-bezier(.18,.62,.22,1) both !important;
+}
+
+@keyframes qwen-reader-edge-position {
+  from { --qwen-reader-beam-x: -22%; }
+  to { --qwen-reader-beam-x: 112%; }
+}
+
+@keyframes qwen-reader-aurora-pass {
+  from { --qwen-reader-beam-x: -18%; background-position: 0 0, 100% 0; }
+  to { --qwen-reader-beam-x: 112%; background-position: 0 0, 0 0; }
+}
+
+html.qwen-reader-word-motion-paused .qwen-reader-speaking-word {
+  animation-play-state: paused !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::highlight(qwen-reader-current),
+  ::highlight(qwen-reader-current-word),
+  .qwen-reader-speaking,
+  .qwen-reader-speaking-word {
+    animation: none !important;
+    will-change: auto;
+  }
+}

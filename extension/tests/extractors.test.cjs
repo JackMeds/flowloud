@@ -6,9 +6,10 @@ const vm = require('node:vm');
 
 function loadModules() {
   delete globalThis.QwenReaderText;
+  delete globalThis.QwenReaderForumContent;
   delete globalThis.QwenReaderNormalizedDocument;
   delete globalThis.QwenReaderExtractors;
-  for (const relativePath of ['shared/text.js', 'shared/normalized-document.js', 'shared/extractors.js']) {
+  for (const relativePath of ['shared/text.js', 'shared/forum-content.js', 'shared/generic-thread-detector.js', 'shared/normalized-document.js', 'shared/extractors.js', 'shared/sentence-range.js']) {
     const absolutePath = path.join(__dirname, '..', relativePath);
     if (!fs.existsSync(absolutePath)) continue;
     const source = fs.readFileSync(absolutePath, 'utf8');
@@ -16,6 +17,26 @@ function loadModules() {
   }
   return globalThis.QwenReaderExtractors;
 }
+
+test('Flarum keeps paragraph boundaries and speaker metadata inside one post', () => {
+  const { parseFlarumApi } = loadModules();
+  const blocks = parseFlarumApi({
+    data: [{
+      type: 'posts', id: '48666-1',
+      attributes: { number: 1, contentHtml: '<p>First paragraph.</p><p>Second paragraph.</p><p>Agreed</p>' },
+      relationships: { user: { data: { type: 'users', id: 'op' } } }
+    }],
+    included: [{ type: 'users', id: 'op', attributes: { username: 'Owner' } }]
+  });
+
+  assert.deepEqual(blocks.map((block) => block.text), ['First paragraph.', 'Second paragraph.', 'Agreed']);
+  assert.ok(blocks.every((block) => block.authorId === 'op' && block.authorName === 'Owner' && block.floor === 1 && block.isOp));
+  assert.deepEqual(blocks.map((block) => block.sourceLocator), [
+    { adapter: 'flarum', containerSelector: '.PostStream-item[data-id="48666-1"] .Post-body', unitIndex: 0, fingerprint: '1qob6lf' },
+    { adapter: 'flarum', containerSelector: '.PostStream-item[data-id="48666-1"] .Post-body', unitIndex: 1, fingerprint: 'rjbkmf' },
+    { adapter: 'flarum', containerSelector: '.PostStream-item[data-id="48666-1"] .Post-body', unitIndex: 2, fingerprint: '13h5eh1' }
+  ]);
+});
 
 function readFixture(name) {
   return JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8'));
@@ -301,6 +322,140 @@ test('Discourse anonymous posts remain distinct while the first readable post is
   assert.notEqual(segments[0].authorId, segments[1].authorId);
 });
 
+test('NodeBB reports the first API page before background pagination completes', async () => {
+  const { extractDocument } = loadModules();
+  const first = readFixture('nodebb-topic-page-1.json');
+  const second = readFixture('nodebb-topic-page-2.json');
+  const progress = [];
+  const document = makeLocationDocument('https://forum.example/community/topic/44/story');
+  const result = await extractDocument(document, {
+    onProgress: async (partial, meta) => {
+      progress.push({ count: partial.blocks.length, phase: meta.phase, complete: partial.complete });
+    },
+    fetchFn: async (url) => jsonResponse(String(url).includes('page=2') ? second : first, String(url))
+  });
+
+  assert.equal(result.complete, true);
+  assert.equal(progress[0].phase, 'initial');
+  assert.ok(progress[0].count > 0);
+  assert.ok(progress.at(-1).count <= result.blocks.length);
+  assert.ok(progress.length >= 2);
+});
+
+test('Discourse keeps paragraph boundaries and speaker metadata inside one post', () => {
+  const { parseDiscourseTopic } = loadModules();
+  const blocks = parseDiscourseTopic({
+    post_stream: {
+      posts: [{
+        id: 91,
+        user_id: 7,
+        username: 'Owner',
+        post_number: 4,
+        post_type: 1,
+        cooked: '<p>Opening thought.</p><p>Supporting detail.</p>'
+      }]
+    }
+  }, []);
+
+  assert.deepEqual(blocks.map((block) => block.text), ['Opening thought.', 'Supporting detail.']);
+  assert.ok(blocks.every((block) => block.authorId === '7' && block.authorName === 'Owner' && block.floor === 4 && block.isOp));
+  assert.deepEqual(blocks.map((block) => block.sourceLocator), [
+    { adapter: 'discourse', containerSelector: 'article[data-post-id="91"] .cooked, article#post_91 .cooked', unitIndex: 0, fingerprint: '1rlycf8' },
+    { adapter: 'discourse', containerSelector: 'article[data-post-id="91"] .cooked, article#post_91 .cooked', unitIndex: 1, fingerprint: 'jywbul' }
+  ]);
+});
+
+test('Flarum live DOM emoji extraction stays aligned through playback splitting and first-sentence ranges', () => {
+  const { extractFlarumDom } = loadModules();
+  const firstSentence = '这几天摸乳头怎么没有感觉了😭😭，感受不到快感了，我这几天开发的也不频繁啊。';
+  const continuation = '今天下午午睡起来碰乳头不管是轻点，上下拨还是揉，捏，提拉都没什么快感，好难过。突然很好奇大家看片的时候会不会代入自己。';
+  const marker = '\uFFF0';
+  const paragraph = {
+    closest: () => null,
+    querySelectorAll: () => [],
+    cloneNode() {
+      let projected = `这几天摸乳头怎么没有感觉了${marker}${marker}，感受不到快感了，我这几天开发的也不频繁啊。${continuation}`;
+      const images = [0, 1].map(() => ({
+        tagName: 'IMG',
+        getAttribute(name) {
+          return name === 'class' ? 'emoji' : name === 'alt' ? '😭' : null;
+        },
+        replaceWith(value) {
+          projected = projected.replace(marker, value);
+        }
+      }));
+      return {
+        get textContent() { return projected.replaceAll(marker, ''); },
+        querySelectorAll(selector) { return selector === 'img' ? images : []; }
+      };
+    }
+  };
+  const body = {
+    querySelectorAll(selector) {
+      return selector === 'p,h1,h2,h3,h4,h5,h6,li' ? [paragraph] : [];
+    }
+  };
+  const post = {
+    id: 'post-80611',
+    getAttribute(name) {
+      return name === 'data-id' ? '80611' : name === 'data-number' ? '165' : null;
+    },
+    querySelector(selector) {
+      if (selector.includes('.Post-body')) return body;
+      if (selector.includes('.PostUser-name')) return { textContent: 'Sweetui', getAttribute: () => '/u/sweetui' };
+      if (selector.includes('a[href*="/u/"]')) return { getAttribute: () => '/u/sweetui' };
+      return null;
+    }
+  };
+  const document = {
+    location: makeLocation('https://bbs.viva-la-vita.org/d/10627/165'),
+    querySelectorAll(selector) {
+      return selector.includes('PostStream-item') || selector === '.Post' ? [post] : [];
+    }
+  };
+
+  const blocks = extractFlarumDom(document);
+  const normalized = globalThis.QwenReaderDocument.createDocument({
+    url: document.location,
+    adapterId: 'flarum',
+    blocks
+  });
+  const segments = globalThis.QwenReaderDocument.toPlaybackSegments(normalized, 260);
+
+  assert.equal(blocks[0].text, firstSentence + continuation);
+  assert.equal(segments[0].text, firstSentence);
+
+  function domText(value) {
+    return { nodeType: 3, nodeName: '#text', nodeValue: value, childNodes: [] };
+  }
+  function domElement(tagName, children = [], attributes = {}) {
+    return {
+      nodeType: 1,
+      nodeName: tagName.toUpperCase(),
+      tagName: tagName.toUpperCase(),
+      childNodes: children,
+      getAttribute(name) { return attributes[name] || null; }
+    };
+  }
+  const opening = domText('这几天摸乳头怎么没有感觉了');
+  const ending = domText(`，感受不到快感了，我这几天开发的也不频繁啊。${continuation}`);
+  const rangeRoot = domElement('p', [
+    opening,
+    domElement('img', [], { class: 'emoji', alt: '😭' }),
+    domElement('img', [], { class: 'emoji', alt: '😭' }),
+    ending
+  ]);
+  const index = globalThis.QwenReaderSentenceRange.buildTextIndex(rangeRoot);
+  const firstMatch = globalThis.QwenReaderSentenceRange.findSegment(index, segments[0].text, 0);
+  const secondMatch = globalThis.QwenReaderSentenceRange.findSegment(index, segments[1].text, firstMatch.nextOffset);
+
+  assert.ok(firstMatch);
+  assert.ok(secondMatch);
+  assert.equal(firstMatch.startContainer, opening);
+  assert.equal(firstMatch.endContainer, ending);
+  assert.ok(secondMatch.normalizedStart >= firstMatch.normalizedEnd);
+});
+
 test('Discourse removes image attachment metadata and bare URLs but keeps descriptive link text', () => {
   const { parseDiscourseTopic } = loadModules();
   const segments = parseDiscourseTopic({
@@ -327,7 +482,7 @@ test('Discourse removes image attachment metadata and bare URLs but keeps descri
     }
   }, []);
 
-  assert.equal(segments[0].text, '感觉我的建议已经很中肯了 补充说明');
+  assert.equal(segments.map((segment) => segment.text).join(' '), '感觉我的建议已经很中肯了 补充说明');
 });
 
 test('NodeBB guest uid zero uses names instead of merging every guest into the OP', () => {
@@ -344,6 +499,27 @@ test('NodeBB guest uid zero uses names instead of merging every guest into the O
   assert.equal(segments[1].isOp, false);
   assert.equal(segments[0].authorId, 'name:guest-a');
   assert.equal(segments[1].authorId, 'name:guest-b');
+});
+
+test('NodeBB keeps paragraph boundaries and speaker metadata inside one post', () => {
+  const { parseNodebbTopicPages } = loadModules();
+  const blocks = parseNodebbTopicPages([{
+    uid: 12,
+    posts: [{
+      pid: 501,
+      uid: 12,
+      index: 0,
+      content: '<p>NodeBB first.</p><p>NodeBB second.</p>',
+      user: { uid: 12, username: 'Owner' }
+    }]
+  }]);
+
+  assert.deepEqual(blocks.map((block) => block.text), ['NodeBB first.', 'NodeBB second.']);
+  assert.ok(blocks.every((block) => block.authorId === '12' && block.authorName === 'Owner' && block.floor === 1 && block.isOp));
+  assert.deepEqual(blocks.map((block) => block.sourceLocator), [
+    { adapter: 'nodebb', containerSelector: '[component="post"][data-pid="501"] [component="post/content"]', unitIndex: 0, fingerprint: '1wcxwvb' },
+    { adapter: 'nodebb', containerSelector: '[component="post"][data-pid="501"] [component="post/content"]', unitIndex: 1, fingerprint: 'sx67nn' }
+  ]);
 });
 
 test('NodeBB reports a pagination limit instead of claiming a capped topic is complete', async () => {
@@ -373,6 +549,41 @@ test('NodeBB reports a pagination limit instead of claiming a capped topic is co
   assert.deepEqual(result.warnings, ['nodebb-pagination-limit']);
 });
 
+test('NodeBB fetches long topics with bounded parallelism', async () => {
+  const { extractDocument } = loadModules();
+  const document = makeLocationDocument('https://forum.example/topic/88/long-topic');
+  let active = 0;
+  let peak = 0;
+
+  const result = await extractDocument(document, {
+    fetchFn: async (url) => {
+      const page = Number(new URL(String(url)).searchParams.get('page') || 1);
+      if (page > 1) {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setImmediate(resolve));
+        active -= 1;
+      }
+      return jsonResponse({
+        title: '并发长主题',
+        pagination: { pageCount: 9 },
+        posts: [{
+          pid: page,
+          uid: page,
+          index: page - 1,
+          content: `<p>第 ${page} 页</p>`,
+          user: { uid: page, username: `user-${page}` }
+        }]
+      }, String(url));
+    }
+  });
+
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.blocks.map((block) => block.floor), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  assert.ok(peak > 1, `expected parallel page requests, saw ${peak}`);
+  assert.ok(peak <= 6, `expected at most 6 parallel page requests, saw ${peak}`);
+});
+
 test('XenForo DOM adapter removes quotes, controls and signatures from current-page speech', async () => {
   const { extractDocument } = loadModules();
   const document = makeXenForoDocument();
@@ -386,6 +597,61 @@ test('XenForo DOM adapter removes quotes, controls and signatures from current-p
     { floor: 1, text: '真正正文' },
     { floor: 2, text: '回复正文' }
   ]);
+});
+
+test('XenForo keeps paragraph boundaries and speaker metadata inside one post', () => {
+  const { extractXenForo } = loadModules();
+  const document = makeXenForoDocument([
+    makeXenForoPost('9001', 'Owner', '#1', ['First XenForo paragraph.', 'Second XenForo paragraph.'])
+  ]);
+
+  const blocks = extractXenForo(document);
+
+  assert.deepEqual(blocks.map((block) => block.text), ['First XenForo paragraph.', 'Second XenForo paragraph.']);
+  assert.ok(blocks.every((block) => block.authorName === 'Owner' && block.floor === 1 && block.isOp));
+  assert.deepEqual(blocks.map((block) => block.sourceLocator), [
+    { adapter: 'xenforo', containerSelector: '.message--post[data-content="post-9001"] .message-body .bbWrapper, #js-post-9001 .message-body .bbWrapper', unitIndex: 0, fingerprint: '9a6va2' },
+    { adapter: 'xenforo', containerSelector: '.message--post[data-content="post-9001"] .message-body .bbWrapper, #js-post-9001 .message-body .bbWrapper', unitIndex: 1, fingerprint: 'lsa0t2' }
+  ]);
+});
+
+test('mirror card forum keeps br paragraphs, author identity, and a shared source container', async () => {
+  const { extractDocument } = loadModules();
+  const content = { innerHTML: 'First line<br>Second line<br>短' };
+  const author = {
+    textContent: 'Alice',
+    getAttribute(name) { return name === 'href' ? '/author/40475' : ''; }
+  };
+  const subtitle = { textContent: 'Re: Thread title' };
+  const post = {
+    id: 'p280414',
+    querySelector(selector) {
+      if (selector === '.card-body') return content;
+      if (selector.includes('.ui-link')) return author;
+      if (selector.includes('.text-muted')) return subtitle;
+      return null;
+    }
+  };
+  const document = {
+    title: 'Thread',
+    location: makeLocation('https://mirror.chromaso.net/thread/29141/2'),
+    querySelectorAll(selector) {
+      if (selector === '.mm-post .card-body') return [content];
+      if (selector === '.mm-post') return [post];
+      return [];
+    }
+  };
+
+  const result = await extractDocument(document, {});
+
+  assert.equal(result.adapterId, 'mirror-card');
+  assert.deepEqual(result.blocks.map(({ text, authorId, authorName, isOp }) => ({ text, authorId, authorName, isOp })), [
+    { text: 'First line', authorId: '40475', authorName: 'Alice', isOp: false },
+    { text: 'Second line', authorId: '40475', authorName: 'Alice', isOp: false },
+    { text: '短', authorId: '40475', authorName: 'Alice', isOp: false }
+  ]);
+  assert.deepEqual(result.blocks.map((item) => item.sourceLocator.unitIndex), [0, 1, 2]);
+  assert.ok(result.blocks.every((item) => item.sourceSelector === '[id="p280414"] .card-body'));
 });
 
 test('Readability receives a cloned document and wins over the generic fallback', async () => {
@@ -411,6 +677,27 @@ test('Readability receives a cloned document and wins over the generic fallback'
   assert.equal(result.adapterId, 'readability');
   assert.equal(result.title, '文章标题');
   assert.deepEqual(result.blocks.map((block) => block.text), ['第一段', '第二段']);
+});
+
+test('Readability preserves br-only visual paragraphs for range mapping', async () => {
+  const { extractDocument } = loadModules();
+  const original = makeGenericDocument(['fallback']);
+  original.location = makeLocation('https://mirror.example/thread/42/2');
+  original.cloneNode = () => ({ marker: 'clone' });
+  class BreakReadability {
+    parse() {
+      return {
+        title: 'Thread',
+        content: '<div class="card-body">First line<br>Second line<br><br>短</div>',
+        textContent: 'First line Second line 短'
+      };
+    }
+  }
+
+  const result = await extractDocument(original, { ReadabilityCtor: BreakReadability });
+
+  assert.equal(result.adapterId, 'readability');
+  assert.deepEqual(result.blocks.map((block) => block.text), ['First line', 'Second line', '短']);
 });
 
 test('a null Readability result falls through to the generic extractor', async () => {
@@ -505,6 +792,30 @@ test('extractGeneric chooses readable article blocks instead of navigation contr
   assert.deepEqual(segments.map((segment) => segment.text), fixture.articleBlocks);
 });
 
+test('extractGeneric splits a br-only content container into visual paragraphs', () => {
+  const { extractGeneric } = loadModules();
+  const candidate = {
+    tagName: 'DIV',
+    innerHTML: 'First line<br>Second line<br>短',
+    textContent: 'First line Second line 短',
+    hidden: false,
+    getAttribute: () => null,
+    closest: () => null,
+    cloneNode() {
+      return { textContent: this.textContent, querySelectorAll: () => [] };
+    },
+    querySelectorAll(selector) {
+      if (selector.includes('a')) return [];
+      return [];
+    }
+  };
+  const document = { querySelectorAll: () => [candidate] };
+
+  const segments = extractGeneric(document);
+
+  assert.deepEqual(segments.map((segment) => segment.text), ['First line', 'Second line', '短']);
+});
+
 function makeCandidate(tagName, blocks, linkCount) {
   const blockNodes = blocks.map((text) => ({
     tagName: 'P',
@@ -587,7 +898,14 @@ function makeFlarumDocument(posts) {
 }
 
 function makeRemovableBody(text, removableTexts) {
+  const readableText = removableTexts.reduce((current, value) => current.replace(value, ''), text).trim();
+  const semantic = makeSemanticBody([readableText]);
   return {
+    textContent: text,
+    querySelectorAll(selector) {
+      if (selector === 'p,h1,h2,h3,h4,h5,h6,li') return semantic.querySelectorAll(selector);
+      return [];
+    },
     cloneNode() {
       const removed = new Set();
       return {
@@ -595,18 +913,17 @@ function makeRemovableBody(text, removableTexts) {
           return removableTexts.map((value) => ({ remove: () => removed.add(value) }));
         },
         get textContent() {
-          return removableTexts.reduce((current, value) => current.replace(value, ''), text);
+          return readableText;
         }
       };
     }
   };
 }
 
-function makeXenForoDocument() {
-  const posts = [
+function makeXenForoDocument(posts = [
     makeXenForoPost('9001', '楼主', '#1', '真正正文 引用旧文 点赞 签名档', ['引用旧文', '点赞', '签名档']),
     makeXenForoPost('9002', '回复者', '#2', '回复正文 操作按钮', ['操作按钮'])
-  ];
+  ]) {
   return {
     location: makeLocation('https://xen.example/threads/topic.22/'),
     title: 'XenForo 主题',
@@ -627,7 +944,9 @@ function makeXenForoDocument() {
 }
 
 function makeXenForoPost(id, author, floor, content, removable) {
-  const body = makeRemovableBody(content, removable);
+  const body = Array.isArray(content)
+    ? makeSemanticBody(content)
+    : makeRemovableBody(content, removable || []);
   return {
     id: `js-post-${id}`,
     getAttribute(name) {
@@ -646,6 +965,26 @@ function makeXenForoPost(id, author, floor, content, removable) {
   };
 }
 
+function makeSemanticBody(paragraphs) {
+  const elements = paragraphs.map((textContent) => ({
+    textContent,
+    closest: () => null,
+    querySelectorAll: () => [],
+    cloneNode() {
+      return { textContent, querySelectorAll: () => [] };
+    }
+  }));
+  return {
+    textContent: paragraphs.join(' '),
+    querySelectorAll(selector) {
+      return selector === 'p,h1,h2,h3,h4,h5,h6,li' ? elements : [];
+    },
+    cloneNode() {
+      return { textContent: paragraphs.join(' '), querySelectorAll: () => [] };
+    }
+  };
+}
+
 function makeGenericDocument(blocks) {
   const article = makeCandidate('ARTICLE', blocks, 0);
   return {
@@ -658,3 +997,34 @@ function makeGenericDocument(blocks) {
     }
   };
 }
+
+test('candidate evaluator records deterministic quality metrics and penalizes duplicate blocks', () => {
+  const { evaluateCandidate } = loadModules();
+  const diverse = evaluateCandidate({
+    adapterId: 'generic',
+    blocks: [
+      { text: '第一段包含足够长的正文，用来验证候选质量评分。' },
+      { text: '第二段提供不同的信息，因此应该获得较高的内容多样性。' }
+    ]
+  });
+  const duplicated = evaluateCandidate({
+    adapterId: 'generic',
+    blocks: [
+      { text: '完全重复的正文片段。' },
+      { text: '完全重复的正文片段。' },
+      { text: '完全重复的正文片段。' }
+    ]
+  });
+
+  assert.equal(diverse.metrics.blockCount, 2);
+  assert.equal(diverse.metrics.uniqueRatio, 1);
+  assert.ok(diverse.score > duplicated.score);
+});
+
+test('candidate chooser prefers Readability on an exact quality tie', () => {
+  const { chooseCandidate } = loadModules();
+  const readability = { id: 'readability', score: 60, document: { adapterId: 'readability' } };
+  const generic = { id: 'generic', score: 60, document: { adapterId: 'generic' } };
+
+  assert.equal(chooseCandidate([generic, readability]), readability);
+});

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qwen 网页朗读 0.5.2 截图验收报告</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #171522;
+      --muted: #686478;
+      --line: #e8e4f2;
+      --violet: #6f55e8;
+      --green: #159b6a;
+      --paper: #ffffff;
+      --wash: #f5f3fa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--wash);
+      font: 15px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    main { width: min(1180px, calc(100% - 32px)); margin: 32px auto 56px; }
+    header, section { background: var(--paper); border: 1px solid var(--line); }
+    header { padding: 30px 32px; border-radius: 22px 22px 0 0; }
+    h1 { margin: 0 0 8px; font-size: clamp(26px, 4vw, 42px); letter-spacing: -.04em; }
+    h2 { margin: 0 0 16px; font-size: 20px; }
+    p { margin: 0; }
+    .lede { color: var(--muted); max-width: 780px; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 18px;
+      color: var(--green);
+      font-weight: 700;
+    }
+    .badge::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      border-top: 0;
+    }
+    .metric { padding: 22px; border-right: 1px solid var(--line); }
+    .metric:last-child { border-right: 0; }
+    .metric strong { display: block; font-size: 24px; color: var(--violet); }
+    .metric span { color: var(--muted); font-size: 13px; }
+    .evidence { padding: 28px; border-top: 0; }
+    .shots { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    figure { margin: 0; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: #faf9fd; }
+    img { display: block; width: 100%; height: auto; }
+    figcaption { padding: 14px 16px 16px; color: var(--muted); }
+    figcaption strong { display: block; color: var(--ink); margin-bottom: 3px; }
+    .findings { padding: 28px; border-top: 0; border-radius: 0 0 22px 22px; }
+    .finding { display: grid; grid-template-columns: 96px 1fr; gap: 18px; padding: 15px 0; border-top: 1px solid var(--line); }
+    .finding:first-of-type { border-top: 0; }
+    .finding b { color: var(--violet); }
+    .note { margin-top: 18px; padding: 14px 16px; border-left: 3px solid var(--violet); background: #f4f0ff; color: var(--muted); }
+    @media (max-width: 800px) {
+      .metrics, .shots { grid-template-columns: 1fr; }
+      .metric { border-right: 0; border-bottom: 1px solid var(--line); }
+      .finding { grid-template-columns: 1fr; gap: 3px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="badge">0.5.2 发布验收通过</div>
+      <h1>逐词动效与流式暂停</h1>
+      <p class="lede">2026-08-17 · 本报告记录隔离 Microsoft Edge 中的 UI Harness 测试状态，用于验证真实扩展界面与交互逻辑；截图不是 viva-la-vita 真实站点画面。</p>
+    </header>
+
+    <section class="metrics" aria-label="自动验证结果">
+      <div class="metric"><strong>317 / 317</strong><span>扩展自动测试</span></div>
+      <div class="metric"><strong>17 / 17</strong><span>Gateway 测试</span></div>
+      <div class="metric"><strong>3 / 3</strong><span>隔离 Edge Harness</span></div>
+      <div class="metric"><strong>2 × PASS</strong><span>UI Harness 连续复跑</span></div>
+      <div class="metric"><strong>48 / 48</strong><span>源码—dist SHA256 一致</span></div>
+    </section>
+
+    <section class="evidence">
+      <h2>截图证据</h2>
+      <div class="shots">
+        <figure>
+          <img src="2026-08-17-qwen-reader-v0.5.2-word-motion-playing.png" alt="流式朗读中，页面词语动效、正在朗读状态和暂停控件">
+          <figcaption><strong>流式朗读中</strong>当前词语使用动效聚焦；悬浮入口和主控均呈现暂停语义，状态显示“正在朗读”。</figcaption>
+        </figure>
+        <figure>
+          <img src="2026-08-17-qwen-reader-v0.5.2-word-motion-paused.png" alt="流式暂停后，当前词冻结、已暂停状态和继续播放控件">
+          <figcaption><strong>暂停已确认</strong>当前词保持冻结；悬浮入口和主控切换为继续播放图标，状态显示“已暂停”。</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="findings">
+      <h2>结论</h2>
+      <div class="finding"><b>#165 长段落</b><span>长共享段落的第一句改为精确 Range 映射，不再把整大段作为高亮兜底；逐词范围从第一句开始即可建立。</span></div>
+      <div class="finding"><b>流式暂停</b><span>流尚未开始出声时可以排队暂停；流已开始后暂停会冻结音频时钟和当前词，暂停期间的进度事件不会推动高亮。</span></div>
+      <div class="finding"><b>词语动效</b><span>新词进入与旧词退出分别保留动效阶段；停止、结束、报错会统一清理，且系统“减少动态效果”设置可关闭动画。</span></div>
+      <div class="finding"><b>发布完整性</b><span>0.5.2 正式包共 48 个文件，包含 content/page-highlight.css；Manifest/HTML 引用完整，无 eval 或远程脚本。</span></div>
+      <p class="note">证据边界：截图由仓库内 UI Harness 在全新隔离 Edge 用户目录中生成，后端与流式事件由测试桩驱动；真实站点 #165 的结论来自相同产品代码路径和针对性自动测试，不把测试页面截图表述为线上实测。</p>
+    </section>
+  </main>
+</body>
+</html>

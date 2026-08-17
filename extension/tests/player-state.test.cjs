@@ -275,3 +275,142 @@ test("playback admission gate rejects an older invocation after a newer seek beg
   gate.invalidate();
   assert.equal(gate.isCurrent(newer), false);
 });
+
+test("progressive queue update appends forum pages without resetting playback", () => {
+  let state = Player.reduce(Player.createInitialState(), {
+    type: "LOAD_START",
+    scanId: 7,
+    pageKey: "https://forum.example/topic/7",
+  });
+  state = Player.reduce(state, {
+    type: "LOAD_SUCCESS",
+    scanId: 7,
+    segments: sampleSegments(),
+    index: 1,
+  });
+  state = Player.reduce(state, { type: "AUDIO_PLAYING", sessionId: "play-7" });
+  const updated = Player.reduce(state, {
+    type: "QUEUE_UPDATE",
+    scanId: 7,
+    segments: [...sampleSegments(), { id: "p4", text: "后台补全" }],
+    index: 1,
+  });
+
+  assert.equal(updated.status, "playing");
+  assert.equal(updated.sessionId, "play-7");
+  assert.equal(updated.index, 1);
+  assert.equal(updated.current.id, "p2");
+  assert.equal(updated.segments.length, 4);
+});
+
+test("orb status synthesis follows operation priority and exposes accessible actions", () => {
+  assert.deepEqual(
+    Player.deriveOrbStatus({
+      stateStatus: "playing",
+      serviceStatus: "ready",
+      hasSegments: true,
+    }),
+    {
+      key: "playing",
+      priority: 80,
+      label: "正在朗读",
+      action: "pause",
+      busy: false,
+    },
+  );
+  assert.equal(
+    Player.deriveOrbStatus({
+      stateStatus: "playing",
+      serviceStatus: "offline",
+      hasSegments: true,
+    }).key,
+    "offline",
+  );
+  assert.equal(
+    Player.deriveOrbStatus({ stateStatus: "extracting", hasSegments: false }).key,
+    "scanning",
+  );
+  assert.equal(
+    Player.deriveOrbStatus({ stateStatus: "idle", hasSegments: false, serviceStatus: "ready" }).key,
+    "text-not-ready",
+  );
+  assert.equal(
+    Player.deriveOrbStatus({ stateStatus: "idle", hasSegments: false, serviceStatus: "connecting" }).key,
+    "connecting",
+  );
+  assert.equal(
+    Player.deriveOrbStatus({ stateStatus: "ready", hasSegments: true, serviceStatus: "ready" }).action,
+    "play",
+  );
+});
+
+test("orb exposes loading pause, queued pause, and in-flight control truthfully", () => {
+  assert.deepEqual(
+    Player.deriveOrbStatus({
+      stateStatus: "loading",
+      serviceStatus: "model-loading",
+      hasSegments: true,
+      canControlLoading: true,
+    }),
+    { key: "stream-starting", priority: 72, label: "正在加载模型", action: "pause", busy: true },
+  );
+  assert.equal(Player.deriveOrbStatus({
+    stateStatus: "loading", serviceStatus: "synthesizing", pauseQueued: true,
+  }).action, "resume");
+  assert.equal(Player.deriveOrbStatus({
+    stateStatus: "playing", serviceStatus: "playing", controlPending: "pause",
+  }).key, "pausing");
+  assert.equal(Player.deriveOrbStatus({
+    stateStatus: "paused", serviceStatus: "paused", controlPending: "resume",
+  }).key, "resuming");
+});
+
+test("two reader instances created at the same time cannot collide on client, playback, or request identity", () => {
+  const fixedNow = () => 1_700_000_000_000;
+  const uuidsA = [
+    "11111111-1111-4111-8111-111111111111",
+    "11111111-1111-4111-8111-111111111112",
+    "11111111-1111-4111-8111-111111111113",
+  ];
+  const uuidsB = [
+    "22222222-2222-4222-8222-222222222221",
+    "22222222-2222-4222-8222-222222222222",
+    "22222222-2222-4222-8222-222222222223",
+  ];
+  const first = Player.createIdentityFactory({
+    now: fixedNow,
+    crypto: { randomUUID: () => uuidsA.shift() },
+  });
+  const second = Player.createIdentityFactory({
+    now: fixedNow,
+    crypto: { randomUUID: () => uuidsB.shift() },
+  });
+
+  const identitiesA = [first("client"), first("playback"), first("request")];
+  const identitiesB = [second("client"), second("playback"), second("request")];
+
+  assert.equal(new Set([...identitiesA, ...identitiesB]).size, 6);
+  assert.match(identitiesA[0], /qwen-reader-client-11111111/u);
+  assert.match(identitiesB[1], /qwen-reader-playback-22222222/u);
+});
+
+test("identity fallback keeps per-instance entropy when randomUUID is unavailable", () => {
+  const first = Player.createIdentityFactory({
+    now: () => 42,
+    crypto: null,
+    random: (() => {
+      const values = [0.1, 0.2, 0.3, 0.4];
+      return () => values.shift();
+    })(),
+  });
+  const second = Player.createIdentityFactory({
+    now: () => 42,
+    crypto: null,
+    random: (() => {
+      const values = [0.5, 0.6, 0.7, 0.8];
+      return () => values.shift();
+    })(),
+  });
+
+  assert.notEqual(first("playback"), second("playback"));
+});
