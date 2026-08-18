@@ -167,6 +167,8 @@ if (typeof importScripts === 'function') {
       'reader:active-context',
       'reader:snapshot:get',
       'reader:command',
+      'reader:page-voices:get',
+      'reader:page-voices:apply',
     ].includes(type);
   }
 
@@ -784,6 +786,34 @@ if (typeof importScripts === 'function') {
       return Object.assign({}, sent, { target, command, snapshot });
     }
 
+    async function handlePageVoices(target, message) {
+      if (!target || target.tabId == null) {
+        return { ok: false, error: { code: 'popup_target_unavailable', message: '没有找到要调整配音的网页。' } };
+      }
+      const pageKey = String(message && message.pageKey || target.pageKey || '');
+      const payload = {
+        type: message.type === 'reader:page-voices:apply'
+          ? 'reader:page-context:apply'
+          : 'reader:page-context:get',
+        source: 'popup',
+        pageKey,
+      };
+      if (payload.type === 'reader:page-context:apply') {
+        const authorVoices = {};
+        (Array.isArray(message.assignments) ? message.assignments : []).forEach((assignment) => {
+          const authorId = String(assignment && assignment.authorId || '').trim();
+          const voice = String(assignment && assignment.voice || '').trim();
+          if (authorId && voice) authorVoices[authorId] = voice;
+        });
+        payload.context = { pageKey, authorVoices };
+      }
+      const sent = await sendToTarget(target, payload);
+      if (!sent.ok) return sent;
+      const body = sent.response && typeof sent.response === 'object' ? sent.response : {};
+      if (body.ok === false) return body;
+      return Object.assign({ ok: true }, body);
+    }
+
     async function handleReaderMessage(message) {
       // Opening a new toolbar popup always starts from the tab that is active
       // at that moment. Follow-up snapshot and command messages carry tabId,
@@ -821,6 +851,9 @@ if (typeof importScripts === 'function') {
           }
           return Object.assign({}, body, { ok: true, snapshot: result.snapshot || snapshotFromMessage(body) || null });
         }
+        case 'reader:page-voices:get':
+        case 'reader:page-voices:apply':
+          return handlePageVoices(target, message);
         default:
           return { ok: false, error: { code: 'unknown_message', message: '不支持的网页朗读请求。' } };
       }
@@ -844,6 +877,8 @@ if (typeof importScripts === 'function') {
         case 'reader:active-context':
         case 'reader:snapshot:get':
         case 'reader:command':
+        case 'reader:page-voices:get':
+        case 'reader:page-voices:apply':
           return handleReaderMessage(message);
         default:
           return { ok: false, error: { code: 'unknown_message', message: '不支持的 Popup 请求。' } };

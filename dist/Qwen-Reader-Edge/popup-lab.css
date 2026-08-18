@@ -8,7 +8,7 @@
 .qr-lab-card { overflow: hidden; border: 1px solid rgba(83, 57, 139, .14); border-radius: 23px; background: #f7f5fb; box-shadow: 0 17px 46px rgba(45, 29, 76, .12); }
 .qr-lab-card > h2 { margin: 0; padding: 13px 16px; border-bottom: 1px solid #e7e2ef; color: #675d74; background: #fff; font-size: 12px; }
 .qr-lab-card .qr-popup-root { width: 100%; }
-.qr-lab-editor-card { width: min(100%, 980px); margin-top: 28px; overflow: hidden; border: 1px solid rgba(83, 57, 139, .14); border-radius: 23px; background: #fff; box-shadow: 0 17px 46px rgba(45, 29, 76, .1); }
+.qr-lab-editor-card { width: 390px; margin-top: 28px; overflow: hidden; border: 1px solid rgba(83, 57, 139, .14); border-radius: 23px; background: #f7f5fb; box-shadow: 0 17px 46px rgba(45, 29, 76, .1); }
 .qr-lab-editor-card > h2 { margin: 0; padding: 14px 18px; border-bottom: 1px solid #e7e2ef; color: #675d74; background: #f7f5fb; font-size: 12px; }
 .qr-lab-editor-card .qr-page-root { min-height: 0; }
 @media (max-width: 1260px) { .qr-lab-grid { grid-template-columns: repeat(2, minmax(340px, 390px)); } }

@@ -34,7 +34,9 @@
 
   function normalize(value) {
     const next = Object.assign({}, defaults, value || {});
-    next.clickToRead = next.clickToRead !== false;
+    next.clickToRead = Number(value && value.interactionVersion || 0) < 3
+      ? false
+      : next.clickToRead === true;
     next.preset = oneOf(next.preset || next.voiceMode, ['op-exclusive', 'stable-author', 'round-robin'], 'op-exclusive');
     next.readingFocus = oneOf(next.readingFocus, ['off', 'line', 'sentence'], 'sentence');
     next.readingFocusStyle = oneOf(next.readingFocusStyle, ['soft-glow', 'edge-glow', 'paper-wash', 'underline-guide'], 'soft-glow');
@@ -46,7 +48,7 @@
     next.opVoice = String(next.opVoice || defaults.opVoice || '邵思萌').trim();
     next.replyVoices = unique(Array.isArray(next.replyVoices) ? next.replyVoices : defaults.replyVoices);
     next.replyVoices = next.replyVoices.filter((voice) => voice !== next.opVoice);
-    next.interactionVersion = 2;
+    next.interactionVersion = 3;
     return next;
   }
 

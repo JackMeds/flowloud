@@ -4,12 +4,21 @@
   const api = globalThis.chrome;
   let context = null;
   let snapshot = null;
+  let view = 'reader';
+  let pageContext = null;
 
   function request(type, payload) {
     return api.runtime.sendMessage(Object.assign({ type }, payload || {}));
   }
 
   function render(message) {
+    if (view === 'page-voices') {
+      globalThis.QwenPopupView.mountPageVoices(root, Object.assign({}, pageContext || {}, {
+        compact: true,
+        error: message || ''
+      }));
+      return;
+    }
     if (!context || !context.tabId) {
       globalThis.QwenPopupView.mountPopup(root, { empty: true, message: message || '正在读取当前网页…' });
       return;
@@ -32,8 +41,40 @@
     const detail = event.detail || {};
     try {
       if (detail.action === 'open-page-editor') {
-        const response = await request('reader:page-editor:open', { tabId: context && context.tabId, pageKey: context && context.pageKey });
-        if (response && response.ok === false) throw new Error(response.error && response.error.message || '无法打开本页配音。');
+        const response = await request('reader:page-voices:get', {
+          tabId: context && context.tabId,
+          pageKey: snapshot && snapshot.pageKey || context && context.pageKey
+        });
+        if (response && response.ok === false) throw new Error(response.error && response.error.message || '无法读取本页配音。');
+        pageContext = response && response.pageContext || response;
+        view = 'page-voices';
+        render();
+        return;
+      }
+      if (detail.action === 'cancel-page-voices') {
+        view = 'reader';
+        pageContext = null;
+        render();
+        return;
+      }
+      if (detail.action === 'save-page-voices') {
+        const assignments = Array.from(root.querySelectorAll('[data-author-id]'))
+          .filter((select) => Boolean(select.value))
+          .map((select) => ({ authorId: select.dataset.authorId, voice: select.value }));
+        const response = await request('reader:page-voices:apply', {
+          tabId: context && context.tabId,
+          pageKey: pageContext && pageContext.pageKey || snapshot && snapshot.pageKey || context && context.pageKey,
+          assignments
+        });
+        if (response && response.ok === false) {
+          pageContext = response.pageContext || pageContext;
+          render(response.error && response.error.message || '本页配音没有保存，请重试。');
+          return;
+        }
+        pageContext = null;
+        view = 'reader';
+        snapshot = await request('reader:snapshot:get', { tabId: context && context.tabId });
+        render('本页配音已更新。');
         return;
       }
       if (detail.action === 'open-options') {
@@ -65,7 +106,7 @@
     if (!context || !context.tabId) return;
     try {
       snapshot = await request('reader:snapshot:get', { tabId: context.tabId });
-      render();
+      if (view === 'reader') render();
     } catch (_) {
       // A transient background restart should not replace a usable Popup with
       // an error while the user is interacting with it.

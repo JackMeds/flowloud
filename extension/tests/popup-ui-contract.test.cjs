@@ -17,15 +17,15 @@ test('popup and the comparison lab load the shared production renderer and CSS',
   assert.doesNotMatch(lab, /<script[^>]*>[^<]/);
 });
 
-test('popup controller uses the B+C message contract and keeps advanced editing separate', () => {
+test('popup controller keeps current-page voice editing inside the native popup', () => {
   const source = read('popup.js');
-  for (const type of ['reader:active-context', 'reader:snapshot:get', 'reader:command', 'reader:page-editor:open']) {
+  for (const type of ['reader:active-context', 'reader:snapshot:get', 'reader:command', 'reader:page-voices:get', 'reader:page-voices:apply']) {
     assert.match(source, new RegExp(type));
   }
-  assert.match(read('page-voices.js'), /reader:page-context:get/);
-  assert.match(read('page-voices.js'), /reader:page-context:apply/);
+  assert.doesNotMatch(source, /reader:page-editor:open/);
   assert.match(read('popup-view.js'), /mountPopup/);
   assert.match(read('popup-view.js'), /mountPageVoices/);
+  assert.match(read('popup-view.js'), /qr-page-root-compact/);
 });
 
 test('popup renderer accepts a compact snapshot without the full segment queue or fake controls', () => {
@@ -63,6 +63,7 @@ test('page editor trusts contextId, keeps global voice choices implicit, and onl
 test('popup commands carry the current page identity', () => {
   const source = read('popup.js');
   assert.match(source, /pageKey: snapshot && snapshot\.pageKey \|\| context && context\.pageKey/);
+  assert.match(source, /pageKey: pageContext && pageContext\.pageKey/);
 });
 
 test('the popup has no legacy sidebar or floating-orb surface', () => {

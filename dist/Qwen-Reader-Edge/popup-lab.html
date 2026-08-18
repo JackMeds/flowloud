@@ -9,11 +9,11 @@
 </head>
 <body class="qr-lab-body">
   <main class="qr-lab-shell">
-    <header class="qr-lab-header"><p>QWEN READER · 真实组件预览</p><h1>Popup B+C</h1><span>Popup 状态与本页配音编辑器共用生产 renderer 与 CSS；不是生成图片。</span></header>
+    <header class="qr-lab-header"><p>QWEN READER · 真实组件预览</p><h1>Popup B+C</h1><span>主控制与本页配音都在同一个原生 Popup 内切换，共用生产 renderer 与 CSS；不是生成图片。</span></header>
     <section id="popup-lab-root" class="qr-lab-grid"></section>
     <section class="qr-lab-editor-card">
-      <h2>C · 从 Popup 打开的本页配音编辑器</h2>
-      <div id="page-voices-lab-root"></div>
+      <h2>C · Popup 内的本页配音状态</h2>
+      <div id="page-voices-lab-root" class="qr-popup-root"></div>
     </section>
   </main>
   <script src="popup-view.js"></script>

@@ -97,7 +97,7 @@
       const copy = element('div');
       copy.append(element('h2', '', '本页配音'));
       copy.append(element('p', '', `${authors.length} 位作者，已按本页规则分配音色。`));
-      titleRow.append(copy, button('qr-link-button', '编辑', 'open-page-editor'));
+      titleRow.append(copy, button('qr-link-button', '在弹窗内调整', 'open-page-editor'));
       summary.append(titleRow);
       const chips = element('div', 'qr-voice-chips');
       authors.slice(0, 3).forEach((author) => chips.append(element('span', 'qr-voice-chip', `${author.name} · ${author.voice || '默认'}`)));
@@ -114,13 +114,16 @@
     const authors = model && model.authors || [];
     const voices = model && model.voices || [];
     const authorVoices = model && model.authorVoices || {};
+    const compact = Boolean(model && model.compact);
     root.replaceChildren();
-    const shell = element('main', 'qr-page-root');
+    const shell = element('main', `qr-page-root${compact ? ' qr-page-root-compact' : ''}`);
     const header = element('header', 'qr-page-header');
     const title = element('div', 'qr-page-title-block');
-    title.append(element('p', 'qr-kicker', 'QWEN READER · 本页配音'));
-    title.append(element('h1', '', model && model.title || '本页配音'));
-    title.append(element('p', 'qr-page-subtitle', '只影响当前网页。全局音色请在扩展设置中管理。'));
+    title.append(element('p', 'qr-kicker', compact ? '本页配音' : 'QWEN READER · 本页配音'));
+    title.append(element('h1', '', compact ? '调整作者音色' : model && model.title || '本页配音'));
+    title.append(element('p', 'qr-page-subtitle', compact
+      ? '直接在这里修改，只影响当前网页；留空即跟随全局策略。'
+      : '只影响当前网页。全局音色请在扩展设置中管理。'));
     header.append(title, element('span', 'qr-author-count', `${authors.length} 位作者`));
     shell.append(header);
     if (model && model.error) {

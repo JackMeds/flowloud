@@ -30,14 +30,14 @@
       Defaults.replyVoices && Defaults.replyVoices.length
         ? Defaults.replyVoices.slice()
         : ["qwen-clone"],
-    clickToRead: true,
+    clickToRead: false,
     readingFocus: "sentence",
     readingFocusStyle: Defaults.readingFocusStyle || "soft-glow",
     wordHighlightStyle: Defaults.wordHighlightStyle || "edge-dissolve",
     wordHighlightColor: Defaults.wordHighlightColor || "#6f58bd",
     wordHighlightGlow: Defaults.wordHighlightGlow ?? 48,
     wordHighlightSpeed: Defaults.wordHighlightSpeed ?? 1,
-    interactionVersion: 2,
+    interactionVersion: 3,
   };
 
   const host = document.createElement("div");
@@ -111,14 +111,14 @@
   let state = Player.createInitialState();
   let settings = Object.assign({}, DEFAULT_SETTINGS, {
     replyVoices: (DEFAULT_SETTINGS.replyVoices || []).slice(),
-    clickToRead: DEFAULT_SETTINGS.clickToRead !== false,
+    clickToRead: DEFAULT_SETTINGS.clickToRead === true,
     readingFocus: normalizeReadingFocus(DEFAULT_SETTINGS.readingFocus),
     readingFocusStyle: normalizeReadingFocusStyle(DEFAULT_SETTINGS.readingFocusStyle),
     wordHighlightStyle: normalizeWordHighlightStyle(DEFAULT_SETTINGS.wordHighlightStyle),
     wordHighlightColor: normalizeHighlightColor(DEFAULT_SETTINGS.wordHighlightColor),
     wordHighlightGlow: clampNumber(DEFAULT_SETTINGS.wordHighlightGlow, 0, 100, 48),
     wordHighlightSpeed: clampNumber(DEFAULT_SETTINGS.wordHighlightSpeed, .6, 1.8, 1),
-    interactionVersion: 2,
+    interactionVersion: 3,
   });
   let knownVoices = unique([
     settings.opVoice,
@@ -622,8 +622,8 @@
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
     const before = JSON.stringify(settings);
     const next = Object.assign({}, settings, value);
-    next.clickToRead = Number(value.interactionVersion || 0) < 2
-      ? true
+    next.clickToRead = Number(value.interactionVersion || 0) < 3
+      ? false
       : Boolean(next.clickToRead);
     next.readingFocus = normalizeReadingFocus(next.readingFocus);
     next.readingFocusStyle = normalizeReadingFocusStyle(next.readingFocusStyle);
@@ -631,7 +631,7 @@
     next.wordHighlightColor = normalizeHighlightColor(next.wordHighlightColor);
     next.wordHighlightGlow = clampNumber(next.wordHighlightGlow, 0, 100, 48);
     next.wordHighlightSpeed = clampNumber(next.wordHighlightSpeed, .6, 1.8, 1);
-    next.interactionVersion = 2;
+    next.interactionVersion = 3;
     next.opVoice = String(next.opVoice || DEFAULT_SETTINGS.opVoice || "邵思萌").trim();
     const requestedReplies = Array.isArray(value.replyVoices)
       ? value.replyVoices

@@ -70,7 +70,7 @@
         clickToRead: true,
         orbEdge: "right",
         orbY: 0.82,
-        interactionVersion: 2
+        interactionVersion: 3
       }
     };
     window.QwenReaderText = {
@@ -677,7 +677,7 @@
         tabs[0].click();
         const clickToRead = root.querySelector('[data-setting="clickToRead"]');
         if (!clickToRead) throw new Error("page click-to-read control missing");
-        if (!clickToRead.checked) throw new Error("page click-to-read should default on after the interaction upgrade");
+        if (!clickToRead.checked) throw new Error("explicit click-to-read opt-in was not preserved");
         const synthBeforePageClick = window.__qrHarness.synthCalls;
         const replacementParagraph = firstParagraph.cloneNode(true);
         firstParagraph.replaceWith(replacementParagraph);

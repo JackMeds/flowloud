@@ -8,6 +8,7 @@ const html = fs.readFileSync(path.join(extensionRoot, 'voice-studio.html'), 'utf
 const source = fs.readFileSync(path.join(extensionRoot, 'settings-center.js'), 'utf8');
 const css = fs.readFileSync(path.join(extensionRoot, 'voice-studio.css'), 'utf8');
 const reader = fs.readFileSync(path.join(extensionRoot, 'content', 'reader.js'), 'utf8');
+const defaults = fs.readFileSync(path.join(extensionRoot, 'shared', 'defaults.js'), 'utf8');
 
 test('options page unifies reading settings and the complete voice studio', () => {
   assert.match(html, /data-settings-section="reader"/u);
@@ -39,4 +40,13 @@ test('visual setting changes update live reading without interrupting playback',
   assert.match(reader, /const\s+previousVoiceAssignment\s*=\s*voiceAssignmentSignature\(settings\)/u);
   assert.match(reader, /if\s*\(!voiceAssignmentChanged\)\s*\{[\s\S]*?refreshReadingFocus\(\)[\s\S]*?refreshActiveWordStyle\(\)[\s\S]*?render\(\)[\s\S]*?return/u);
   assert.match(reader, /if\s*\(!voiceAssignmentChanged\)[\s\S]*?return;[\s\S]*?await\s+stopPlayback\(\)/u);
+});
+
+test('page click-to-read is opt-in and never cancels the site click event', () => {
+  assert.match(defaults, /clickToRead:\s*false/u);
+  assert.match(defaults, /interactionVersion:\s*3/u);
+  assert.match(reader, /Number\(value\.interactionVersion \|\| 0\) < 3[\s\S]*?\? false/u);
+  const clickHandler = reader.slice(reader.indexOf('async function handlePageClick'), reader.indexOf('function handlePagePointerMove'));
+  assert.doesNotMatch(clickHandler, /preventDefault|stopPropagation|stopImmediatePropagation/u);
+  assert.match(clickHandler, /isInteractivePageTarget\(target\)/u);
 });

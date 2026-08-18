@@ -203,6 +203,28 @@ test('installed background bridges the popup reader contract and page assignment
   assert.equal(commandError.error.code, 'reader_blocked');
   assert.equal(commandError.snapshot.status, 'error');
 
+  const popupPageContext = await call({
+    type: 'reader:page-voices:get',
+    tabId: 7,
+    pageKey: 'https://example.test/topic',
+  });
+  assert.equal(popupPageContext.ok, true);
+  assert.equal(sent.at(-1).message.type, 'reader:page-context:get');
+  assert.equal(sent.at(-1).message.pageKey, 'https://example.test/topic');
+
+  const popupApply = await call({
+    type: 'reader:page-voices:apply',
+    tabId: 7,
+    pageKey: 'https://example.test/topic',
+    assignments: [
+      { authorId: 'op', voice: '旁白' },
+      { authorId: 'follow', voice: '' },
+    ],
+  });
+  assert.equal(popupApply.ok, true);
+  assert.equal(sent.at(-1).message.type, 'reader:page-context:apply');
+  assert.deepEqual(sent.at(-1).message.context.authorVoices, { op: '旁白' });
+
   const editor = await call({ type: 'reader:page-editor:open' });
   const contextId = editor.context.contextId;
   const beforeRejected = sent.length;

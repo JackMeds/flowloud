@@ -16,7 +16,7 @@
     voiceMode: 'op-exclusive',
     opVoice: '邵思萌',
     replyVoices: ['qwen-clone'],
-    clickToRead: true,
+    clickToRead: false,
     readingFocus: 'sentence',
     readingFocusStyle: 'soft-glow',
     wordHighlightStyle: 'edge-dissolve',
@@ -25,6 +25,6 @@
     wordHighlightSpeed: 1,
     orbEdge: 'right',
     orbY: 0.82,
-    interactionVersion: 2
+    interactionVersion: 3
   });
 })(globalThis);

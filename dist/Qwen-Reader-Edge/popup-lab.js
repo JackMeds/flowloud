@@ -41,7 +41,8 @@
       title: base.title,
       authors: base.authors.map((author) => Object.assign({}, author, { effectiveVoice: author.voice })),
       voices: ['邵思萌', '清朗', '温和', '低沉旁白'],
-      authorVoices: { op: '邵思萌', a2: '温和' }
+      authorVoices: { op: '邵思萌', a2: '温和' },
+      compact: true
     }
   );
 })();
