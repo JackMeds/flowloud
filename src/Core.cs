@@ -20,6 +20,13 @@ namespace QwenTrayGateway
         public int IdleMinutes { get; set; }
         public bool AutoUnload { get; set; }
         public int BackendStartTimeoutSeconds { get; set; }
+        // Limits apply to both the legacy buffered endpoint and the streaming endpoint.
+        // They are intentionally conservative because the gateway is a loopback service
+        // that owns a single GPU-backed backend process.
+        public int MaxConcurrentRequests { get; set; }
+        public int RequestTimeoutSeconds { get; set; }
+        public int MaxStreamBytes { get; set; }
+        public int StreamChunkBytes { get; set; }
         public string VoiceReferenceWav { get; set; }
         public string VoiceName { get; set; }
         public string VoiceAlias { get; set; }
@@ -40,6 +47,10 @@ namespace QwenTrayGateway
             config.IdleMinutes = 10;
             config.AutoUnload = true;
             config.BackendStartTimeoutSeconds = 60;
+            config.MaxConcurrentRequests = 2;
+            config.RequestTimeoutSeconds = 120;
+            config.MaxStreamBytes = 64 * 1024 * 1024;
+            config.StreamChunkBytes = 32 * 1024;
             config.VoiceReferenceWav = Path.Combine(runtimeDirectory, "voices", "邵思萌", "reference.wav");
             config.VoiceName = "邵思萌";
             config.VoiceAlias = "qwen-clone";
@@ -62,6 +73,7 @@ namespace QwenTrayGateway
                 Save(path, config);
             }
 
+            ApplyDefaults(config);
             Validate(config);
             Directory.CreateDirectory(config.LogDirectory);
             return config;
@@ -100,10 +112,36 @@ namespace QwenTrayGateway
             {
                 throw new InvalidDataException("BackendStartTimeoutSeconds must be at least 5.");
             }
+            if (config.MaxConcurrentRequests < 1 || config.MaxConcurrentRequests > 16)
+            {
+                throw new InvalidDataException("MaxConcurrentRequests must be between 1 and 16.");
+            }
+            if (config.RequestTimeoutSeconds < 5 || config.RequestTimeoutSeconds > 1800)
+            {
+                throw new InvalidDataException("RequestTimeoutSeconds must be between 5 and 1800.");
+            }
+            if (config.MaxStreamBytes < 1024 * 1024 || config.MaxStreamBytes > 512 * 1024 * 1024)
+            {
+                throw new InvalidDataException("MaxStreamBytes must be between 1 MiB and 512 MiB.");
+            }
+            if (config.StreamChunkBytes < 1024 || config.StreamChunkBytes > 1024 * 1024)
+            {
+                throw new InvalidDataException("StreamChunkBytes must be between 1 KiB and 1 MiB.");
+            }
             if (string.IsNullOrWhiteSpace(config.ManagementToken))
             {
                 throw new InvalidDataException("ManagementToken is required.");
             }
+        }
+
+        private static void ApplyDefaults(GatewayConfig config)
+        {
+            // gateway.json files created by older versions do not contain the streaming
+            // fields. Treat zero as "not configured" so upgrades remain seamless.
+            if (config.MaxConcurrentRequests <= 0) { config.MaxConcurrentRequests = 2; }
+            if (config.RequestTimeoutSeconds <= 0) { config.RequestTimeoutSeconds = 120; }
+            if (config.MaxStreamBytes <= 0) { config.MaxStreamBytes = 64 * 1024 * 1024; }
+            if (config.StreamChunkBytes <= 0) { config.StreamChunkBytes = 32 * 1024; }
         }
 
         private static string CreateToken()
@@ -131,6 +169,10 @@ namespace QwenTrayGateway
             {
                 return true;
             }
+            if (normalizedMethod == "POST" && normalizedPath == "/v1/audio/speech/stream")
+            {
+                return true;
+            }
             if (normalizedMethod == "GET" &&
                 (normalizedPath == "/v1/models" || normalizedPath == "/v1/audio/voices"))
             {
@@ -142,6 +184,55 @@ namespace QwenTrayGateway
             }
             return normalizedMethod == "DELETE" &&
                    normalizedPath.StartsWith("/v1/audio/voices/", StringComparison.Ordinal);
+        }
+
+        public static bool IsSpeechStream(string method, string path)
+        {
+            return string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(StripQuery(path), "/v1/audio/speech/stream", StringComparison.Ordinal);
+        }
+
+        public static bool IsSpeechCancel(string method, string path)
+        {
+            return string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(StripQuery(path), "/v1/audio/speech/cancel", StringComparison.Ordinal);
+        }
+
+        public static bool IsSpeechStatus(string method, string path)
+        {
+            if (!string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+            string normalizedPath = StripQuery(path);
+            return normalizedPath.StartsWith("/v1/audio/speech/status/", StringComparison.Ordinal) &&
+                   normalizedPath.Length > "/v1/audio/speech/status/".Length;
+        }
+
+        public static bool RequiresTrustedClient(string method, string path)
+        {
+            return RequiresBackend(method, path) || IsSpeechCancel(method, path) || IsSpeechStatus(method, path);
+        }
+
+        public static bool IsSafeRequestId(string value)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length > 128)
+            {
+                return false;
+            }
+            for (int index = 0; index < value.Length; index++)
+            {
+                char character = value[index];
+                if ((character >= 'a' && character <= 'z') ||
+                    (character >= 'A' && character <= 'Z') ||
+                    (character >= '0' && character <= '9') ||
+                    character == '-' || character == '_' || character == '.' || character == ':')
+                {
+                    continue;
+                }
+                return false;
+            }
+            return true;
         }
 
         public static bool IsAuthorized(string expected, string provided)

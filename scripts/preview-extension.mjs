@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 function parseArgs(argv) {
   const values = {};
@@ -74,6 +74,25 @@ const lab = await context.newPage();
 await lab.goto(`${extensionOrigin}/popup-lab.html`, { waitUntil: 'domcontentloaded' });
 await lab.screenshot({ path: path.join(output, 'popup-lab.png'), fullPage: true });
 
+// The page harness loads the production content reader and its real CSS in a
+// deterministic article fixture. This captures the other half of B+C: the
+// active-only mini player plus the inline author/voice and word indicators.
+const harnessBase = pathToFileURL(path.join(extensionRoot, 'tests', 'browser', 'ui-harness.html')).href;
+async function captureReaderHarness(name, query) {
+  const page = await context.newPage();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(`${harnessBase}${query || ''}`, { waitUntil: 'load' });
+  await page.waitForFunction(() => document.documentElement.dataset.testStatus === 'pass', null, { timeout: 15000 });
+  await page.waitForTimeout(350);
+  const result = await page.locator('#test-result').textContent();
+  await page.screenshot({ path: path.join(output, name), fullPage: true });
+  await page.close();
+  return result;
+}
+
+const readerPlaying = await captureReaderHarness('reader-playing.png', '?audit=playing');
+const readerStopped = await captureReaderHarness('reader-stopped.png', '');
+
 let actionPopup = null;
 let actionPopupMode = 'direct-extension-page';
 let actionPopupError = null;
@@ -103,6 +122,7 @@ const report = {
   output,
   actionPopupMode,
   actionPopupError,
+  readerHarness: { playing: readerPlaying, stopped: readerStopped },
   manualSmokeTest: actionPopupMode === 'native-action-popup'
     ? '仍需人工确认工具栏锚点和失焦自动关闭。'
     : 'openPopup 自动化不可用；需人工确认工具栏锚点和失焦自动关闭。',

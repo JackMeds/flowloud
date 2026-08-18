@@ -38,12 +38,141 @@ test('synthesize sends the fixed local WAV request and returns a WAV Blob', asyn
   assert.deepEqual(body, {
     input: '你好，世界。',
     voice: '邵思萌',
-    model: 'qwen3-tts-1.7b-base',
-    response_format: 'wav',
+    model: 'untrusted-model',
+    response_format: 'mp3',
   });
   assert.equal(result.mimeType, 'audio/wav');
   assert.equal(result.blob.type, 'audio/wav');
   assert.deepEqual([...new Uint8Array(await result.blob.arrayBuffer())], [82, 73, 70, 70]);
+});
+
+test('synthesizeStream negotiates a readable stream and keeps the trusted request contract', async () => {
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array([82, 73, 70, 70]));
+      controller.close();
+    },
+  });
+  const fake = createFetch([new Response(body, {
+    status: 200,
+    headers: { 'content-type': 'audio/wav' },
+  })]);
+  const client = createApiClient({ fetchImpl: fake.fetchImpl });
+
+  const result = await client.synthesizeStream({ input: '流式你好。', voice: '旁白' });
+
+  assert.equal(fake.calls.length, 1);
+  assert.equal(fake.calls[0].url, 'http://127.0.0.1:7811/v1/audio/speech/stream');
+  assert.equal(fake.calls[0].options.headers['x-qwen-reader-client'], 'qwen-reader-extension-v1');
+  assert.deepEqual(JSON.parse(fake.calls[0].options.body), {
+    input: '流式你好。',
+    voice: '旁白',
+    model: 'qwen3-tts-1.7b-base',
+    response_format: 'wav',
+    stream: true,
+  });
+  assert.equal(typeof result.stream.getReader, 'function');
+  assert.equal(client.streamCapability(), 'supported');
+});
+
+test('synthesizeStream remembers an unavailable endpoint and exposes a stable fallback code', async () => {
+  const fake = createFetch([new Response(JSON.stringify({ error: { message: 'not found' } }), {
+    status: 404,
+    headers: { 'content-type': 'application/json' },
+  })]);
+  const client = createApiClient({ fetchImpl: fake.fetchImpl });
+
+  await assert.rejects(
+    client.synthesizeStream({ input: '旧网关' }),
+    (error) => error.code === 'stream_unsupported',
+  );
+  await assert.rejects(
+    client.synthesizeStream({ input: '旧网关再次请求' }),
+    (error) => error.code === 'stream_unsupported',
+  );
+  assert.equal(fake.calls.length, 1);
+  assert.equal(client.streamCapability(), 'unsupported');
+});
+
+test('speech identity is sanitized consistently across headers and stream request body', async () => {
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array([82, 73, 70, 70]));
+      controller.close();
+    },
+  });
+  const fake = createFetch([new Response(body, {
+    status: 200,
+    headers: { 'content-type': 'audio/wav' },
+  })]);
+  const client = createApiClient({ fetchImpl: fake.fetchImpl });
+
+  await client.synthesizeStream({
+    input: '带身份的流',
+    voice: '旁白',
+    requestId: ' req/stream\r\nunsafe ',
+    playbackId: 'playback:42',
+  });
+
+  const call = fake.calls[0];
+  assert.equal(call.options.headers['x-qwen-request-id'], 'req_stream__unsafe');
+  assert.equal(call.options.headers['x-qwen-playback-id'], 'playback:42');
+  assert.deepEqual(JSON.parse(call.options.body), {
+    input: '带身份的流',
+    voice: '旁白',
+    model: 'qwen3-tts-1.7b-base',
+    response_format: 'wav',
+    stream: true,
+    request_id: 'req_stream__unsafe',
+    playback_id: 'playback:42',
+  });
+});
+
+test('health capabilities are queried and suppress a stream probe when explicitly unsupported', async () => {
+  const fake = createFetch([new Response(JSON.stringify({
+    gateway: 'running',
+    capabilities: { stream: false, transportStreaming: false },
+  }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })]);
+  const client = createApiClient({ fetchImpl: fake.fetchImpl });
+
+  await client.status();
+  assert.equal(client.streamCapability(), 'unsupported');
+  await assert.rejects(
+    client.synthesizeStream({ input: '不要探测' }),
+    (error) => error.code === 'stream_unsupported',
+  );
+  assert.equal(fake.calls.length, 1);
+  assert.equal(fake.calls[0].url, 'http://127.0.0.1:7811/health');
+});
+
+test('speech cancel and status APIs use the same safe request and playback identity', async () => {
+  const json = (value, status = 200) => new Response(JSON.stringify(value), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+  const fake = createFetch([
+    json({ status: 'cancellation_requested', request_id: 'r-1', playback_id: 'p-1' }),
+    json({ status: 'active', request_id: 'r-1', playback_id: 'p-1' }),
+  ]);
+  const client = createApiClient({ fetchImpl: fake.fetchImpl });
+
+  const cancelled = await client.cancel({ requestId: 'r-1', playbackId: 'p-1' });
+  const current = await client.speechStatus({ requestId: 'r-1', playbackId: 'p-1' });
+
+  assert.equal(cancelled.status, 'cancellation_requested');
+  assert.equal(current.status, 'active');
+  assert.equal(fake.calls[0].url, 'http://127.0.0.1:7811/v1/audio/speech/cancel');
+  assert.equal(fake.calls[0].options.headers['x-qwen-request-id'], 'r-1');
+  assert.equal(fake.calls[0].options.headers['x-qwen-playback-id'], 'p-1');
+  assert.deepEqual(JSON.parse(fake.calls[0].options.body), {
+    request_id: 'r-1', playback_id: 'p-1',
+  });
+  assert.equal(fake.calls[1].url, 'http://127.0.0.1:7811/v1/audio/speech/status/r-1');
+  assert.equal(fake.calls[1].options.headers['x-qwen-request-id'], 'r-1');
+  assert.equal(fake.calls[1].options.headers['x-qwen-playback-id'], 'p-1');
 });
 
 test('ensureLocalVoices only registers locally saved profiles absent from the server', async () => {
@@ -291,8 +420,14 @@ test('background sends browser-saved profiles to the offscreen voice library', a
   assert.deepEqual(result, {
     ok: true,
     voices: [
-      { name: '邵思萌', kind: 'registered' },
-      { name: '旁白', kind: 'registered', local: true },
+      {
+        name: '邵思萌', kind: 'registered', local: false, editable: false,
+        readOnly: true, source: 'backend',
+      },
+      {
+        name: '旁白', kind: 'registered', local: true, editable: true,
+        readOnly: false, source: 'browser', sourceFileName: '', durationSeconds: 0, refText: '',
+      },
     ],
   });
 });

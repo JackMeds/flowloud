@@ -1,0 +1,959 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qwen Reader · 逐词动效设计实验室</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1f2330;
+      --muted: #7c8293;
+      --line: rgba(54, 61, 80, .1);
+      --panel: rgba(255, 255, 255, .8);
+      --purple: #7658d8;
+      --blue: #4a83dc;
+      --cyan: #48a9c8;
+      --speed: 1;
+    }
+
+    @property --silk-angle {
+      syntax: "<angle>";
+      inherits: false;
+      initial-value: 10deg;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 0%, rgba(122, 91, 218, .09), transparent 32rem),
+        radial-gradient(circle at 94% 24%, rgba(61, 155, 191, .08), transparent 34rem),
+        #f4f5f9;
+      font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button,
+    input { font: inherit; }
+
+    .page {
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 58px 0 70px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 28px;
+      align-items: end;
+      margin-bottom: 30px;
+    }
+
+    .eyebrow {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin: 0 0 13px;
+      color: #6950bf;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      width: 22px;
+      height: 1px;
+      content: "";
+      background: currentColor;
+    }
+
+    h1 {
+      margin: 0;
+      font-family: "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+      font-size: clamp(27px, 4vw, 44px);
+      font-weight: 650;
+      letter-spacing: -.045em;
+    }
+
+    .intro {
+      max-width: 700px;
+      margin: 14px 0 0;
+      color: #6f7585;
+      font-size: 14px;
+      line-height: 1.8;
+    }
+
+    .controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 7px;
+      border: 1px solid rgba(56, 62, 81, .09);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, .68);
+      box-shadow: 0 12px 32px rgba(39, 43, 60, .05);
+      backdrop-filter: blur(18px);
+    }
+
+    .play-button {
+      display: flex;
+      min-width: 108px;
+      height: 42px;
+      gap: 9px;
+      align-items: center;
+      padding: 5px 11px 5px 5px;
+      border: 0;
+      border-radius: 13px;
+      color: #343845;
+      background: rgba(245, 246, 249, .76);
+      cursor: pointer;
+      transition: transform 180ms ease, background 180ms ease;
+    }
+
+    .play-button:hover { background: rgba(238, 235, 248, .92); transform: translateY(-1px); }
+    .play-button:active { transform: translateY(0) scale(.97); }
+
+    .play-icon-shell {
+      display: grid;
+      flex: 0 0 auto;
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
+      color: #fff;
+      background: #282b35;
+      box-shadow: 0 5px 12px rgba(39, 42, 54, .14);
+      place-items: center;
+    }
+
+    .play-icon { width: 13px; height: 13px; fill: currentColor; }
+
+    .play-copy {
+      display: grid;
+      gap: 1px;
+      text-align: left;
+    }
+
+    .play-copy strong {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .03em;
+    }
+
+    .play-copy small {
+      color: #9499a7;
+      font-size: 9px;
+      white-space: nowrap;
+    }
+
+    .focus-control {
+      display: grid;
+      gap: 4px;
+      padding: 0 5px;
+    }
+
+    .control-label {
+      color: #8b909e;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .06em;
+    }
+
+    .segmented {
+      display: flex;
+      gap: 2px;
+      padding: 2px;
+      border-radius: 9px;
+      background: rgba(231, 233, 239, .72);
+    }
+
+    .segmented button {
+      padding: 4px 7px;
+      border: 0;
+      border-radius: 7px;
+      color: #8b909e;
+      background: transparent;
+      font-size: 9px;
+      cursor: pointer;
+      transition: color 170ms ease, background 170ms ease, box-shadow 170ms ease;
+    }
+
+    .segmented button:hover { color: #545a69; }
+
+    .segmented button.is-selected {
+      color: #51416f;
+      background: rgba(255,255,255,.94);
+      box-shadow: 0 2px 7px rgba(47,51,68,.09);
+    }
+
+    .speed-control {
+      display: grid;
+      min-width: 112px;
+      padding: 0 10px 1px 3px;
+      grid-template-columns: 1fr auto;
+      gap: 4px 9px;
+      align-items: center;
+    }
+
+    .speed-control label,
+    .speed-output {
+      color: #838897;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .06em;
+    }
+
+    .speed-output { color: #595f70; text-align: right; }
+
+    .speed-control input {
+      width: 100%;
+      height: 3px;
+      margin: 0;
+      grid-column: 1 / -1;
+      accent-color: #7258cd;
+      cursor: pointer;
+    }
+
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .concept {
+      position: relative;
+      min-height: 244px;
+      padding: 24px 26px 25px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: var(--panel);
+      box-shadow:
+        0 1px 0 rgba(255, 255, 255, .94) inset,
+        0 18px 48px rgba(43, 47, 63, .055);
+      backdrop-filter: blur(20px);
+      isolation: isolate;
+    }
+
+    .concept:last-child { grid-column: 1 / -1; }
+
+    .concept::after {
+      position: absolute;
+      z-index: -2;
+      inset: auto -50px -90px auto;
+      width: 210px;
+      height: 210px;
+      border-radius: 50%;
+      content: "";
+      background: radial-gradient(circle, rgba(111, 83, 202, .045), transparent 68%);
+    }
+
+    .concept-head {
+      display: flex;
+      gap: 18px;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    .index {
+      color: #a7abba;
+      font-family: ui-monospace, "Cascadia Code", monospace;
+      font-size: 11px;
+      letter-spacing: .08em;
+    }
+
+    .concept h2 {
+      margin: 5px 0 0;
+      font-size: 17px;
+      font-weight: 650;
+      letter-spacing: -.02em;
+    }
+
+    .concept h2 span {
+      margin-left: 7px;
+      color: #a1a5b1;
+      font-family: ui-monospace, "Cascadia Code", monospace;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .tag {
+      padding: 5px 8px;
+      border: 1px solid rgba(62, 68, 87, .08);
+      border-radius: 999px;
+      color: #8b909e;
+      background: rgba(247, 248, 251, .68);
+      font-size: 10px;
+      white-space: nowrap;
+    }
+
+    .sentence-wrap {
+      position: relative;
+      display: flex;
+      min-height: 93px;
+      align-items: center;
+    }
+
+    .sentence {
+      position: relative;
+      z-index: 1;
+      margin: 21px 0 14px;
+      color: #313541;
+      font-family: "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+      font-size: clamp(20px, 2.25vw, 27px);
+      font-weight: 510;
+      line-height: 2.15;
+      letter-spacing: .015em;
+    }
+
+    .clause {
+      border-radius: 8px;
+      box-decoration-break: clone;
+      -webkit-box-decoration-break: clone;
+      transition: color 240ms ease, opacity 240ms ease, background 240ms ease, box-shadow 240ms ease;
+    }
+
+    .context-clause { color: #8b909d; }
+
+    .line-focus-strip {
+      position: absolute;
+      z-index: 0;
+      top: 0;
+      right: -13px;
+      left: -13px;
+      height: 2.2em;
+      border-top: 1px solid rgba(106, 83, 190, .06);
+      border-bottom: 1px solid rgba(76, 144, 180, .055);
+      border-radius: 14px;
+      opacity: 0;
+      background: linear-gradient(90deg, transparent, rgba(117,92,200,.07) 10%, rgba(74,146,180,.055) 78%, transparent);
+      transform: translateY(var(--line-y, 0));
+      transition: opacity 220ms ease, height 260ms ease, transform 520ms cubic-bezier(.18,.86,.22,1);
+      pointer-events: none;
+    }
+
+    #app[data-focus="line"] .line-focus-strip { opacity: 1; }
+    #app[data-focus="line"] .word { opacity: .3; }
+    #app[data-focus="line"] .word.is-line-focus { opacity: 1; }
+
+    #app[data-focus="sentence"] .context-clause { opacity: .32; }
+    #app[data-focus="sentence"] .current-clause {
+      padding: .08em .11em;
+      margin: 0 -.11em;
+      background: linear-gradient(110deg, rgba(118,91,203,.055), rgba(66,146,179,.045));
+      box-shadow: .1em 0 0 rgba(66,146,179,.045), -.1em 0 0 rgba(118,91,203,.055);
+    }
+
+    .word {
+      position: relative;
+      z-index: 0;
+      display: inline-block;
+      margin-right: .22em;
+      border-radius: 7px;
+      white-space: nowrap;
+      transition: color 220ms ease, opacity 220ms ease;
+    }
+
+    .word::before,
+    .word::after {
+      position: absolute;
+      z-index: -1;
+      content: "";
+      pointer-events: none;
+    }
+
+    .caption {
+      display: flex;
+      gap: 9px;
+      align-items: center;
+      margin: 0;
+      color: #969ba8;
+      font-size: 11px;
+      line-height: 1.6;
+    }
+
+    .caption::before {
+      flex: 0 0 auto;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      content: "";
+      background: #9e8adb;
+      box-shadow: 0 0 0 4px rgba(126, 99, 205, .07);
+    }
+
+    /* 01 · Liquid Lens — 柔和折射膜，不使用中心光点。 */
+    .liquid-lens .word::before {
+      inset: -.18em -.34em -.2em;
+      border: 1px solid rgba(100, 79, 190, 0);
+      border-radius: 44% 56% 48% 52% / 54% 47% 53% 46%;
+      opacity: 0;
+      background:
+        linear-gradient(125deg, rgba(255,255,255,.6), transparent 40%),
+        linear-gradient(135deg, rgba(135, 105, 224, .18), rgba(71, 145, 200, .12));
+      box-shadow: 0 5px 18px rgba(91, 73, 167, 0), inset 0 1px 0 rgba(255,255,255,.4);
+      transform: scale(.72, .82);
+      transform-origin: 48% 62%;
+    }
+
+    .liquid-lens .word::after {
+      right: -.05em;
+      bottom: -.13em;
+      left: -.05em;
+      height: 1px;
+      opacity: 0;
+      background: linear-gradient(90deg, transparent, rgba(100, 77, 201, .72), rgba(67, 147, 189, .58), transparent);
+      transform: scaleX(.2);
+    }
+
+    .liquid-lens .word.is-active::before {
+      animation:
+        liquid-arrive calc(380ms / var(--speed)) cubic-bezier(.18,.8,.22,1) both,
+        liquid-breathe calc(1250ms / var(--speed)) 380ms ease-in-out infinite alternate;
+    }
+
+    .liquid-lens .word.is-active::after {
+      animation: line-arrive calc(430ms / var(--speed)) 80ms cubic-bezier(.2,.8,.2,1) both;
+    }
+
+    @keyframes liquid-arrive {
+      0% { opacity: 0; transform: scale(.72,.82); }
+      60% { opacity: .96; transform: scale(1.045,.94); }
+      100% { opacity: .9; border-color: rgba(100,79,190,.23); box-shadow: 0 7px 18px rgba(91,73,167,.1), inset 0 1px 0 rgba(255,255,255,.68); transform: scale(1); }
+    }
+
+    @keyframes liquid-breathe {
+      from { border-radius: 44% 56% 48% 52% / 54% 47% 53% 46%; transform: translateY(0) scale(1); }
+      to { border-radius: 53% 47% 55% 45% / 47% 56% 44% 53%; transform: translateY(-.5px) scale(1.018,.96); }
+    }
+
+    /* 02 · Aurora Tide — 所有光都被约束在文字基线以下。 */
+    .aurora-tide .word::before {
+      right: -.16em;
+      bottom: -.23em;
+      left: -.16em;
+      height: .4em;
+      border-radius: 50%;
+      opacity: 0;
+      background: linear-gradient(90deg, rgba(112,80,211,0), rgba(112,80,211,.44), rgba(55,159,188,.5), rgba(112,80,211,0));
+      filter: blur(5px);
+      transform: translateX(-10%) scaleX(.45) skewX(-12deg);
+    }
+
+    .aurora-tide .word::after {
+      right: -.04em;
+      bottom: -.07em;
+      left: -.04em;
+      height: 2px;
+      border-radius: 99px;
+      opacity: 0;
+      background: linear-gradient(90deg, #7454d8, #50a4c4, #7454d8);
+      background-size: 200% 100%;
+      transform: scaleX(.12);
+    }
+
+    .aurora-tide .word.is-active {
+      color: #2d3040;
+      text-shadow: 0 4px 14px rgba(85, 70, 161, .09);
+    }
+
+    .aurora-tide .word.is-active::before {
+      animation: tide-halo calc(1080ms / var(--speed)) ease-in-out infinite alternate;
+    }
+
+    .aurora-tide .word.is-active::after {
+      animation:
+        line-arrive calc(390ms / var(--speed)) cubic-bezier(.16,.78,.24,1) both,
+        tide-flow calc(950ms / var(--speed)) 390ms linear infinite;
+    }
+
+    @keyframes tide-halo {
+      0% { opacity: .35; transform: translateX(-9%) scaleX(.54) skewX(-12deg); }
+      55% { opacity: .72; }
+      100% { opacity: .4; transform: translateX(9%) scaleX(.9) skewX(10deg); }
+    }
+
+    @keyframes tide-flow {
+      to { background-position: -200% 0; }
+    }
+
+    /* 03 · Aurora Ink — 字形不位移，色彩与基线光点持续流动。 */
+    .prism-ink .word.is-active {
+      color: transparent;
+      background: linear-gradient(105deg, #443363 4%, #6b4fbe 24%, #8b70e2 41%, #54a4ba 53%, #7559cc 72%, #443363 96%);
+      background-clip: text;
+      -webkit-background-clip: text;
+      background-size: 260% 100%;
+      filter:
+        drop-shadow(0 1px 3px rgba(97, 74, 167, .16))
+        drop-shadow(0 3px 8px rgba(65, 151, 180, .08));
+      transform: none;
+      animation: ink-flow calc(1450ms / var(--speed)) linear infinite;
+    }
+
+    .prism-flow-line {
+      position: absolute;
+      z-index: 3;
+      top: 0;
+      left: 0;
+      width: 24px;
+      height: 2px;
+      border-radius: 99px;
+      opacity: .86;
+      background: linear-gradient(90deg, #4d3b70, #7056bf 20%, #a08ae8 39%, #55a9bd 50%, #7860cb 66%, #4d3b70 100%);
+      background-size: 240% 100%;
+      box-shadow: 0 2px 7px rgba(88, 67, 166, .17);
+      transform: translate3d(0,0,0);
+      transition:
+        left calc(210ms / var(--speed)) cubic-bezier(.2,.72,.24,1),
+        top calc(210ms / var(--speed)) cubic-bezier(.2,.72,.24,1),
+        width calc(210ms / var(--speed)) cubic-bezier(.2,.72,.24,1),
+        opacity 160ms ease;
+      pointer-events: none;
+      will-change: left, top, width, background-position;
+      animation: prism-line-flow calc(1150ms / var(--speed)) linear infinite;
+    }
+
+    .prism-flow-line::before {
+      position: absolute;
+      top: -4px;
+      left: -9px;
+      width: 18px;
+      height: 10px;
+      border-radius: 50%;
+      content: "";
+      opacity: 0;
+      background: radial-gradient(circle, rgba(228, 239, 255, .9) 0 10%, rgba(119, 99, 215, .62) 28%, rgba(65, 163, 189, .22) 52%, transparent 72%);
+      filter: blur(1.6px);
+      animation: prism-line-glow calc(1150ms / var(--speed)) ease-in-out infinite;
+    }
+
+    .prism-flow-line::after {
+      position: absolute;
+      right: 4%;
+      bottom: -3px;
+      left: 4%;
+      height: 6px;
+      border-radius: 50%;
+      content: "";
+      opacity: .24;
+      background: linear-gradient(90deg, transparent, rgba(106, 78, 194, .5), rgba(68, 158, 184, .42), transparent);
+      filter: blur(4px);
+    }
+
+    @keyframes ink-flow {
+      from { background-position: 120% 0; }
+      to { background-position: -140% 0; }
+    }
+
+    @keyframes prism-line-flow {
+      from { background-position: 120% 0; }
+      to { background-position: -120% 0; }
+    }
+
+    @keyframes prism-line-glow {
+      0% { left: -9px; opacity: 0; transform: scale(.68); }
+      18% { opacity: .62; }
+      50% { opacity: .82; transform: scale(1); }
+      82% { opacity: .58; }
+      100% { left: calc(100% - 9px); opacity: 0; transform: scale(.7); }
+    }
+
+    .prism-flow-line.is-instant { transition: none; }
+
+    /* 04 · Echo Field — 空心能量场，中心保持完全透明。 */
+    .echo-field .word::before {
+      inset: -.22em -.34em;
+      border: 1px solid rgba(102, 78, 192, .48);
+      border-radius: 9px;
+      opacity: 0;
+      background: transparent;
+      box-shadow: 0 0 0 0 rgba(92, 74, 179, .08);
+      transform: scale(.78);
+    }
+
+    .echo-field .word::after {
+      inset: -.12em -.24em;
+      border: 1px solid rgba(68, 145, 183, .36);
+      border-radius: 7px;
+      opacity: 0;
+      transform: scale(.82);
+    }
+
+    .echo-field .word.is-active {
+      color: #433a62;
+    }
+
+    .echo-field .word.is-active::before {
+      animation: field-outer calc(1120ms / var(--speed)) cubic-bezier(.2,.7,.3,1) infinite;
+    }
+
+    .echo-field .word.is-active::after {
+      animation: field-inner calc(1120ms / var(--speed)) 140ms cubic-bezier(.2,.7,.3,1) infinite;
+    }
+
+    @keyframes field-outer {
+      0% { opacity: 0; border-radius: 7px; transform: scale(.78); }
+      20% { opacity: .72; }
+      74% { opacity: .16; }
+      100% { opacity: 0; border-radius: 15px; box-shadow: 0 0 0 7px rgba(92,74,179,0); transform: scale(1.14,1.35); }
+    }
+
+    @keyframes field-inner {
+      0% { opacity: 0; transform: scale(.82); }
+      26% { opacity: .58; }
+      100% { opacity: 0; transform: scale(1.04,1.14); }
+    }
+
+    /* 05 · Silk Perimeter — 高光只沿边缘游走，不进入字面区域。 */
+    .silk-edge .word::before,
+    .silk-edge .word::after {
+      inset: -.2em -.34em;
+      border-radius: 13px 8px 13px 9px;
+      opacity: 0;
+    }
+
+    .silk-edge .word::before {
+      padding: 1px;
+      background: conic-gradient(from var(--silk-angle), rgba(117,83,210,.16), rgba(58,154,185,.82), rgba(117,83,210,.2), rgba(117,83,210,.78), rgba(117,83,210,.16));
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+      mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      mask-composite: exclude;
+      transform: scale(.88) rotate(-2deg);
+    }
+
+    .silk-edge .word::after {
+      border: 1px solid rgba(104, 79, 191, .1);
+      box-shadow: 0 6px 16px rgba(84, 66, 158, .08);
+      transform: scale(.92);
+    }
+
+    .silk-edge .word.is-active::before {
+      animation:
+        silk-arrive calc(360ms / var(--speed)) cubic-bezier(.16,.78,.22,1) both,
+        silk-orbit calc(1550ms / var(--speed)) 360ms linear infinite;
+    }
+
+    .silk-edge .word.is-active::after {
+      animation: silk-shadow calc(1180ms / var(--speed)) ease-in-out infinite alternate;
+    }
+
+    @keyframes silk-arrive {
+      from { opacity: 0; transform: scale(.76,.88) rotate(-3deg); }
+      to { opacity: .78; transform: scale(1) rotate(0); }
+    }
+
+    @keyframes silk-orbit {
+      from { --silk-angle: 10deg; }
+      to { --silk-angle: 370deg; }
+    }
+
+    @keyframes silk-shadow {
+      from { opacity: .42; border-radius: 13px 8px 13px 9px; transform: scale(.98,1.02); }
+      to { opacity: .85; border-radius: 9px 14px 8px 13px; transform: scale(1.02,.96); }
+    }
+
+    @keyframes line-arrive {
+      from { opacity: 0; transform: scaleX(.12); }
+      to { opacity: .78; transform: scaleX(1); }
+    }
+
+    .is-paused *,
+    .is-paused *::before,
+    .is-paused *::after {
+      animation-play-state: paused !important;
+    }
+
+    .footer-note {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin: 22px 3px 0;
+      color: #969aa7;
+      font-size: 11px;
+    }
+
+    .footer-note span {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #69a8b9;
+      box-shadow: 0 0 0 4px rgba(77,151,172,.08);
+    }
+
+    @media (max-width: 780px) {
+      .page { width: min(100% - 24px, 620px); padding-top: 32px; }
+      .hero { grid-template-columns: 1fr; align-items: start; }
+      .controls { width: 100%; flex-wrap: wrap; }
+      .speed-control { flex: 1 1 110px; }
+      .gallery { grid-template-columns: 1fr; }
+      .concept:last-child { grid-column: auto; }
+      .concept { min-height: 225px; padding: 21px 20px; }
+      .sentence { font-size: clamp(19px, 5vw, 24px); }
+    }
+  </style>
+</head>
+<body>
+  <main class="page" id="app">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Word motion study · 05</p>
+        <h1>让高亮像声音一样流动</h1>
+        <p class="intro">五种逐词朗读动效，同步循环展示。现在可以切换“当前行 / 当前句 / 关闭”三种阅读聚焦，比较它与逐词定位叠加后的效果。</p>
+      </div>
+
+      <div class="controls" aria-label="播放控制">
+        <button class="play-button" id="playButton" type="button" aria-label="暂停动画" title="暂停">
+          <span class="play-icon-shell">
+            <svg class="play-icon" id="playIcon" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M4 2.6c0-.55.45-1 1-1s1 .45 1 1v10.8c0 .55-.45 1-1 1s-1-.45-1-1V2.6Zm6 0c0-.55.45-1 1-1s1 .45 1 1v10.8c0 .55-.45 1-1 1s-1-.45-1-1V2.6Z"/>
+            </svg>
+          </span>
+          <span class="play-copy"><strong id="playState">正在演示</strong><small id="playHint">点击暂停</small></span>
+        </button>
+        <div class="focus-control">
+          <span class="control-label">阅读聚焦</span>
+          <div class="segmented" role="group" aria-label="阅读聚焦模式">
+            <button type="button" data-focus-mode="off" aria-pressed="false">关闭</button>
+            <button type="button" data-focus-mode="line" aria-pressed="false">当前行</button>
+            <button class="is-selected" type="button" data-focus-mode="sentence" aria-pressed="true">当前句</button>
+          </div>
+        </div>
+        <div class="speed-control">
+          <label for="speed">播放速度</label>
+          <output class="speed-output" id="speedOutput">1.0×</output>
+          <input id="speed" type="range" min="0.65" max="1.5" value="1" step="0.05">
+        </div>
+      </div>
+    </header>
+
+    <section class="gallery" aria-label="五种逐词动效方案">
+      <article class="concept liquid-lens">
+        <div class="concept-head">
+          <div><span class="index">01</span><h2>液态折射 <span>Liquid Lens</span></h2></div>
+          <span class="tag">柔和 · 有实体感</span>
+        </div>
+        <div class="sentence-wrap"><p class="sentence" aria-label="液态折射动效示例"></p></div>
+        <p class="caption">薄薄的折射膜包住当前词，形变明显，但高光不再压在字面中央。</p>
+      </article>
+
+      <article class="concept aurora-tide">
+        <div class="concept-head">
+          <div><span class="index">02</span><h2>极光底潮 <span>Aurora Tide</span></h2></div>
+          <span class="tag">克制 · 最不遮字</span>
+        </div>
+        <div class="sentence-wrap"><p class="sentence" aria-label="极光底潮动效示例"></p></div>
+        <p class="caption">流动光带被限制在文字基线下方，适合长时间阅读与密集正文。</p>
+      </article>
+
+      <article class="concept prism-ink">
+        <div class="concept-head">
+          <div><span class="index">03</span><h2>极光字墨 <span>Aurora Ink</span></h2></div>
+          <span class="tag">静态字形 · 流动光色</span>
+        </div>
+        <div class="sentence-wrap"><p class="sentence" aria-label="棱镜字墨动效示例"></p></div>
+        <p class="caption">字形保持稳定，渐变与柔光在字内流动；线段只平滑换位，亮区沿线持续游走。</p>
+      </article>
+
+      <article class="concept echo-field">
+        <div class="concept-head">
+          <div><span class="index">04</span><h2>回声力场 <span>Echo Field</span></h2></div>
+          <span class="tag">未来 · 空心脉冲</span>
+        </div>
+        <div class="sentence-wrap"><p class="sentence" aria-label="回声力场动效示例"></p></div>
+        <p class="caption">透明中心配合双层轮廓扩散，像声音的回波，不影响文字对比度。</p>
+      </article>
+
+      <article class="concept silk-edge">
+        <div class="concept-head">
+          <div><span class="index">05</span><h2>丝绸描边 <span>Silk Perimeter</span></h2></div>
+          <span class="tag">高级 · 动态边缘</span>
+        </div>
+        <div class="sentence-wrap"><p class="sentence" aria-label="丝绸描边动效示例"></p></div>
+        <p class="caption">渐变能量沿柔性轮廓游走，内部完全透明，兼顾凝胶感与清晰度。</p>
+      </article>
+    </section>
+
+    <p class="footer-note"><span></span>这是独立 HTML 原型，没有引用字体、图片、脚本库或预览框架。</p>
+  </main>
+
+  <script>
+    (() => {
+      const tokens = ["当", "声音", "沿着", "文字", "缓缓", "向前，", "注意力", "也", "自然", "流动。"];
+      const beforeTokens = ["前文", "仍在这里。"];
+      const afterTokens = ["下一句", "尚未开始。"];
+      const app = document.querySelector("#app");
+      const sentences = [...document.querySelectorAll(".sentence")];
+      const playButton = document.querySelector("#playButton");
+      const playIcon = document.querySelector("#playIcon");
+      const playState = document.querySelector("#playState");
+      const playHint = document.querySelector("#playHint");
+      const speedInput = document.querySelector("#speed");
+      const speedOutput = document.querySelector("#speedOutput");
+      const focusButtons = [...document.querySelectorAll("[data-focus-mode]")];
+      const pausePath = "M4 2.6c0-.55.45-1 1-1s1 .45 1 1v10.8c0 .55-.45 1-1 1s-1-.45-1-1V2.6Zm6 0c0-.55.45-1 1-1s1 .45 1 1v10.8c0 .55-.45 1-1 1s-1-.45-1-1V2.6Z";
+      const playPath = "M4.1 2.35c0-.78.85-1.26 1.52-.86l8.1 4.82a1 1 0 0 1 0 1.72l-8.1 4.82a1 1 0 0 1-1.52-.86V2.35Z";
+      const baseDelay = 760;
+      let current = 0;
+      let playing = true;
+      let timer = 0;
+
+      function appendClause(sentence, clauseTokens, className, reading = false) {
+        const clause = document.createElement("span");
+        clause.className = `clause ${className}`;
+        clauseTokens.forEach((token, index) => {
+          const word = document.createElement("span");
+          word.className = "word";
+          if (reading) word.dataset.index = String(index);
+          word.textContent = token;
+          clause.append(word);
+        });
+        sentence.append(clause);
+      }
+
+      sentences.forEach((sentence) => {
+        appendClause(sentence, beforeTokens, "context-clause");
+        appendClause(sentence, tokens, "current-clause", true);
+        appendClause(sentence, afterTokens, "context-clause");
+
+        const strip = document.createElement("span");
+        strip.className = "line-focus-strip";
+        sentence.parentElement.prepend(strip);
+
+        if (sentence.closest(".prism-ink")) {
+          const cursor = document.createElement("span");
+          cursor.className = "prism-flow-line";
+          cursor.setAttribute("aria-hidden", "true");
+          sentence.parentElement.append(cursor);
+        }
+      });
+
+      function boxWithin(element, container) {
+        let x = 0;
+        let y = 0;
+        let node = element;
+        while (node && node !== container) {
+          x += node.offsetLeft;
+          y += node.offsetTop;
+          node = node.offsetParent;
+        }
+        return {
+          x,
+          y: y + element.offsetHeight - 3,
+          width: element.offsetWidth,
+          lineTop: y,
+          lineHeight: element.offsetHeight
+        };
+      }
+
+      function positionPrismFlowLine(sentence, activeWord, instant) {
+        const wrap = sentence.parentElement;
+        const cursor = wrap.querySelector(".prism-flow-line");
+        if (!cursor) return;
+
+        const target = boxWithin(activeWord, wrap);
+        cursor.classList.toggle("is-instant", instant);
+        cursor.style.left = `${target.x - 2}px`;
+        cursor.style.top = `${target.y}px`;
+        cursor.style.width = `${target.width + 4}px`;
+        if (instant) window.requestAnimationFrame(() => cursor.classList.remove("is-instant"));
+      }
+
+      function updateLineFocus(sentence, activeWord) {
+        const wrap = sentence.parentElement;
+        const strip = wrap.querySelector(".line-focus-strip");
+        const activeBox = boxWithin(activeWord, wrap);
+
+        sentence.querySelectorAll(".word").forEach((word) => {
+          word.classList.toggle("is-line-focus", Math.abs(word.offsetTop - activeWord.offsetTop) < 3);
+        });
+
+        strip.style.setProperty("--line-y", `${activeBox.lineTop + activeBox.lineHeight * .08}px`);
+        strip.style.height = `${activeBox.lineHeight * .84}px`;
+      }
+
+      function render(instant = false) {
+        document.querySelectorAll(".word").forEach((word) => {
+          word.classList.toggle("is-active", Number(word.dataset.index) === current);
+        });
+
+        sentences.forEach((sentence) => {
+          const activeWord = sentence.querySelector(`.word[data-index="${current}"]`);
+          if (!activeWord) return;
+          updateLineFocus(sentence, activeWord);
+          positionPrismFlowLine(sentence, activeWord, instant);
+        });
+      }
+
+      function schedule() {
+        window.clearTimeout(timer);
+        if (!playing) return;
+        const speed = Number(speedInput.value);
+        timer = window.setTimeout(() => {
+          current = (current + 1) % tokens.length;
+          render();
+          schedule();
+        }, baseDelay / speed);
+      }
+
+      function updatePlayButton() {
+        playIcon.querySelector("path").setAttribute("d", playing ? pausePath : playPath);
+        playButton.setAttribute("aria-label", playing ? "暂停动画" : "继续动画");
+        playButton.title = playing ? "暂停" : "继续";
+        playState.textContent = playing ? "正在演示" : "演示已暂停";
+        playHint.textContent = playing ? "点击暂停" : "点击继续";
+        app.classList.toggle("is-paused", !playing);
+        document.querySelectorAll(".prism-flow-line").forEach((cursor) => {
+          cursor.getAnimations().forEach((animation) => playing ? animation.play() : animation.pause());
+        });
+      }
+
+      playButton.addEventListener("click", () => {
+        playing = !playing;
+        updatePlayButton();
+        schedule();
+      });
+
+      speedInput.addEventListener("input", () => {
+        const speed = Number(speedInput.value);
+        document.documentElement.style.setProperty("--speed", speed);
+        speedOutput.value = `${speed.toFixed(2).replace(/0$/, "")}×`;
+        schedule();
+      });
+
+      focusButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const mode = button.dataset.focusMode;
+          app.dataset.focus = mode;
+          focusButtons.forEach((item) => {
+            const selected = item === button;
+            item.classList.toggle("is-selected", selected);
+            item.setAttribute("aria-pressed", String(selected));
+          });
+        });
+      });
+
+      let resizeFrame = 0;
+      window.addEventListener("resize", () => {
+        window.cancelAnimationFrame(resizeFrame);
+        resizeFrame = window.requestAnimationFrame(() => render(true));
+      });
+
+      app.dataset.focus = "sentence";
+      window.requestAnimationFrame(() => {
+        render(true);
+        schedule();
+      });
+    })();
+  </script>
+</body>
+</html>

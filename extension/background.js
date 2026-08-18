@@ -1,30 +1,56 @@
 /* global chrome, importScripts */
-if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
-  importScripts('shared/api-client.js');
+if (typeof importScripts === 'function') {
+  const backgroundScripts = [];
+  if (!globalThis.QwenReaderApiClient) backgroundScripts.push('shared/api-client.js');
+  if (!globalThis.QwenReaderVoiceLibrary) {
+    if (!globalThis.QwenReaderVoiceNaming) backgroundScripts.push('shared/voice-naming.js');
+    backgroundScripts.push('shared/voice-library.js');
+  }
+  if (backgroundScripts.length) importScripts(...backgroundScripts);
 }
 
 (function backgroundModule(root, factory) {
   const apiModule = root.QwenReaderApiClient || (typeof require === 'function'
     ? require('./shared/api-client.js') : null);
-  const exported = factory(apiModule);
+  const voiceLibrary = root.QwenReaderVoiceLibrary || (typeof require === 'function'
+    ? require('./shared/voice-library.js') : null);
+  const exported = factory(apiModule, voiceLibrary);
   if (typeof module === 'object' && module.exports) module.exports = exported;
   root.QwenReaderBackground = exported;
 
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
     exported.install(chrome);
   }
-}(typeof globalThis !== 'undefined' ? globalThis : this, function makeBackground(apiModule) {
+}(typeof globalThis !== 'undefined' ? globalThis : this, function makeBackground(apiModule, voiceLibrary) {
   'use strict';
 
   const OFFSCREEN_TARGET = 'qwen-reader-offscreen';
+  const STREAM_EVENT_TARGET = 'qwen-reader-stream-event';
   const OFFSCREEN_PATH = 'offscreen.html';
   const REQUIRED_ORIGIN = 'http://127.0.0.1:7811/*';
   const SETTINGS_KEY = 'qwenReaderSettings';
+  const CLEANUP_QUEUE_KEY = 'voiceCleanupQueue';
   const POPUP_TARGET_KEY = 'qwenReaderPopupTarget';
   const POPUP_SNAPSHOTS_KEY = 'qwenReaderPopupSnapshots';
   const PAGE_EDITOR_CONTEXTS_KEY = 'qwenReaderPageEditorContexts';
   const PAGE_EDITOR_PATH = 'page-voices.html';
   const BUILTIN_VOICES = ['邵思萌', 'qwen-clone'];
+
+  function isReadOnlyProfile(profile) {
+    if (!profile || typeof profile !== 'object') return false;
+    const kind = String(profile.kind || '').trim().toLowerCase();
+    const nonLocalKinds = ['builtin', 'alias', 'remote', 'provider'];
+    const hasWav = Boolean(String(profile.wavB64 || profile.wav_b64 || ''));
+    const hasExtractedVoice = Boolean(
+      String(profile.spkB64 || profile.spk_b64 || '') &&
+      String(profile.rvqB64 || profile.rvq_b64 || ''),
+    );
+    return (
+      profile.local === false || profile.remote === true || profile.builtIn || profile.builtin ||
+      nonLocalKinds.includes(kind) || BUILTIN_VOICES.includes(profile.name) ||
+      (!hasWav && !hasExtractedVoice)
+    );
+  }
 
   function repairVoiceSettings(current, deletedName, remainingProfiles) {
     if (!current || typeof current !== 'object' || Array.isArray(current)) return null;
@@ -72,14 +98,14 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
       async set(key, value) {
         await chromeApi.storage.local.set({ [key]: value });
       },
+      async setMany(values) {
+        await chromeApi.storage.local.set(values);
+      },
     };
   }
 
-  // Popup targets and page-editor contexts are deliberately session scoped. They
-  // describe open browser tabs, so persisting them in local storage would leave
-  // stale tab ids after a browser restart. Older Chromium builds without
-  // storage.session fall back to a service-worker-local map; all callers keep
-  // the same async contract either way.
+  // Popup targets are browser-session state. Keeping them out of local storage
+  // avoids restoring an old tab id after a browser restart.
   function chromeSessionStorage(chromeApi) {
     const memory = new Map();
     const area = chromeApi && chromeApi.storage && chromeApi.storage.session;
@@ -183,9 +209,7 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
   function snapshotFromMessage(message) {
     const body = message || {};
     const snapshot = body.snapshot || body.state || body.player || body;
-    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
-      return null;
-    }
+    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null;
     const document = snapshot.document && typeof snapshot.document === 'object'
       ? snapshot.document
       : null;
@@ -197,17 +221,11 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
       ? Number(snapshot.total)
       : Number.isFinite(Number(snapshot.segmentCount))
         ? Number(snapshot.segmentCount)
-        : segments
-          ? segments.length
-          : 0;
+        : segments ? segments.length : 0;
     return {
       status: String(snapshot.status || 'idle'),
       pageKey: String(snapshot.pageKey || (document && document.pageKey) || ''),
-      title: String(
-        snapshot.title ||
-          (document && (document.title || document.name)) ||
-          '',
-      ),
+      title: String(snapshot.title || (document && (document.title || document.name)) || ''),
       index: Number.isFinite(Number(snapshot.index)) ? Number(snapshot.index) : 0,
       total,
       segmentCount: total,
@@ -280,8 +298,8 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
       if (!creating) {
         creating = chromeApi.offscreen.createDocument({
           url: OFFSCREEN_PATH,
-          reasons: ['BLOBS'],
-          justification: 'Convert local Qwen TTS WAV blobs to transferable Base64 during long model cold starts.',
+          reasons: ['BLOBS', 'AUDIO_PLAYBACK'],
+          justification: 'Convert local Qwen TTS WAV blobs and schedule bounded streaming playback during long model cold starts.',
         }).then(() => {
           assumedOpen = true;
         }).catch(async (error) => {
@@ -316,6 +334,22 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
         await ensureDocument();
         return send(message);
       },
+      async control(message) {
+        // getContexts()/hasDocument() can briefly lag behind a live offscreen
+        // page during MV3 lifecycle transitions. Send the identity-bearing
+        // control directly; a missing recipient is still reported as a benign
+        // non-applied control below.
+        try {
+          return await send(message);
+        } catch (_) {
+          return {
+            ok: true,
+            paused: message && message.type === 'tts:pause' ? false : undefined,
+            resumed: message && message.type === 'tts:resume' ? false : undefined,
+            count: 0,
+          };
+        }
+      },
       async cancel(message) {
         if (!(await hasDocument())) return { ok: true, cancelled: false, count: 0 };
         return send(message);
@@ -334,21 +368,21 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
       return Array.isArray(saved) ? saved : [];
     }
 
-    async function saveProfile(profile) {
-      const saved = await profiles();
-      const index = saved.findIndex((item) => item && item.name === profile.name);
-      if (index >= 0) saved[index] = profile;
-      else saved.push(profile);
-      await storage.set('voiceProfiles', saved);
-    }
-
     function withIdentity(message) {
       const body = message || {};
       const sessionId = String(body.sessionId || '');
       const clientId = String(body.clientId || sessionId || 'legacy-client');
       const playbackId = String(body.playbackId || sessionId || 'legacy-playback');
       const requestId = String(body.requestId || `${sessionId || clientId}:${++requestSequence}`);
-      return Object.assign({}, body, { clientId, playbackId, requestId });
+      const normalized = Object.assign({}, body, { clientId, playbackId, requestId });
+      if (body.request && typeof body.request === 'object' && !Array.isArray(body.request)) {
+        normalized.request = Object.assign({}, body.request, {
+          requestId,
+          playbackId,
+          sessionId,
+        });
+      }
+      return normalized;
     }
 
     async function forward(message, includeProfiles) {
@@ -362,17 +396,87 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
       return offscreen.request(payload);
     }
 
+    async function deferCleanup(name, activeName) {
+      const queued = await storage.get(CLEANUP_QUEUE_KEY);
+      const names = [...(Array.isArray(queued) ? queued : []), name]
+        .map((item) => String(item || '').trim())
+        .filter((item, index, list) => (
+          item && item !== activeName && list.indexOf(item) === index
+        ));
+      await storage.set(CLEANUP_QUEUE_KEY, names);
+    }
+
+    async function cleanupPendingVoices() {
+      let queued;
+      try {
+        queued = await storage.get(CLEANUP_QUEUE_KEY);
+      } catch (_) {
+        return;
+      }
+      if (!Array.isArray(queued) || !queued.length) return;
+
+      const uniqueNames = queued
+        .map((name) => String(name || '').trim())
+        .filter((name, index, list) => name && list.indexOf(name) === index);
+      const remaining = [];
+      for (const name of uniqueNames) {
+        try {
+          const result = await forward({ type: 'voice:delete', name }, false);
+          if (!result || !result.ok) remaining.push(name);
+        } catch (_) {
+          remaining.push(name);
+        }
+      }
+      try {
+        await storage.set(CLEANUP_QUEUE_KEY, remaining);
+      } catch (_) {
+        // Cleanup is best-effort and must never block listing voices.
+      }
+    }
+
     return async function route(message) {
       const body = message || {};
       try {
         switch (body.type) {
           case 'tts:status':
+            if (offscreen && typeof offscreen.request === 'function') {
+              return await forward(body, false);
+            }
             return { ok: true, status: await api.status() };
 
           case 'tts:voices':
-          case 'voice:list':
           case 'tts:synthesize':
             return await forward(body, true);
+
+          case 'voice:list':
+            await cleanupPendingVoices();
+            {
+              const result = await forward(body, true);
+              if (!result || !result.ok || !Array.isArray(result.voices)) return result;
+              const savedProfiles = await profiles();
+              const profileByName = new Map(savedProfiles
+                .filter((profile) => profile && profile.name)
+                .map((profile) => [String(profile.name), profile]));
+              return Object.assign({}, result, {
+                voices: result.voices.map((voice) => {
+                  const sourceVoice = voice && typeof voice === 'object' ? voice : {};
+                  const profile = profileByName.get(String(sourceVoice.name || ''));
+                  const editable = Boolean(profile && !isReadOnlyProfile(profile));
+                  const presented = Object.assign({}, sourceVoice, {
+                    local: editable,
+                    editable,
+                    readOnly: !editable,
+                    source: editable ? 'browser' : 'backend',
+                  });
+                  if (editable) {
+                    presented.sourceFileName = String(profile.sourceFileName || '');
+                    presented.durationSeconds = Number(profile.durationSeconds) || 0;
+                    presented.refText = String(profile.refText || profile.ref_text || '');
+                  }
+                  return presented;
+                }),
+              });
+            }
 
           case 'tts:cancel':
             if (!offscreen || typeof offscreen.cancel !== 'function') {
@@ -380,11 +484,92 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
             }
             return await offscreen.cancel(body);
 
+          case 'tts:pause':
+          case 'tts:resume':
+            if (!offscreen || typeof offscreen.control !== 'function') {
+              return {
+                ok: true,
+                paused: body.type === 'tts:pause' ? false : undefined,
+                resumed: body.type === 'tts:resume' ? false : undefined,
+                count: 0,
+              };
+            }
+            return await offscreen.control(withIdentity(body));
+
           case 'voice:save': {
             const profile = body.profile || {};
+            const saved = await profiles();
+            const previousProfile = saved.find((item) => item && item.name === profile.name) || null;
             const result = await forward(body, false);
-            if (result && result.ok) await saveProfile(profile);
+            if (!result || !result.ok) return result;
+            const nextProfiles = saved.slice();
+            const index = nextProfiles.findIndex((item) => item && item.name === profile.name);
+            if (index >= 0) nextProfiles[index] = profile;
+            else nextProfiles.push(profile);
+            try {
+              await storage.set('voiceProfiles', nextProfiles);
+            } catch (error) {
+              try {
+                if (previousProfile) {
+                  await forward({ type: 'voice:save', profile: previousProfile }, false);
+                } else {
+                  await forward({ type: 'voice:delete', name: profile.name }, false);
+                }
+              } catch (_) {
+                // The storage failure remains primary; rollback is best-effort.
+              }
+              throw error;
+            }
             return result;
+          }
+
+          case 'voice:rename': {
+            const saved = await profiles();
+            const currentSettings = await storage.get(SETTINGS_KEY);
+            const matchedProfile = saved.find((profile) => profile && profile.name === body.oldName);
+            if (!matchedProfile || isReadOnlyProfile(matchedProfile)) {
+              const error = new Error('该音色为只读，无法重命名。');
+              error.code = 'voice_read_only';
+              throw error;
+            }
+            const plan = voiceLibrary.planRename(
+              saved,
+              currentSettings,
+              body.oldName,
+              body.newName,
+            );
+            const registered = await forward({ type: 'voice:save', profile: plan.newProfile }, false);
+            if (!registered || !registered.ok) return registered;
+            try {
+              await storage.setMany({
+                voiceProfiles: plan.profiles,
+                [SETTINGS_KEY]: plan.settings,
+              });
+            } catch (error) {
+              try {
+                await forward({ type: 'voice:delete', name: plan.newProfile.name }, false);
+              } catch (_) {
+                // The storage error remains the primary transaction failure.
+              }
+              throw error;
+            }
+
+            let deleted;
+            try {
+              deleted = await forward({ type: 'voice:delete', name: body.oldName }, false);
+            } catch (_) {
+              deleted = null;
+            }
+            if (deleted && deleted.ok) return deleted;
+
+            await deferCleanup(body.oldName, plan.newProfile.name);
+            return {
+              ok: true,
+              warning: {
+                code: 'old_voice_cleanup_pending',
+                message: '旧音色将在下次列出音色时重试清理。',
+              },
+            };
           }
 
           case 'voice:delete': {
@@ -415,34 +600,41 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
     };
   }
 
+  // The popup is transient, so it owns a fixed tab target for its lifetime and
+  // requests a compact snapshot from the content script. Playback itself stays
+  // in the page/offscreen pipeline when the popup closes.
   function createPopupBroker(chromeApi, options) {
     const config = options || {};
     const session = config.session || chromeSessionStorage(chromeApi);
-    const onSnapshot = typeof config.onSnapshot === 'function'
-      ? config.onSnapshot
-      : () => {};
+    const onSnapshot = typeof config.onSnapshot === 'function' ? config.onSnapshot : () => {};
     let targetMemory = null;
-    const snapshotMemory = new Map();
+    const snapshots = new Map();
 
-    function targetError(message, code) {
-      return {
-        ok: false,
-        error: { code: code || 'popup_target_unavailable', message },
-      };
+    async function readSnapshots() {
+      if (snapshots.size) return snapshots;
+      const stored = await session.get(POPUP_SNAPSHOTS_KEY);
+      if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+        Object.entries(stored).forEach(([tabId, snapshot]) => {
+          if (snapshot && typeof snapshot === 'object') snapshots.set(String(tabId), snapshot);
+        });
+      }
+      return snapshots;
     }
 
-    async function queryActiveTab() {
-      if (!chromeApi.tabs || typeof chromeApi.tabs.query !== 'function') {
-        return null;
-      }
-      const tabs = await chromeApi.tabs.query({ active: true, currentWindow: true });
-      return normalizeTabTarget(Array.isArray(tabs) ? tabs[0] : null);
+    async function persistSnapshots() {
+      const stored = {};
+      snapshots.forEach((snapshot, tabId) => { stored[tabId] = snapshot; });
+      await session.set(POPUP_SNAPSHOTS_KEY, stored);
+    }
+
+    async function persistTarget(target) {
+      if (target) await session.set(POPUP_TARGET_KEY, target);
+      else await session.remove(POPUP_TARGET_KEY);
     }
 
     async function tabStillExists(target) {
-      if (!target || !chromeApi.tabs || typeof chromeApi.tabs.get !== 'function') {
-        return Boolean(target);
-      }
+      if (!target) return false;
+      if (!chromeApi.tabs || typeof chromeApi.tabs.get !== 'function') return true;
       try {
         const tab = await chromeApi.tabs.get(target.tabId);
         return Boolean(tab && tab.id != null);
@@ -451,9 +643,10 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
       }
     }
 
-    async function persistTarget(target) {
-      if (target) await session.set(POPUP_TARGET_KEY, target);
-      else await session.remove(POPUP_TARGET_KEY);
+    async function queryActiveTab() {
+      if (!chromeApi.tabs || typeof chromeApi.tabs.query !== 'function') return null;
+      const tabs = await chromeApi.tabs.query({ active: true, currentWindow: true });
+      return normalizeTabTarget(Array.isArray(tabs) ? tabs[0] : null);
     }
 
     async function restoreTarget() {
@@ -470,30 +663,25 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
         const restored = await restoreTarget();
         if (restored) return restored;
       }
-      const active = await queryActiveTab();
-      targetMemory = active;
-      await persistTarget(active);
-      return active;
+      targetMemory = await queryActiveTab();
+      await persistTarget(targetMemory);
+      return targetMemory;
     }
 
     async function getTarget() {
-      const restored = await restoreTarget();
-      if (restored) return restored;
-      return beginTarget(false);
+      return (await restoreTarget()) || beginTarget(false);
     }
 
     async function targetForTab(tabId) {
       if (tabId == null || tabId === '') return getTarget();
       const numericId = Number(tabId);
       if (!Number.isFinite(numericId)) return getTarget();
-      const current = await getTarget();
-      if (current && current.tabId === numericId) return current;
+      const existing = await getTarget();
+      if (existing && existing.tabId === numericId) return existing;
       if (chromeApi.tabs && typeof chromeApi.tabs.get === 'function') {
         try {
           return normalizeTabTarget(await chromeApi.tabs.get(numericId));
-        } catch (_) {
-          // The tab may have closed between the popup render and this command.
-        }
+        } catch (_) {}
       }
       return normalizeTabTarget({ id: numericId });
     }
@@ -505,10 +693,10 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
 
     async function sendToTarget(target, message) {
       if (!target || target.tabId == null) {
-        return targetError('没有找到可控制的网页标签页。');
+        return { ok: false, error: { code: 'popup_target_unavailable', message: '没有找到可控制的网页标签页。' } };
       }
       if (!chromeApi.tabs || typeof chromeApi.tabs.sendMessage !== 'function') {
-        return targetError('当前浏览器不支持向网页发送朗读控制。', 'tabs_unavailable');
+        return { ok: false, error: { code: 'tabs_unavailable', message: '当前浏览器不支持向网页发送朗读控制。' } };
       }
       try {
         const response = await chromeApi.tabs.sendMessage(target.tabId, message);
@@ -518,26 +706,10 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
           ok: false,
           error: {
             code: 'content_script_unavailable',
-            message: error && error.message
-              ? error.message
-              : '当前页面暂时不能接收朗读控制。',
+            message: error && error.message ? error.message : '当前页面暂时不能接收朗读控制。',
           },
         };
       }
-    }
-
-    async function readSnapshots() {
-      if (snapshotMemory.size) return snapshotMemory;
-      const saved = await session.get(POPUP_SNAPSHOTS_KEY);
-      if (!saved || typeof saved !== 'object' || Array.isArray(saved)) {
-        return snapshotMemory;
-      }
-      Object.entries(saved).forEach(([tabId, snapshot]) => {
-        if (snapshot && typeof snapshot === 'object') {
-          snapshotMemory.set(String(tabId), snapshot);
-        }
-      });
-      return snapshotMemory;
     }
 
     async function rememberSnapshot(target, value) {
@@ -551,50 +723,28 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
         await persistTarget(targetMemory);
       }
       await readSnapshots();
-      snapshotMemory.set(String(target.tabId), snapshot);
-      const persisted = {};
-      snapshotMemory.forEach((entry, tabId) => {
-        persisted[tabId] = entry;
-      });
-      await session.set(POPUP_SNAPSHOTS_KEY, persisted);
+      snapshots.set(String(target.tabId), snapshot);
+      await persistSnapshots();
       onSnapshot(target, snapshot);
       return snapshot;
     }
 
-    function cachedSnapshot(target) {
-      return target ? snapshotMemory.get(String(target.tabId)) || null : null;
-    }
-
     async function requestSnapshot(target) {
-      const response = await sendToTarget(target, {
-        type: 'reader:snapshot:get',
-        request: 'snapshot',
-        source: 'popup',
-      });
-      const direct = response.response && (
-        response.response.snapshot ||
-        response.response.state ||
-        response.response.player
-      );
-      const pageError = response.response && response.response.ok === false
-        ? response.response.error || { code: 'reader_unavailable', message: '当前页面暂时不能朗读。' }
-        : null;
-      const snapshot = direct
-        ? await rememberSnapshot(target, direct)
-        : cachedSnapshot(target);
-      return Object.assign({}, response, pageError ? { ok: false, error: pageError } : {}, {
-        target,
-        snapshot: snapshot || null,
-        source: direct ? 'page' : snapshot ? 'session' : 'empty',
-      });
+      const sent = await sendToTarget(target, { type: 'reader:snapshot:get', request: 'snapshot', source: 'popup' });
+      const body = sent.response;
+      const snapshot = body && (body.snapshot || body.state || body.player)
+        ? await rememberSnapshot(target, body)
+        : (await readSnapshots()).get(String(target && target.tabId)) || null;
+      if (body && body.ok === false) {
+        return Object.assign({}, sent, { ok: false, error: body.error, target, snapshot });
+      }
+      return Object.assign({}, sent, { target, snapshot });
     }
 
     async function sendCommand(target, message) {
       const command = normalizeCommand(message);
-      if (!command) {
-        return { ok: false, error: { code: 'invalid_command', message: '缺少朗读控制命令。' } };
-      }
-      const commandMessage = {
+      if (!command) return { ok: false, error: { code: 'invalid_command', message: '缺少朗读控制命令。' } };
+      const payload = {
         type: 'reader:command',
         command,
         action: command,
@@ -602,32 +752,27 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
         contextId: message && message.contextId ? String(message.contextId) : '',
         pageKey: message && message.pageKey
           ? String(message.pageKey)
-          : target && target.pageKey
-            ? String(target.pageKey)
-            : '',
+          : target && target.pageKey ? String(target.pageKey) : '',
       };
-      // Keep command-specific values intact (for example the Popup's
-      // set-speed value and seek index) while still using a small, explicit
-      // broker envelope.
-      if (message && message.value !== undefined) commandMessage.value = message.value;
-      if (message && message.index !== undefined) commandMessage.index = message.index;
-      if (message && message.payload && typeof message.payload === 'object') {
-        commandMessage.payload = message.payload;
-      }
-      const response = await sendToTarget(target, commandMessage);
-      const direct = response.response && (
-        response.response.snapshot ||
-        response.response.state ||
-        response.response.player
-      );
-      const snapshot = direct ? await rememberSnapshot(target, direct) : null;
-      return Object.assign({}, response, { target, command, snapshot });
+      if (message && message.value !== undefined) payload.value = message.value;
+      if (message && message.index !== undefined) payload.index = message.index;
+      if (message && message.payload && typeof message.payload === 'object') payload.payload = message.payload;
+      const sent = await sendToTarget(target, payload);
+      const body = sent.response;
+      const snapshot = body && (body.snapshot || body.state || body.player)
+        ? await rememberSnapshot(target, body)
+        : null;
+      return Object.assign({}, sent, { target, command, snapshot });
     }
 
     async function handleReaderMessage(message) {
-      const body = message || {};
-      const target = await targetForTab(body.tabId);
-      switch (body.type) {
+      // Opening a new toolbar popup always starts from the tab that is active
+      // at that moment. Follow-up snapshot and command messages carry tabId,
+      // so they remain pinned even if the user changes tabs while it is open.
+      const target = message && message.type === 'reader:active-context' && message.tabId == null
+        ? await beginTarget(true)
+        : await targetForTab(message && message.tabId);
+      switch (message && message.type) {
         case 'reader:active-context': {
           const result = await requestSnapshot(target);
           if (!result.ok && !result.snapshot) {
@@ -650,21 +795,12 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
           return result.snapshot || { status: 'idle', index: 0, total: 0, current: null };
         }
         case 'reader:command': {
-          const result = await sendCommand(target, body);
-          if (!result || !result.ok) {
-            return {
-              ok: false,
-              error: result && result.error || { code: 'reader_unavailable', message: '当前页面暂时不能朗读。' },
-              snapshot: result && result.snapshot || null,
-            };
+          const result = await sendCommand(target, message);
+          const body = result.response && typeof result.response === 'object' ? result.response : {};
+          if (!result.ok || body.ok === false) {
+            return { ok: false, error: body.error || result.error || { code: 'reader_unavailable', message: '当前页面暂时不能朗读。' }, snapshot: result.snapshot || null };
           }
-          const contentResponse = result.response && typeof result.response === 'object'
-            ? result.response
-            : { ok: true };
-          return Object.assign({}, contentResponse, {
-            ok: contentResponse.ok !== false,
-            snapshot: result.snapshot || snapshotFromMessage(contentResponse) || null,
-          });
+          return Object.assign({}, body, { ok: true, snapshot: result.snapshot || snapshotFromMessage(body) || null });
         }
         default:
           return { ok: false, error: { code: 'unknown_message', message: '不支持的网页朗读请求。' } };
@@ -672,29 +808,24 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
     }
 
     async function handle(message) {
-      const body = message || {};
-      switch (body.type) {
+      switch (message && message.type) {
         case 'popup:init':
         case 'popup:target': {
           const target = await beginTarget(true);
           return Object.assign({ ok: Boolean(target), target }, await requestSnapshot(target));
         }
         case 'popup:snapshot':
-        case 'popup:get-state': {
-          const target = await getTarget();
-          return requestSnapshot(target);
-        }
-        case 'popup:command': {
-          const target = await getTarget();
-          return sendCommand(target, body);
-        }
+        case 'popup:get-state':
+          return requestSnapshot(await getTarget());
+        case 'popup:command':
+          return sendCommand(await getTarget(), message);
         case 'popup:reset-target':
           await clearTarget();
           return { ok: true, target: null };
         case 'reader:active-context':
         case 'reader:snapshot:get':
         case 'reader:command':
-          return handleReaderMessage(body);
+          return handleReaderMessage(message);
         default:
           return { ok: false, error: { code: 'unknown_message', message: '不支持的 Popup 请求。' } };
       }
@@ -702,175 +833,79 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
 
     async function acceptSnapshot(message, sender) {
       if (!sender || !sender.tab || sender.tab.id == null) return false;
-      const snapshot = snapshotFromMessage(message);
-      if (!snapshot) return false;
-      const target = normalizeTabTarget(sender.tab);
-      await rememberSnapshot(target, snapshot);
-      return true;
+      return Boolean(await rememberSnapshot(normalizeTabTarget(sender.tab), message));
     }
 
     async function forgetTab(tabId) {
       const numericId = Number(tabId);
       if (targetMemory && targetMemory.tabId === numericId) await clearTarget();
       await readSnapshots();
-      snapshotMemory.delete(String(numericId));
-      const persisted = {};
-      snapshotMemory.forEach((entry, key) => { persisted[key] = entry; });
-      await session.set(POPUP_SNAPSHOTS_KEY, persisted);
+      snapshots.delete(String(numericId));
+      await persistSnapshots();
     }
 
-    return {
-      beginTarget,
-      getTarget,
-      clearTarget,
-      sendToTarget,
-      sendCommand,
-      requestSnapshot,
-      targetForTab,
-      handleReaderMessage,
-      handle,
-      acceptSnapshot,
-      forgetTab,
-    };
+    return { beginTarget, getTarget, clearTarget, sendToTarget, sendCommand, requestSnapshot, targetForTab, handleReaderMessage, handle, acceptSnapshot, forgetTab };
   }
 
   function createPageEditorBroker(chromeApi, options) {
     const config = options || {};
     const session = config.session || chromeSessionStorage(chromeApi);
-    const sendCommand = typeof config.sendCommand === 'function'
-      ? config.sendCommand
-      : null;
-    let contextsMemory = null;
+    const sendCommand = typeof config.sendCommand === 'function' ? config.sendCommand : null;
+    let contexts = null;
 
     async function readContexts() {
-      if (contextsMemory) return contextsMemory;
-      const saved = await session.get(PAGE_EDITOR_CONTEXTS_KEY);
-      contextsMemory = saved && typeof saved === 'object' && !Array.isArray(saved)
-        ? saved
-        : {};
-      return contextsMemory;
+      if (contexts) return contexts;
+      const stored = await session.get(PAGE_EDITOR_CONTEXTS_KEY);
+      contexts = stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
+      return contexts;
     }
 
-    async function persistContexts() {
-      await session.set(PAGE_EDITOR_CONTEXTS_KEY, contextsMemory || {});
+    async function persist() {
+      await session.set(PAGE_EDITOR_CONTEXTS_KEY, contexts || {});
     }
 
     function makeContextId() {
-      if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
-        return `qwen-page-${globalThis.crypto.randomUUID()}`;
-      }
-      return `qwen-page-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      return globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+        ? `qwen-page-${globalThis.crypto.randomUUID()}`
+        : `qwen-page-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     }
 
     async function open(body, sender, fallbackTarget) {
-      const contextId = String(body.contextId || makeContextId());
-      const contexts = await readContexts();
-      const existing = contexts[contextId];
-      // Opening an editor is the trust boundary: bind it to the popup's fixed
-      // target (or the sending content tab), never to a tab id supplied by the
-      // extension page.
-      const trustedTabId = fallbackTarget && fallbackTarget.tabId != null
-        ? fallbackTarget.tabId
-        : sender && sender.tab && sender.tab.id != null
-          ? sender.tab.id
-          : existing && existing.tabId;
-      const tabId = trustedTabId == null ? null : Number(trustedTabId);
-      const pageKey = String(
-        fallbackTarget && fallbackTarget.pageKey ||
-          existing && existing.pageKey ||
-          '',
-      );
-      if (tabId == null) {
-        return { ok: false, error: { code: 'page_context_missing', message: '没有找到要编辑的页面。' } };
-      }
+      const contextId = String(body && body.contextId || makeContextId());
+      const map = await readContexts();
+      const existing = map[contextId];
+      const tabId = fallbackTarget && fallbackTarget.tabId != null
+        ? Number(fallbackTarget.tabId)
+        : sender && sender.tab && sender.tab.id != null ? Number(sender.tab.id)
+          : existing && existing.tabId != null ? Number(existing.tabId) : null;
+      const pageKey = String(fallbackTarget && fallbackTarget.pageKey || existing && existing.pageKey || '');
+      if (tabId == null) return { ok: false, error: { code: 'page_context_missing', message: '没有找到要编辑的页面。' } };
       if (!chromeApi.tabs || typeof chromeApi.tabs.create !== 'function') {
         return { ok: false, error: { code: 'tabs_unavailable', message: '当前浏览器无法打开页面编辑器。' } };
       }
-      const query = new URLSearchParams({ contextId });
-      const url = chromeApi.runtime.getURL(`${PAGE_EDITOR_PATH}?${query.toString()}`);
-      let editorTab;
+      const url = chromeApi.runtime.getURL(`${PAGE_EDITOR_PATH}?${new URLSearchParams({ contextId }).toString()}`);
       try {
-        editorTab = await chromeApi.tabs.create({
-          url,
-          openerTabId: Number.isFinite(tabId) ? tabId : undefined,
-        });
+        const editorTab = await chromeApi.tabs.create({ url, openerTabId: tabId });
+        map[contextId] = { contextId, tabId, pageKey, editorTabId: editorTab && editorTab.id != null ? Number(editorTab.id) : null, updatedAt: Date.now() };
+        await persist();
+        return { ok: true, context: map[contextId], tab: editorTab || null };
       } catch (error) {
-        return {
-          ok: false,
-          error: { code: 'page_editor_open_failed', message: error && error.message || '无法打开页面编辑器。' },
-        };
+        return { ok: false, error: { code: 'page_editor_open_failed', message: error && error.message || '无法打开页面编辑器。' } };
       }
-      contexts[contextId] = {
-        contextId,
-        tabId,
-        pageKey,
-        editorTabId: editorTab && editorTab.id != null ? Number(editorTab.id) : null,
-        updatedAt: Date.now(),
-      };
-      await persistContexts();
-      return { ok: true, context: contexts[contextId], tab: editorTab || null };
-    }
-
-    async function register(body, sender) {
-      const contextId = String(body.contextId || '');
-      if (!contextId) {
-        return { ok: false, error: { code: 'context_id_missing', message: '缺少页面编辑上下文。' } };
-      }
-      const contexts = await readContexts();
-      const current = contexts[contextId] || {};
-      const explicitTabId = body.sourceTabId != null
-        ? body.sourceTabId
-        : body.tabId != null
-          ? body.tabId
-          : null;
-      const tabId = explicitTabId != null
-        ? Number(explicitTabId)
-        : current.tabId != null
-          ? Number(current.tabId)
-          : sender && sender.tab && sender.tab.id != null
-            ? Number(sender.tab.id)
-            : null;
-      contexts[contextId] = Object.assign({}, current, {
-        contextId,
-        tabId,
-        pageKey: String(body.pageKey || current.pageKey || ''),
-        editorTabId: sender && sender.tab && sender.tab.id != null
-          ? Number(sender.tab.id)
-          : current.editorTabId || null,
-        updatedAt: Date.now(),
-      });
-      await persistContexts();
-      return { ok: true, context: contexts[contextId] };
     }
 
     async function getContext(body) {
-      const contexts = await readContexts();
-      const contextId = String(body.contextId || '');
-      return { ok: true, context: contextId ? contexts[contextId] || null : contexts };
+      const map = await readContexts();
+      const contextId = String(body && body.contextId || '');
+      return { ok: true, context: contextId ? map[contextId] || null : map };
     }
 
-    async function command(body, sender) {
-      const contexts = await readContexts();
-      const contextId = String(body.contextId || '');
-      const context = contexts[contextId];
-      if (!context || context.tabId == null) {
-        return { ok: false, error: { code: 'page_context_missing', message: '页面编辑上下文已失效，请重新打开。' } };
-      }
-      if (sendCommand) {
-        const target = { tabId: context.tabId, pageKey: context.pageKey };
-        return sendCommand(target, Object.assign({}, body, {
-          source: 'page-editor',
-          contextId,
-          pageKey: context.pageKey,
-        }));
-      }
-      const payload = Object.assign({}, body, {
-        type: 'ui:command',
-        command: normalizeCommand(body),
-        source: 'page-editor',
-        contextId,
-        pageKey: context.pageKey,
-      });
+    async function command(body) {
+      const map = await readContexts();
+      const context = map[String(body && body.contextId || '')];
+      if (!context || context.tabId == null) return { ok: false, error: { code: 'page_context_missing', message: '页面编辑上下文已失效，请重新打开。' } };
+      if (sendCommand) return sendCommand({ tabId: context.tabId, pageKey: context.pageKey }, Object.assign({}, body, { source: 'page-editor', pageKey: context.pageKey }));
+      const payload = Object.assign({}, body, { type: 'ui:command', command: normalizeCommand(body), pageKey: context.pageKey });
       try {
         const response = await chromeApi.tabs.sendMessage(context.tabId, payload);
         return { ok: true, context, response: response || null };
@@ -880,10 +915,10 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
     }
 
     async function close(body) {
-      const contexts = await readContexts();
-      const contextId = String(body.contextId || '');
-      if (contextId) delete contexts[contextId];
-      await persistContexts();
+      const map = await readContexts();
+      const contextId = String(body && body.contextId || '');
+      if (contextId) delete map[contextId];
+      await persist();
       return { ok: true };
     }
 
@@ -892,37 +927,26 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
         case 'page-editor:open':
         case 'page-editor:init':
         case 'page-voices:open':
-        case 'reader:page-editor:open':
-          return open(body || {}, sender, fallbackTarget);
-        case 'page-editor:register':
-          return register(body || {}, sender);
+        case 'reader:page-editor:open': return open(body, sender, fallbackTarget);
         case 'page-editor:get-context':
-        case 'page-editor:context':
-          return getContext(body || {});
-        case 'page-editor:command':
-          return command(body || {}, sender);
-        case 'page-editor:close':
-          return close(body || {});
-        default:
-          return { ok: false, error: { code: 'unknown_message', message: '不支持的页面编辑请求。' } };
+        case 'page-editor:context': return getContext(body);
+        case 'page-editor:command': return command(body);
+        case 'page-editor:close': return close(body);
+        default: return { ok: false, error: { code: 'unknown_message', message: '不支持的页面编辑请求。' } };
       }
     }
 
     async function forgetTab(tabId) {
-      const contexts = await readContexts();
+      const map = await readContexts();
       const numericId = Number(tabId);
-      let changed = false;
-      Object.keys(contexts).forEach((contextId) => {
-        const context = contexts[contextId];
-        if (context && (Number(context.tabId) === numericId || Number(context.editorTabId) === numericId)) {
-          delete contexts[contextId];
-          changed = true;
-        }
+      Object.keys(map).forEach((contextId) => {
+        const context = map[contextId];
+        if (context && (Number(context.tabId) === numericId || Number(context.editorTabId) === numericId)) delete map[contextId];
       });
-      if (changed) await persistContexts();
+      await persist();
     }
 
-    return { handle, open, register, getContext, command, close, forgetTab };
+    return { handle, open, getContext, command, close, forgetTab };
   }
 
   function install(chromeApi) {
@@ -934,34 +958,23 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
       url: chromeApi.runtime.getURL('voice-studio.html'),
     });
     const router = createMessageRouter({ api, storage, openVoiceStudio, offscreen });
+
     async function setBadge(target, snapshot) {
       if (!target || target.tabId == null || !chromeApi.action) return;
-      const status = snapshot && String(snapshot.status || 'idle');
-      const text = status === 'playing'
-        ? '▶'
-        : status === 'paused'
-          ? 'Ⅱ'
-          : status === 'error'
-            ? '!'
-            : '';
+      const status = String(snapshot && snapshot.status || 'idle');
+      const text = status === 'playing' ? '▶' : status === 'paused' ? 'Ⅱ' : status === 'error' ? '!' : '';
       try {
         if (typeof chromeApi.action.setBadgeText === 'function') {
           await chromeApi.action.setBadgeText({ tabId: target.tabId, text });
         }
-        if (typeof chromeApi.action.setBadgeBackgroundColor === 'function') {
-          const color = status === 'error'
-            ? '#dc2626'
-            : status === 'paused'
-              ? '#d97706'
-              : '#6d28d9';
+        if (typeof chromeApi.action.setBadgeBackgroundColor === 'function' && text) {
           await chromeApi.action.setBadgeBackgroundColor({
             tabId: target.tabId,
-            color,
+            color: status === 'error' ? '#dc2626' : status === 'paused' ? '#d97706' : '#6d28d9',
           });
         }
       } catch (_) {
-        // Badge updates are a convenience; a browser that lacks the promise
-        // form of the Action API must not break playback controls.
+        // The badge is a convenience, never a playback dependency.
       }
     }
 
@@ -973,59 +986,55 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
       session,
       sendCommand: popupBroker.sendCommand,
     });
-
     const snapshotEvents = new Set([
-      'ui:state',
-      'ui:snapshot',
-      'reader:state',
-      'reader:snapshot',
-      'player:state',
-      'playback:state',
-      'playback:status',
+      'ui:state', 'ui:snapshot', 'reader:state', 'reader:snapshot',
+      'player:state', 'playback:state', 'playback:status',
     ]);
+
+    function isOffscreenSender(sender) {
+      const expectedUrl = chromeApi.runtime.getURL(OFFSCREEN_PATH);
+      const source = sender || {};
+      return source.url === expectedUrl || source.documentUrl === expectedUrl;
+    }
+
+    function forwardStreamEvent(message) {
+      if (!isOffscreenSender(message && message.sender)) return;
+      const sourceTabId = message && message.message && message.message.sourceTabId;
+      if (!Number.isInteger(sourceTabId) || sourceTabId < 0) return;
+      if (!chromeApi.tabs || typeof chromeApi.tabs.sendMessage !== 'function') return;
+      try {
+        const result = chromeApi.tabs.sendMessage(sourceTabId, message.message);
+        if (result && typeof result.catch === 'function') result.catch(() => {});
+      } catch (_) {
+        // A tab can close between stream completion and event delivery.
+      }
+    }
 
     async function handlePageContextMessage(message) {
       const contextId = String(message && message.contextId || '').trim();
       if (!contextId) {
-        return {
-          ok: false,
-          error: { code: 'context_id_missing', message: '缺少页面编辑上下文。' },
-        };
+        return { ok: false, error: { code: 'context_id_missing', message: '缺少页面编辑上下文。' } };
       }
-      const contextResult = await pageEditorBroker.getContext({ contextId });
-      const mappedContext = contextResult && contextResult.context;
-      if (!mappedContext || mappedContext.tabId == null) {
-        return {
-          ok: false,
-          error: { code: 'page_context_missing', message: '页面编辑上下文已失效，请重新打开。' },
-        };
+      const saved = await pageEditorBroker.getContext({ contextId });
+      const context = saved && saved.context;
+      if (!context || context.tabId == null) {
+        return { ok: false, error: { code: 'page_context_missing', message: '页面编辑上下文已失效，请重新打开。' } };
       }
-      const target = { tabId: mappedContext.tabId, pageKey: mappedContext.pageKey };
-      const payload = {
-        type: message.type,
-        contextId,
-        pageKey: String(mappedContext.pageKey || ''),
-      };
+      const target = { tabId: context.tabId, pageKey: context.pageKey };
+      const payload = { type: message.type, contextId, pageKey: String(context.pageKey || '') };
       if (message.type === 'reader:page-context:apply') {
-        const assignments = Array.isArray(message.assignments) ? message.assignments : [];
         const authorVoices = {};
-        assignments.forEach((assignment) => {
+        (Array.isArray(message.assignments) ? message.assignments : []).forEach((assignment) => {
           const authorId = String(assignment && assignment.authorId || '').trim();
           const voice = String(assignment && assignment.voice || '').trim();
-          if (!authorId) return;
-          if (voice) authorVoices[authorId] = voice;
-          else delete authorVoices[authorId];
+          if (authorId && voice) authorVoices[authorId] = voice;
         });
-        payload.context = {
-          pageKey: payload.pageKey,
-          authorVoices,
-        };
+        payload.context = { pageKey: payload.pageKey, authorVoices };
       }
-      const response = await popupBroker.sendToTarget(target, payload);
-      if (!response.ok) return response;
-      const body = response.response;
-      if (body && typeof body === 'object') return body;
-      return { ok: true };
+      const sent = await popupBroker.sendToTarget(target, payload);
+      return sent.ok && sent.response && typeof sent.response === 'object'
+        ? sent.response
+        : sent;
     }
 
     function respondWith(promise, sendResponse) {
@@ -1033,7 +1042,13 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
     }
 
     chromeApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message && message.target === OFFSCREEN_TARGET) return undefined;
+      if (message && message.target === STREAM_EVENT_TARGET) {
+        forwardStreamEvent({ message, sender });
+        return undefined;
+      }
+      if (message && message.target === OFFSCREEN_TARGET) {
+        return undefined;
+      }
       if (isPopupMessage(message && message.type)) {
         respondWith(popupBroker.handle(message, sender), sendResponse);
         return true;
@@ -1046,62 +1061,53 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
         );
         return true;
       }
-      if (
-        message &&
-        (message.type === 'reader:page-context:get' ||
-          message.type === 'reader:page-context:apply')
-      ) {
+      if (message && (message.type === 'reader:page-context:get' || message.type === 'reader:page-context:apply')) {
         respondWith(handlePageContextMessage(message), sendResponse);
         return true;
       }
       if (snapshotEvents.has(message && message.type)) {
-        respondWith(
-          popupBroker.acceptSnapshot(message, sender).then(() => ({ ok: true })),
-          sendResponse,
-        );
+        respondWith(popupBroker.acceptSnapshot(message, sender).then(() => ({ ok: true })), sendResponse);
         return true;
       }
-      respondWith(router(message), sendResponse);
+      const sourceTabId = sender && sender.tab && sender.tab.id != null
+        ? sender.tab.id : null;
+      const forwarded = sourceTabId == null || !message || message.sourceTabId != null
+        ? message
+        : Object.assign({}, message, { sourceTabId });
+      respondWith(router(forwarded), sendResponse);
       return true;
     });
-
     if (chromeApi.commands && chromeApi.commands.onCommand) {
       chromeApi.commands.onCommand.addListener(async (command) => {
         if (command !== 'toggle-reader') return;
         const tabs = await chromeApi.tabs.query({ active: true, currentWindow: true });
         const tab = normalizeTabTarget(tabs && tabs[0]);
-        const state = await popupBroker.requestSnapshot(tab);
-        const pageKey = state && state.snapshot && state.snapshot.pageKey;
+        const result = await popupBroker.requestSnapshot(tab);
+        const pageKey = result && result.snapshot && result.snapshot.pageKey;
         if (!pageKey) return;
         const target = Object.assign({}, tab, { pageKey });
-        const result = await popupBroker.sendCommand(target, {
-          command: 'play-toggle',
-          source: 'shortcut',
-          pageKey,
+        const commandResult = await popupBroker.sendCommand(target, {
+          command: 'play-toggle', source: 'shortcut', pageKey,
         });
-        if (result && result.snapshot) await setBadge(target, result.snapshot);
+        if (commandResult && commandResult.snapshot) await setBadge(target, commandResult.snapshot);
       });
     }
-
-    if (chromeApi.tabs && chromeApi.tabs.onRemoved &&
-      typeof chromeApi.tabs.onRemoved.addListener === 'function') {
+    if (chromeApi.tabs && chromeApi.tabs.onRemoved && typeof chromeApi.tabs.onRemoved.addListener === 'function') {
       chromeApi.tabs.onRemoved.addListener((tabId) => {
         void popupBroker.forgetTab(tabId);
         void pageEditorBroker.forgetTab(tabId);
       });
     }
-
-    // Expose the brokers for browser harnesses without making them part of the
-    // extension's public runtime API. This is useful for deterministic tests
-    // that install the service-worker module with a mocked chrome object.
     return { popupBroker, pageEditorBroker };
   }
 
   return {
     OFFSCREEN_TARGET,
+    STREAM_EVENT_TARGET,
     OFFSCREEN_PATH,
     REQUIRED_ORIGIN,
     SETTINGS_KEY,
+    CLEANUP_QUEUE_KEY,
     POPUP_TARGET_KEY,
     POPUP_SNAPSHOTS_KEY,
     PAGE_EDITOR_CONTEXTS_KEY,

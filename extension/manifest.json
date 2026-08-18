@@ -1,13 +1,23 @@
 {
   "manifest_version": 3,
   "name": "Qwen 网页朗读",
-  "version": "0.3.1",
+  "version": "0.5.2",
   "description": "自动识别论坛、小说与长文章，并使用本机 Qwen3-TTS 多音色朗读。",
-  "permissions": ["storage", "offscreen", "tabs"],
+  "permissions": ["storage", "unlimitedStorage", "offscreen", "tabs"],
   "host_permissions": ["http://127.0.0.1:7811/*"],
+  "icons": {
+    "16": "assets/qwen-reader-16.png",
+    "32": "assets/qwen-reader-32.png",
+    "48": "assets/qwen-reader-48.png",
+    "128": "assets/qwen-reader-128.png"
+  },
   "action": {
     "default_title": "Qwen 网页朗读",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "assets/qwen-reader-16.png",
+      "32": "assets/qwen-reader-32.png"
+    }
   },
   "background": {
     "service_worker": "background.js"
@@ -23,22 +33,43 @@
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],
+      "exclude_matches": ["https://accounts.google.com/gsi/*"],
       "run_at": "document_idle",
+      "css": ["content/page-highlight.css"],
       "js": [
         "shared/defaults.js",
         "shared/text.js",
+        "shared/forum-content.js",
+        "shared/generic-thread-detector.js",
         "vendor/readability/Readability.js",
         "shared/normalized-document.js",
         "shared/extractors.js",
+        "shared/sentence-range.js",
+        "shared/marker-placement.js",
+        "shared/source-locator.js",
+        "shared/follow-controller.js",
         "shared/voice-assignment.js",
         "shared/player-state.js",
+        "shared/word-timeline.js",
         "content/reader.js"
       ]
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["content/reader.css"],
+      "resources": [
+        "content/reader.css",
+        "assets/qwen-reader-16.png",
+        "assets/qwen-reader-32.png",
+        "assets/qwen-reader-48.png",
+        "assets/qwen-reader-128.png",
+        "assets/icons/play.svg",
+        "assets/icons/pause.svg",
+        "assets/icons/skip-back.svg",
+        "assets/icons/skip-forward.svg",
+        "assets/icons/stop.svg",
+        "assets/icons/x.svg"
+      ],
       "matches": ["http://*/*", "https://*/*"]
     }
   ],

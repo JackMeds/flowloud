@@ -39,10 +39,6 @@
       if (action === 'save-page-voices') return dispatch(root, action);
       if (action === 'cancel-page-voices') return dispatch(root, action);
     });
-    root.addEventListener('change', (event) => {
-      const target = event.target;
-      if (target.matches('[data-speed]')) dispatch(root, 'reader:command', { command: 'set-speed', value: target.value });
-    });
   }
 
   function mountPopup(root, model) {
@@ -54,9 +50,11 @@
     const shell = element('section', 'qr-popup');
     const header = element('header', 'qr-popup-header');
     header.append(element('h1', 'qr-brand', 'Qwen 网页朗读'));
-    const headerRight = element('div', 'qr-status', status === 'playing' ? '正在朗读' : status === 'paused' ? '已暂停' : status === 'error' ? '连接异常' : '准备就绪');
+    const headerActions = element('div', 'qr-popup-actions');
+    const headerRight = element('span', 'qr-status', status === 'playing' ? '正在朗读' : status === 'paused' ? '已暂停' : status === 'error' ? '连接异常' : '准备就绪');
     headerRight.dataset.state = status === 'idle' ? 'ready' : status;
-    header.append(headerRight);
+    headerActions.append(headerRight, button('qr-text-button', '设置', 'open-options'));
+    header.append(headerActions);
     shell.append(header);
     if (!model || model.empty) {
       shell.append(element('section', 'qr-empty-card', model && model.message || '打开一篇文章或讨论页后，即可从这里开始朗读。'));
@@ -90,19 +88,7 @@
     next.disabled = !segmentCount || status === 'loading';
     controls.append(previous, primary, next);
     pageCard.append(controls);
-    const speedRow = element('label', 'qr-speed-row');
-    speedRow.append(element('span', '', '朗读速度'));
-    const speed = element('select', 'qr-speed-select');
-    speed.dataset.speed = 'true';
-    const playbackSpeed = String(snapshot.speed || snapshot.rate || model.speed || '1.0');
-    ['0.8×', '1.0×', '1.2×', '1.4×'].forEach((label) => {
-      const option = element('option', '', label);
-      option.value = label.replace('×', '');
-      option.selected = option.value === playbackSpeed;
-      speed.append(option);
-    });
-    speedRow.append(speed);
-    pageCard.append(speedRow);
+    pageCard.append(element('p', 'qr-runtime-note', '播放会在关闭弹窗后继续；正文将保持当前句与逐词高亮。'));
     shell.append(pageCard);
     const authors = model.authors || [];
     if (authors.length) {
@@ -143,6 +129,9 @@
       shell.append(error);
     }
     const list = element('section', 'qr-author-list');
+    if (!authors.length) {
+      list.append(element('section', 'qr-empty-card', '还没有识别到可单独配音的作者。返回网页并等待正文识别完成后再试。'));
+    }
     authors.forEach((author) => {
       const card = element('article', 'qr-author-card');
       const row = element('div', 'qr-author-row');
@@ -154,7 +143,8 @@
       const select = element('select', 'qr-voice-select');
       select.name = `voice:${author.id || author.name}`;
       select.dataset.authorId = author.id || author.name || '';
-      const followGlobal = element('option', '', `跟随全局策略（当前：${author.voice || '默认音色'}）`);
+      const effectiveVoice = author.effectiveVoice || author.voice || '默认音色';
+      const followGlobal = element('option', '', `跟随全局策略（当前：${effectiveVoice}）`);
       followGlobal.value = '';
       select.append(followGlobal);
       const explicitVoice = String(authorVoices[author.id || author.name] || '');

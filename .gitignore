@@ -3,4 +3,15 @@ build/
 *.log
 .superpowers/
 .worktrees/
+
+# Browser automation profiles, crash dumps, caches, and temporary E2E runs.
 .tmp-*/
+**/Cache/
+**/Code Cache/
+**/GPUCache/
+**/Crashpad/
+
+# Generated audio and audit screenshots are not source code.
+*.wav
+docs/audits/**/*.png
+docs/voice-studio-audit-*.png

@@ -28,11 +28,13 @@ test('popup controller uses the B+C message contract and keeps advanced editing 
   assert.match(read('popup-view.js'), /mountPageVoices/);
 });
 
-test('popup renderer accepts a compact snapshot without the full segment queue', () => {
+test('popup renderer accepts a compact snapshot without the full segment queue or fake controls', () => {
   const source = read('popup-view.js');
   assert.match(source, /snapshot\.segmentCount/);
   assert.match(source, /snapshot\.current/);
-  assert.match(source, /snapshot\.speed \|\| snapshot\.rate \|\| model\.speed/);
+  assert.match(source, /播放会在关闭弹窗后继续/);
+  assert.doesNotMatch(source, /data-speed/);
+  assert.match(source, /open-options/);
   assert.doesNotMatch(source, /previous\.disabled = !segments\.length/);
 });
 

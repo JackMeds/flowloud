@@ -3,8 +3,11 @@
 
   const text = global.QwenReaderText;
   const model = global.QwenReaderNormalizedDocument;
+  const ForumContent = global.QwenReaderForumContent;
+  const GenericThreadDetector = global.QwenReaderGenericThreadDetector;
   const MAX_PAGES = 100;
   const MAX_POSTS = 5000;
+  const FETCH_CONCURRENCY = 6;
   const REMOVABLE_SELECTOR = [
     'script', 'style', 'noscript', 'template', 'svg', 'button', 'nav', 'aside', 'footer',
     '[hidden]', '[aria-hidden="true"]', '[role="button"]',
@@ -65,6 +68,23 @@
     return requireModel().createBlock(Object.assign({ type: 'forum-post' }, input));
   }
 
+  function expandForumPost(meta, contentSource, options) {
+    if (!ForumContent) throw new Error('QwenReaderForumContent must load before extractors.js');
+    const units = contentSource && typeof contentSource === 'object'
+      ? ForumContent.semanticUnitsFromElement(contentSource, options)
+      : ForumContent.semanticUnitsFromHtml(contentSource, options);
+    return units.map((unit) => block(Object.assign({}, meta, {
+      id: `${meta.id}:unit:${unit.unitIndex}`,
+      text: unit.text,
+      sourceLocator: {
+        adapter: meta.adapter,
+        containerSelector: meta.containerSelector,
+        unitIndex: unit.unitIndex,
+        fingerprint: unit.fingerprint
+      }
+    })));
+  }
+
   function documentResult(document, input) {
     const location = document && document.location;
     return requireModel().createDocument(Object.assign({
@@ -95,6 +115,34 @@
       payload,
       url: response.url || requestUrl.toString()
     };
+  }
+
+  // Long forum topics are useful as soon as their first API response is
+  // available.  Keep this hook deliberately small: callers may choose to
+  // install a queue immediately and let the adapter continue fetching pages.
+  async function reportProgress(options, result, meta) {
+    const callback = options && options.onProgress;
+    if (typeof callback !== 'function' || !result || !result.blocks.length) return;
+    await callback(result, Object.assign({
+      adapterId: result.adapterId,
+      complete: result.complete !== false
+    }, meta || {}));
+  }
+
+  async function mapWithConcurrency(items, limit, worker) {
+    const source = Array.isArray(items) ? items : [];
+    const results = new Array(source.length);
+    let cursor = 0;
+    const workerCount = Math.min(source.length, Math.max(1, Number(limit) || 1));
+    async function run() {
+      while (cursor < source.length) {
+        const index = cursor;
+        cursor += 1;
+        results[index] = await worker(source[index], index);
+      }
+    }
+    await Promise.all(Array.from({ length: workerCount }, () => run()));
+    return results;
   }
 
   function decodeEntities(value) {
@@ -196,26 +244,24 @@
       ? forumAuthor(firstAuthorId, userNames.get(firstAuthorId), firstPostId)
       : null;
 
-    return posts.map((post) => {
+    return posts.flatMap((post) => {
       const id = String(post.id);
       const rawAuthorId = getPostAuthorId(post);
       const author = forumAuthor(rawAuthorId, userNames.get(rawAuthorId), `flarum:${id}`);
-      return block({
+      const sourceSelector = `.PostStream-item[data-id="${cssString(id)}"]`;
+      return expandForumPost({
         id: `flarum:post:${id}`,
+        adapter: 'flarum',
+        containerSelector: `${sourceSelector} .Post-body`,
         postId: id,
         floor: postNumber(post),
         authorId: author.id,
         authorName: author.name,
         isOp: id === firstPostId || Boolean(opAuthor && opAuthor.stable && author.stable && author.id === opAuthor.id),
-        text: htmlToReadableText(
-          (post.attributes || {}).contentHtml || '',
-          options && options.DOMParserCtor,
-          { removeBlockquotes: true }
-        ),
         sourceKey: `flarum:${id}`,
-        sourceSelector: `.PostStream-item[data-id="${cssString(id)}"]`
-      });
-    }).filter((item) => item.text.length > 0);
+        sourceSelector
+      }, (post.attributes || {}).contentHtml || '', Object.assign({}, options, { removeBlockquotes: true }));
+    });
   }
 
   function cssString(value) {
@@ -271,17 +317,21 @@
     });
     const first = normalized.find((item) => elementReadableText(item.body, { removeBlockquotes: true }));
     const opKey = first && first.author.id;
-    return normalized.map((item) => block({
+    return normalized.flatMap((item) => {
+      const sourceSelector = `.PostStream-item[data-id="${cssString(item.postId)}"]`;
+      return expandForumPost({
       id: `flarum:post:${item.postId}`,
+      adapter: 'flarum',
+      containerSelector: `${sourceSelector} .Post-body`,
       postId: item.postId,
       floor: item.floor,
       authorId: item.author.id,
       authorName: item.author.name,
       isOp: Boolean(opKey) && item.author.id === opKey,
-      text: elementReadableText(item.body, { removeBlockquotes: true }),
       sourceKey: `flarum:${item.postId}`,
-      sourceSelector: `.PostStream-item[data-id="${cssString(item.postId)}"]`
-    })).filter((item) => item.text.length > 0);
+      sourceSelector
+      }, item.body, { removeBlockquotes: true });
+    });
   }
 
   async function extractFlarumDocument(document, options) {
@@ -315,6 +365,13 @@
         nextUrl = link
           ? makeSameOriginUrl(link, response.url, route.url.origin).toString()
           : '';
+        await reportProgress(options, documentResult(document, {
+          adapterId: 'flarum',
+          blocks: parseFlarumApi(combined, options),
+          complete: !nextUrl,
+          warnings: nextUrl ? ['flarum-loading-more'] : [],
+          stats: { fetchedPages, extractedPosts: combined.data.length }
+        }), { phase: fetchedPages === 1 ? 'initial' : 'page', page: fetchedPages });
       }
       const blocks = parseFlarumApi(combined, options);
       return documentResult(document, {
@@ -400,21 +457,23 @@
     ));
     const firstId = first && first.id != null ? String(first.id) : '';
     const opAuthor = first ? discourseAuthor(first) : null;
-    return posts.map((post) => {
+    return posts.flatMap((post) => {
       const id = String(post.id);
       const author = discourseAuthor(post);
-      return block({
+      const sourceSelector = `article[data-post-id="${cssString(id)}"], article#post_${cssString(id)}`;
+      return expandForumPost({
         id: `discourse:post:${id}`,
+        adapter: 'discourse',
+        containerSelector: `article[data-post-id="${cssString(id)}"] .cooked, article#post_${cssString(id)} .cooked`,
         postId: id,
         floor: Number(post.post_number),
         authorId: author.id,
         authorName: author.name,
         isOp: id === firstId || Boolean(opAuthor && opAuthor.stable && author.stable && author.id === opAuthor.id),
-        text: htmlToReadableText(post.cooked, options && options.DOMParserCtor, { removeBlockquotes: true }),
         sourceKey: `discourse:${id}`,
-        sourceSelector: `article[data-post-id="${cssString(id)}"], article#post_${cssString(id)}`
-      });
-    }).filter((item) => item.text.length > 0);
+        sourceSelector
+      }, post.cooked, Object.assign({}, options, { removeBlockquotes: true }));
+    });
   }
 
   function extractDiscourseDom(document) {
@@ -428,20 +487,24 @@
       const postId = String((post.getAttribute && post.getAttribute('data-post-id')) || post.id || index + 1).replace(/^post_/u, '');
       const floorNode = post.querySelector && post.querySelector('.post-number, a.post-date');
       const floorMatch = clean(floorNode && floorNode.textContent).match(/(\d+)/u);
-      return { postId, floor: floorMatch ? Number(floorMatch[1]) : index + 1, authorId, authorName, text: elementReadableText(content, { removeBlockquotes: true }) };
-    }).filter((item) => item.text);
+      return { postId, floor: floorMatch ? Number(floorMatch[1]) : index + 1, authorId, authorName, content };
+    }).filter((item) => ForumContent.semanticUnitsFromElement(item.content, { removeBlockquotes: true }).length);
     const first = mapped.slice().sort((a, b) => a.floor - b.floor)[0];
-    return mapped.sort((a, b) => a.floor - b.floor).map((item) => block({
+    return mapped.sort((a, b) => a.floor - b.floor).flatMap((item) => {
+      const sourceSelector = `article[data-post-id="${cssString(item.postId)}"], article#post_${cssString(item.postId)}`;
+      return expandForumPost({
       id: `discourse:post:${item.postId}`,
+      adapter: 'discourse',
+      containerSelector: `article[data-post-id="${cssString(item.postId)}"] .cooked, article#post_${cssString(item.postId)} .cooked`,
       postId: item.postId,
       floor: item.floor,
       authorId: item.authorId,
       authorName: item.authorName,
       isOp: Boolean(first) && first.authorId === item.authorId,
-      text: item.text,
       sourceKey: `discourse:${item.postId}`,
-      sourceSelector: `article[data-post-id="${cssString(item.postId)}"], article#post_${cssString(item.postId)}`
-    }));
+      sourceSelector
+      }, item.content, { removeBlockquotes: true });
+    });
   }
 
   async function extractDiscourseDocument(document, options) {
@@ -468,10 +531,11 @@
       const embedded = stream && Array.isArray(stream.posts) ? stream.posts : [];
       const present = new Set(embedded.map((post) => String(post.id)));
       const missing = ids.filter((id) => !present.has(id));
-      const pages = [];
-      const failedIds = [];
+      const batches = [];
       for (let index = 0; index < missing.length; index += 20) {
-        const batch = missing.slice(index, index + 20);
+        batches.push(missing.slice(index, index + 20));
+      }
+      const fetchBatch = async (batch) => {
         const batchUrl = new URL(`${route.basePath || ''}/t/${route.topicId}/posts.json`.replace(/\/{2,}/gu, '/'), route.url.origin);
         batch.forEach((id) => batchUrl.searchParams.append('post_ids[]', id));
         try {
@@ -480,12 +544,49 @@
             baseUrl: batchUrl,
             signal: options.signal
           });
-          pages.push(response.payload);
+          return { payload: response.payload, failedIds: [] };
         } catch (error) {
           if (isAbortError(error)) throw error;
-          failedIds.push(...batch);
+          return { payload: null, failedIds: batch };
         }
+      };
+      const pages = [];
+      // The embedded posts in the first topic response are enough to expose a
+      // playable queue.  Missing post batches can then arrive in the
+      // background without holding the reader in "extracting".
+      await reportProgress(options, documentResult(document, {
+        adapterId: 'discourse',
+        title: initial.title || (document && document.title),
+        blocks: parseDiscourseTopic(initial, [], options),
+        complete: missing.length === 0,
+        warnings: missing.length ? ['discourse-loading-more'] : [],
+        stats: { expectedPosts: ids.length, extractedPosts: embedded.length, fetchedPages: 1 }
+      }), { phase: 'initial', page: 1 });
+      const firstBatchResult = batches.length ? await fetchBatch(batches[0]) : null;
+      if (firstBatchResult && firstBatchResult.payload) {
+        pages.push(firstBatchResult.payload);
+        await reportProgress(options, documentResult(document, {
+          adapterId: 'discourse', title: initial.title || (document && document.title),
+          blocks: parseDiscourseTopic(initial, pages, options), complete: false,
+          warnings: ['discourse-loading-more'],
+          stats: { expectedPosts: ids.length, extractedPosts: parseDiscourseTopic(initial, pages, options).length, fetchedPages: 1 + pages.length }
+        }), { phase: 'page', page: 1 + pages.length });
       }
+      const remainingBatchResults = await mapWithConcurrency(batches.slice(1), FETCH_CONCURRENCY, async (batch) => {
+        const result = await fetchBatch(batch);
+        if (result.payload) {
+          pages.push(result.payload);
+          await reportProgress(options, documentResult(document, {
+            adapterId: 'discourse', title: initial.title || (document && document.title),
+            blocks: parseDiscourseTopic(initial, pages, options), complete: false,
+            warnings: ['discourse-loading-more'],
+            stats: { expectedPosts: ids.length, extractedPosts: parseDiscourseTopic(initial, pages, options).length, fetchedPages: 1 + pages.length }
+          }), { phase: 'page' });
+        }
+        return result;
+      });
+      const batchResults = [firstBatchResult, ...remainingBatchResults].filter(Boolean);
+      const failedIds = batchResults.flatMap((result) => result.failedIds);
       const blocks = parseDiscourseTopic(initial, pages, options);
       return documentResult(document, {
         adapterId: 'discourse',
@@ -541,7 +642,7 @@
       : null;
     const rootOpKey = authorKey(root.uid, '');
     const opKey = rootOpKey || (firstAuthor && firstAuthor.stable ? firstAuthor.id : '');
-    return posts.map((post) => {
+    return posts.flatMap((post) => {
       const id = String(post.pid);
       const user = post.user || {};
       const authorName = clean(user.displayname || user.username || post.username) || '匿名用户';
@@ -551,18 +652,20 @@
         `nodebb:${id}`
       );
       const index = Number(post.index);
-      return block({
+      const sourceSelector = `[component="post"][data-pid="${cssString(id)}"]`;
+      return expandForumPost({
         id: `nodebb:post:${id}`,
+        adapter: 'nodebb',
+        containerSelector: `${sourceSelector} [component="post/content"]`,
         postId: id,
         floor: Number.isFinite(index) ? index + 1 : null,
         authorId: author.id,
         authorName,
         isOp: post.topicOwnerPost === true || id === firstId || Boolean(opKey && author.stable && author.id === opKey),
-        text: htmlToReadableText(post.content, options && options.DOMParserCtor, { removeBlockquotes: true }),
         sourceKey: `nodebb:${id}`,
-        sourceSelector: `[component="post"][data-pid="${cssString(id)}"]`
-      });
-    }).filter((item) => item.text.length > 0);
+        sourceSelector
+      }, post.content, Object.assign({}, options, { removeBlockquotes: true }));
+    });
   }
 
   function extractNodebbDom(document) {
@@ -579,20 +682,24 @@
         `nodebb:${postId}`
       );
       const indexValue = Number(post.getAttribute && post.getAttribute('data-index'));
-      return { postId, floor: Number.isFinite(indexValue) ? indexValue + 1 : index + 1, authorId: author.id, authorName, text: elementReadableText(content, { removeBlockquotes: true }) };
-    }).filter((item) => item.text);
+      return { postId, floor: Number.isFinite(indexValue) ? indexValue + 1 : index + 1, authorId: author.id, authorName, content };
+    }).filter((item) => ForumContent.semanticUnitsFromElement(item.content, { removeBlockquotes: true }).length);
     const first = mapped.slice().sort((a, b) => a.floor - b.floor)[0];
-    return mapped.sort((a, b) => a.floor - b.floor).map((item) => block({
+    return mapped.sort((a, b) => a.floor - b.floor).flatMap((item) => {
+      const sourceSelector = `[component="post"][data-pid="${cssString(item.postId)}"]`;
+      return expandForumPost({
       id: `nodebb:post:${item.postId}`,
+      adapter: 'nodebb',
+      containerSelector: `${sourceSelector} [component="post/content"]`,
       postId: item.postId,
       floor: item.floor,
       authorId: item.authorId,
       authorName: item.authorName,
       isOp: Boolean(first) && first.authorId === item.authorId,
-      text: item.text,
       sourceKey: `nodebb:${item.postId}`,
-      sourceSelector: `[component="post"][data-pid="${cssString(item.postId)}"]`
-    }));
+      sourceSelector
+      }, item.content, { removeBlockquotes: true });
+    });
   }
 
   async function extractNodebbDocument(document, options) {
@@ -622,25 +729,57 @@
           firstResponse.payload.pagination.pageCount
         ) || 1
       );
+      await reportProgress(options, documentResult(document, {
+        adapterId: 'nodebb',
+        title: firstResponse.payload.title || (document && document.title),
+        blocks: parseNodebbTopicPages(pages, options),
+        complete: reportedPageCount <= 1,
+        warnings: reportedPageCount > 1 ? ['nodebb-loading-more'] : [],
+        stats: { fetchedPages: 1, reportedPages: reportedPageCount, extractedPosts: parseNodebbTopicPages(pages, options).length }
+      }), { phase: 'initial', page: 1 });
       const pageCount = Math.min(MAX_PAGES, reportedPageCount);
       const paginationCapped = reportedPageCount > MAX_PAGES;
-      for (let page = 2; page <= pageCount; page += 1) {
+      const pageNumbers = Array.from(
+        { length: Math.max(0, pageCount - 1) },
+        (_, index) => index + 2
+      );
+      const pageResults = await mapWithConcurrency(pageNumbers, FETCH_CONCURRENCY, async (page) => {
         const pageUrl = new URL(route.apiUrl.toString());
         pageUrl.searchParams.set('page', String(page));
-        const response = await fetchJson(fetchFn, pageUrl, {
-          origin: route.url.origin,
-          baseUrl: pageUrl,
-          signal: options.signal
-        });
-        pages.push(response.payload);
-      }
+        try {
+          const response = await fetchJson(fetchFn, pageUrl, {
+            origin: route.url.origin,
+            baseUrl: pageUrl,
+            signal: options.signal
+          });
+          pages.push(response.payload);
+          await reportProgress(options, documentResult(document, {
+            adapterId: 'nodebb',
+            title: firstResponse.payload.title || (document && document.title),
+            blocks: parseNodebbTopicPages(pages, options),
+            complete: false,
+            warnings: ['nodebb-loading-more'],
+            stats: { fetchedPages: pages.length, reportedPages: reportedPageCount, extractedPosts: parseNodebbTopicPages(pages, options).length }
+          }), { phase: 'page', page });
+          return { page, payload: response.payload };
+        } catch (error) {
+          if (isAbortError(error)) throw error;
+          return { page, payload: null };
+        }
+      });
+      // Results are already appended by workers so a completed page can be
+      // surfaced immediately. Keep the final parser deterministic by sorting
+      // through parseNodebbTopicPages' post index ordering.
       const blocks = parseNodebbTopicPages(pages, options);
+      const fetchedAllPages = pageResults.every((result) => Boolean(result.payload));
       return documentResult(document, {
         adapterId: 'nodebb',
         title: firstResponse.payload.title || (document && document.title),
         blocks,
-        complete: !paginationCapped && pages.length === reportedPageCount,
-        warnings: paginationCapped || pages.length !== pageCount ? ['nodebb-pagination-limit'] : [],
+        complete: !paginationCapped && fetchedAllPages && pages.length === reportedPageCount,
+        warnings: paginationCapped
+          ? ['nodebb-pagination-limit']
+          : (!fetchedAllPages || pages.length !== pageCount ? ['nodebb-api-partial'] : []),
         stats: {
           fetchedPages: pages.length,
           reportedPages: reportedPageCount,
@@ -709,14 +848,18 @@
         authorName: author.name,
         authorStable: author.stable,
         starterMarker,
-        text: elementReadableText(content, { removeBlockquotes: true })
+        content
       };
-    }).filter((item) => item.text).sort((left, right) => left.floor - right.floor);
+    }).filter((item) => ForumContent.semanticUnitsFromElement(item.content, { removeBlockquotes: true }).length).sort((left, right) => left.floor - right.floor);
     const markedStarter = mapped.find((item) => item.starterMarker);
     const visibleFirst = mapped.find((item) => item.floor === 1);
     const op = markedStarter || visibleFirst;
-    return mapped.map((item) => block({
+    return mapped.flatMap((item) => {
+      const sourceSelector = `.message--post[data-content="post-${cssString(item.postId)}"], #js-post-${cssString(item.postId)}`;
+      return expandForumPost({
       id: `xenforo:post:${item.postId}`,
+      adapter: 'xenforo',
+      containerSelector: `.message--post[data-content="post-${cssString(item.postId)}"] .message-body .bbWrapper, #js-post-${cssString(item.postId)} .message-body .bbWrapper`,
       postId: item.postId,
       floor: item.floor,
       authorId: item.authorId,
@@ -725,10 +868,64 @@
         item.postId === op.postId ||
         Boolean(op.authorStable && item.authorStable && item.authorId === op.authorId)
       ),
-      text: item.text,
       sourceKey: `xenforo:${item.postId}`,
-      sourceSelector: `.message--post[data-content="post-${cssString(item.postId)}"], #js-post-${cssString(item.postId)}`
-    }));
+      sourceSelector
+      }, item.content, { removeBlockquotes: true });
+    });
+  }
+
+  function isMirrorCardForum(document) {
+    if (!document || typeof document.querySelectorAll !== 'function') return false;
+    let hostname = '';
+    try {
+      hostname = getLocationUrl(document).hostname.toLowerCase();
+    } catch (_) {}
+    return hostname === 'mirror.chromaso.net' && document.querySelectorAll('.mm-post .card-body').length > 0;
+  }
+
+  function extractMirrorCardForum(document) {
+    if (!document || typeof document.querySelectorAll !== 'function') return [];
+    const posts = Array.from(document.querySelectorAll('.mm-post'));
+    const mapped = posts.map((post, index) => {
+      const content = post.querySelector && post.querySelector('.card-body');
+      if (!content) return null;
+      const authorNode = post.querySelector && post.querySelector(
+        '.card-header a.ui-link[href*="/author/"], .card-header a[href*="/author/"]'
+      );
+      const authorName = clean(authorNode && authorNode.textContent);
+      const authorHref = String(authorNode && authorNode.getAttribute && authorNode.getAttribute('href') || '');
+      const authorMatch = authorHref.match(/\/author\/([^/?#]+)/u);
+      const rawPostId = String(post.id || `mirror-${index + 1}`);
+      const postId = rawPostId.replace(/^p/u, '') || String(index + 1);
+      const author = forumAuthor(authorMatch && authorMatch[1], authorName, `mirror:${postId}`);
+      const subtitle = post.querySelector && post.querySelector(
+        '.card-header .flex-grow-1 > .text-muted, .card-header .text-muted:last-child, .card-header .text-muted'
+      );
+      return {
+        rawPostId,
+        postId,
+        floor: index + 1,
+        author,
+        isReply: /^\s*re\s*:/iu.test(clean(subtitle && subtitle.textContent)),
+        content
+      };
+    }).filter(Boolean);
+    const op = mapped.find((item) => !item.isReply);
+    return mapped.flatMap((item) => {
+      const containerSelector = `[id="${cssString(item.rawPostId)}"] .card-body`;
+      return expandForumPost({
+        id: `mirror-card:post:${item.postId}`,
+        adapter: 'mirror-card',
+        containerSelector,
+        postId: item.postId,
+        floor: item.floor,
+        authorId: item.author.id,
+        authorName: item.author.name,
+        isOp: Boolean(op) && item.author.stable && op.author.stable && item.author.id === op.author.id,
+        sourceKey: `mirror-card:${item.postId}`,
+        sourceSelector: containerSelector
+      }, String(item.content.innerHTML || ''), { removeBlockquotes: true });
+    });
   }
 
   function splitArticleText(value) {
@@ -749,7 +946,10 @@
       return null;
     }
     if (!article) return null;
-    const parts = splitArticleText(article.textContent);
+    const semanticParts = article.content && ForumContent
+      ? ForumContent.semanticUnitsFromHtml(article.content, { removeBlockquotes: true }).map((unit) => unit.text)
+      : [];
+    const parts = semanticParts.length ? semanticParts : splitArticleText(article.textContent);
     if (!parts.length) return null;
     return documentResult(document, {
       adapterId: 'readability',
@@ -807,19 +1007,110 @@
       : [];
     const readableBlocks = descendants.length ? descendants : [candidate.element];
     const segments = [];
-    readableBlocks.forEach((node, index) => {
+    readableBlocks.forEach((node) => {
       if (!isReadableNode(node)) return;
-      const cleaned = elementReadableText(node);
-      if (!cleaned || GENERIC_CONTROL_PATTERN.test(cleaned)) return;
-      segments.push(block({
-        id: `generic:${index}`,
-        type: 'article',
-        floor: segments.length + 1,
-        text: cleaned,
-        sourceKey: `generic:${index}:${fingerprint(cleaned)}`
-      }));
+      const units = ForumContent
+        ? ForumContent.semanticUnitsFromElement(node, { removeBlockquotes: true })
+        : [];
+      const texts = units.length ? units.map((unit) => unit.text) : [elementReadableText(node)];
+      texts.forEach((cleaned) => {
+        if (!cleaned || GENERIC_CONTROL_PATTERN.test(cleaned)) return;
+        const index = segments.length;
+        segments.push(block({
+          id: `generic:${index}`,
+          type: 'article',
+          floor: index + 1,
+          text: cleaned,
+          sourceKey: `generic:${index}:${fingerprint(cleaned)}`
+        }));
+      });
     });
     return segments;
+  }
+
+  function candidateMetrics(document) {
+    const blocks = document && Array.isArray(document.blocks) ? document.blocks : [];
+    const texts = blocks.map((entry) => clean(entry && entry.text)).filter(Boolean);
+    const totalChars = texts.reduce((sum, value) => sum + value.length, 0);
+    const speakableChars = texts.reduce((sum, value) => (
+      sum + Array.from(value).filter((character) => /[\p{L}\p{N}]/u.test(character)).length
+    ), 0);
+    const uniqueBlocks = new Set(texts.map((value) => value.toLocaleLowerCase())).size;
+    return {
+      blockCount: texts.length,
+      totalChars,
+      averageChars: texts.length ? totalChars / texts.length : 0,
+      speakableRatio: totalChars ? speakableChars / totalChars : 0,
+      uniqueRatio: texts.length ? uniqueBlocks / texts.length : 0
+    };
+  }
+
+  function evaluateCandidate(document, options) {
+    const settings = options || {};
+    const metrics = candidateMetrics(document);
+    if (!metrics.blockCount || !metrics.totalChars) {
+      return { score: -Infinity, confidence: 'none', metrics };
+    }
+    const adapterId = String(document && document.adapterId || settings.adapterId || '');
+    const adapterBias = adapterId === 'readability' ? 12 : adapterId === 'generic' ? 2 : 20;
+    const shortPenalty = metrics.totalChars < 80 ? (80 - metrics.totalChars) / 4 : 0;
+    const duplicatePenalty = (1 - metrics.uniqueRatio) * 24;
+    const score = Math.max(0, Math.min(100,
+      adapterBias +
+      Math.min(36, metrics.totalChars / 70) +
+      Math.min(14, Math.sqrt(metrics.blockCount) * 3) +
+      Math.min(10, metrics.averageChars / 18) +
+      metrics.speakableRatio * 12 +
+      metrics.uniqueRatio * 12 -
+      shortPenalty -
+      duplicatePenalty
+    ));
+    return {
+      score: Math.round(score * 100) / 100,
+      confidence: score >= 72 ? 'high' : score >= 48 ? 'medium' : 'low',
+      metrics
+    };
+  }
+
+  function makeCandidate(document, options) {
+    if (!document) return null;
+    const quality = evaluateCandidate(document, options);
+    return {
+      id: String(document.adapterId || options && options.id || 'candidate'),
+      document,
+      score: quality.score,
+      confidence: quality.confidence,
+      metrics: quality.metrics
+    };
+  }
+
+  function chooseCandidate(candidates) {
+    const viable = (Array.isArray(candidates) ? candidates : [])
+      .filter((candidate) => candidate && candidate.document && Number.isFinite(candidate.score));
+    if (!viable.length) return null;
+    return viable.slice().sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score;
+      const priority = { readability: 2, generic: 1 };
+      return (priority[right.id] || 0) - (priority[left.id] || 0);
+    })[0];
+  }
+
+  function attachCandidateDiagnostics(selected, candidates, fallbackFrom) {
+    if (!selected || !selected.document) return null;
+    const result = selected.document;
+    result.stats = Object.assign({}, result.stats, {
+      fallbackFrom: fallbackFrom || '',
+      selectedCandidate: selected.id,
+      selectedCandidateScore: selected.score,
+      selectedCandidateConfidence: selected.confidence,
+      candidates: candidates.map((candidate) => ({
+        id: candidate.id,
+        score: candidate.score,
+        confidence: candidate.confidence,
+        metrics: Object.assign({}, candidate.metrics)
+      }))
+    });
+    return result;
   }
 
   function selectedText(document, options) {
@@ -832,6 +1123,7 @@
   }
 
   function detectAdapter(document) {
+    if (isMirrorCardForum(document)) return 'mirror-card';
     if (discourseRoute(document)) return 'discourse';
     if (flarumRoute(document)) return 'flarum';
     if (nodebbRoute(document)) return 'nodebb';
@@ -894,29 +1186,57 @@
         warnings: ['xenforo-current-page-only']
       });
     }
+    if (adapterId === 'mirror-card') {
+      forumResult = documentResult(document, {
+        adapterId: 'mirror-card',
+        kind: 'forum',
+        blocks: extractMirrorCardForum(document),
+        complete: false,
+        warnings: ['mirror-card-current-page-only']
+      });
+    }
     if (forumResult && forumResult.blocks.length) return forumResult;
     const fallbackWarnings = forumResult
       ? [...forumResult.warnings, `${adapterId}-empty-fallback`]
       : [];
 
-    const readable = extractReadability(document, settings.ReadabilityCtor);
-    if (readable) {
-      readable.warnings = Array.from(new Set([
-        ...(readable.warnings || []),
-        ...fallbackWarnings
-      ]));
-      readable.stats = Object.assign({}, readable.stats, {
-        fallbackFrom: forumResult ? adapterId : ''
-      });
-      return readable;
+    if (!adapterId && GenericThreadDetector && typeof GenericThreadDetector.detect === 'function') {
+      const detectedThread = GenericThreadDetector.detect(document, settings.genericThreadOptions);
+      if (detectedThread) {
+        return documentResult(document, {
+          adapterId: 'generic-thread',
+          kind: 'forum',
+          blocks: GenericThreadDetector.toBlocks(detectedThread),
+          complete: false,
+          warnings: ['generic-thread-heuristic'],
+          stats: {
+            detectorScore: detectedThread.score,
+            detectorConfidence: detectedThread.confidence,
+            detectorSelector: detectedThread.selector
+          }
+        });
+      }
     }
-    return documentResult(document, {
+
+    const candidates = [];
+    const readable = extractReadability(document, settings.ReadabilityCtor);
+    if (readable) candidates.push(makeCandidate(readable));
+    const generic = documentResult(document, {
       adapterId: 'generic',
       blocks: extractGeneric(document),
       complete: true,
-      warnings: fallbackWarnings,
-      stats: { fallbackFrom: forumResult ? adapterId : '' }
+      warnings: fallbackWarnings
     });
+    if (generic.blocks.length) candidates.push(makeCandidate(generic));
+    const selected = chooseCandidate(candidates);
+    if (selected) {
+      selected.document.warnings = Array.from(new Set([
+        ...(selected.document.warnings || []),
+        ...fallbackWarnings
+      ]));
+      return attachCandidateDiagnostics(selected, candidates, forumResult ? adapterId : '');
+    }
+    return generic;
   }
 
   async function extractPage(document, fetchOrOptions, extraOptions) {
@@ -944,8 +1264,13 @@
     parseDiscourseTopic,
     parseNodebbTopicPages,
     extractXenForo,
+    extractMirrorCardForum,
     extractReadability,
     extractGeneric,
+    candidateMetrics,
+    evaluateCandidate,
+    makeCandidate,
+    chooseCandidate,
     htmlToReadableText,
     makeFlarumPostsUrl
   });

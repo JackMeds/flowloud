@@ -34,4 +34,14 @@
     root.append(card);
     globalThis.QwenPopupView.mountPopup(mount, Object.assign({}, base, changes));
   });
+
+  globalThis.QwenPopupView.mountPageVoices(
+    document.getElementById('page-voices-lab-root'),
+    {
+      title: base.title,
+      authors: base.authors.map((author) => Object.assign({}, author, { effectiveVoice: author.voice })),
+      voices: ['邵思萌', '清朗', '温和', '低沉旁白'],
+      authorVoices: { op: '邵思萌', a2: '温和' }
+    }
+  );
 })();

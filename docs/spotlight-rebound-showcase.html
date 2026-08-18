@@ -1,0 +1,823 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qwen Reader · 白色光斑回弹研究</title>
+  <style>
+    @property --beam-x {
+      syntax: "<percentage>";
+      inherits: true;
+      initial-value: -18%;
+    }
+
+    :root {
+      color-scheme: light;
+      --ink: #25232b;
+      --muted: #737784;
+      --line: rgba(36, 38, 48, .1);
+      --panel: rgba(246, 247, 250, .84);
+      --speed: 1;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 0%, rgba(105, 80, 183, .08), transparent 29rem),
+        radial-gradient(circle at 93% 22%, rgba(54, 129, 157, .075), transparent 32rem),
+        #e9eaf0;
+      font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button,
+    input { font: inherit; }
+
+    .page {
+      width: min(1160px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 52px 0 64px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 28px;
+      align-items: end;
+      margin-bottom: 28px;
+    }
+
+    .eyebrow {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin: 0 0 12px;
+      color: #5f4b9b;
+      font-size: 11px;
+      font-weight: 750;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      width: 23px;
+      height: 1px;
+      content: "";
+      background: currentColor;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 43px);
+      font-weight: 650;
+      letter-spacing: -.045em;
+    }
+
+    .intro {
+      max-width: 760px;
+      margin: 13px 0 0;
+      color: #696d79;
+      font-size: 13px;
+      line-height: 1.8;
+    }
+
+    .controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 6px;
+      border: 1px solid rgba(48, 51, 64, .09);
+      border-radius: 15px;
+      background: rgba(250, 250, 252, .7);
+      box-shadow: 0 12px 30px rgba(37, 40, 52, .055);
+      backdrop-filter: blur(18px);
+    }
+
+    .play-button {
+      display: flex;
+      min-width: 105px;
+      height: 40px;
+      gap: 8px;
+      align-items: center;
+      padding: 4px 11px 4px 4px;
+      border: 0;
+      border-radius: 12px;
+      color: #333641;
+      background: rgba(236, 237, 242, .8);
+      cursor: pointer;
+    }
+
+    .play-symbol {
+      display: grid;
+      width: 31px;
+      height: 31px;
+      border-radius: 9px;
+      color: #fff;
+      background: #252730;
+      place-items: center;
+    }
+
+    .play-symbol svg { width: 13px; height: 13px; fill: currentColor; }
+
+    .play-copy {
+      display: grid;
+      gap: 1px;
+      text-align: left;
+    }
+
+    .play-copy strong { font-size: 10px; }
+    .play-copy small { color: #8a8e9a; font-size: 9px; }
+
+    .speed-control {
+      display: grid;
+      min-width: 118px;
+      padding: 0 9px 1px 3px;
+      grid-template-columns: 1fr auto;
+      gap: 4px 8px;
+      align-items: center;
+    }
+
+    .speed-control label,
+    .speed-output {
+      color: #858995;
+      font-size: 9px;
+      font-weight: 700;
+    }
+
+    .speed-output { color: #545967; }
+
+    .speed-control input {
+      width: 100%;
+      height: 3px;
+      margin: 0;
+      grid-column: 1 / -1;
+      accent-color: #6650a5;
+      cursor: pointer;
+    }
+
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 15px;
+    }
+
+    .concept {
+      position: relative;
+      min-height: 248px;
+      padding: 23px 25px 24px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 23px;
+      background: var(--panel);
+      box-shadow:
+        0 1px 0 rgba(255, 255, 255, .9) inset,
+        0 17px 43px rgba(38, 41, 53, .055);
+      isolation: isolate;
+    }
+
+    .concept:last-child { grid-column: 1 / -1; }
+
+    .no-bounce-gallery .concept:last-child { grid-column: auto; }
+
+    .section-heading {
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      margin: 28px 3px 15px;
+    }
+
+    .section-heading::after {
+      height: 1px;
+      flex: 1;
+      content: "";
+      background: linear-gradient(90deg, rgba(50,53,65,.11), transparent);
+    }
+
+    .section-heading strong {
+      font-size: 13px;
+      font-weight: 680;
+    }
+
+    .section-heading span {
+      margin-left: 7px;
+      color: #9195a0;
+      font-family: ui-monospace, "Cascadia Code", monospace;
+      font-size: 9px;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+
+    .concept-head {
+      display: flex;
+      gap: 15px;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    .index {
+      color: #a0a4b0;
+      font-family: ui-monospace, "Cascadia Code", monospace;
+      font-size: 10px;
+      letter-spacing: .1em;
+    }
+
+    .concept h2 {
+      margin: 5px 0 0;
+      font-size: 16px;
+      font-weight: 680;
+      letter-spacing: -.02em;
+    }
+
+    .concept h2 span {
+      margin-left: 7px;
+      color: #999da8;
+      font-family: ui-monospace, "Cascadia Code", monospace;
+      font-size: 9px;
+      font-weight: 500;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .tag {
+      padding: 5px 8px;
+      border: 1px solid rgba(50, 53, 65, .08);
+      border-radius: 999px;
+      color: #858995;
+      background: rgba(249, 249, 251, .72);
+      font-size: 9px;
+      white-space: nowrap;
+    }
+
+    .stage {
+      position: relative;
+      display: flex;
+      min-height: 105px;
+      align-items: center;
+      margin: 8px -4px 4px;
+      padding: 4px;
+      border-radius: 14px;
+      background: linear-gradient(120deg, rgba(219, 221, 228, .45), rgba(239, 240, 244, .26));
+    }
+
+    .sentence {
+      position: relative;
+      z-index: 1;
+      margin: 0;
+      color: #34313a;
+      font-size: clamp(20px, 2.25vw, 27px);
+      font-weight: 570;
+      line-height: 2.1;
+      letter-spacing: .015em;
+    }
+
+    .word {
+      position: relative;
+      z-index: 0;
+      display: inline-block;
+      margin-right: .22em;
+      color: #35313b;
+      white-space: nowrap;
+    }
+
+    .word::after {
+      position: absolute;
+      z-index: 1;
+      inset: 0;
+      content: attr(data-word);
+      color: transparent;
+      background: radial-gradient(
+        ellipse var(--spot-width, 35%) 80% at var(--beam-x) 47%,
+        rgba(255, 255, 255, var(--core-alpha, .98)) 0 12%,
+        rgba(241, 246, 255, .82) 24%,
+        rgba(192, 209, 232, .34) 47%,
+        transparent 72%
+      );
+      background-clip: text;
+      -webkit-background-clip: text;
+      opacity: 0;
+      filter: drop-shadow(0 0 var(--text-glow, 4px) rgba(255, 255, 255, .26));
+      pointer-events: none;
+    }
+
+    .word.is-active::after { opacity: 1; }
+
+    .focus-beam {
+      position: absolute;
+      z-index: 2;
+      top: 0;
+      left: 0;
+      width: 24px;
+      height: 12px;
+      pointer-events: none;
+      transition:
+        left calc(180ms / var(--speed)) cubic-bezier(.2,.72,.24,1),
+        top calc(180ms / var(--speed)) cubic-bezier(.2,.72,.24,1),
+        width calc(180ms / var(--speed)) cubic-bezier(.2,.72,.24,1);
+    }
+
+    .focus-beam.is-instant { transition: none; }
+
+    .rail {
+      position: absolute;
+      top: 5px;
+      right: 0;
+      left: 0;
+      height: 2px;
+      overflow: visible;
+      border-radius: 99px;
+      background:
+        radial-gradient(circle at var(--beam-x) 50%, rgba(255,255,255,.98) 0 4%, rgba(224,235,248,.84) 8%, rgba(138,151,173,.24) 20%, transparent 32%),
+        #3b3742;
+      box-shadow: 0 1px 3px rgba(31, 29, 36, .16);
+    }
+
+    .halo {
+      position: absolute;
+      top: 0;
+      left: var(--beam-x);
+      width: var(--halo-size, 17px);
+      height: 12px;
+      border-radius: 50%;
+      opacity: var(--halo-alpha, .72);
+      background: radial-gradient(circle, rgba(255,255,255,.96) 0 8%, rgba(229,239,255,.7) 24%, rgba(136,155,190,.24) 48%, transparent 72%);
+      filter: blur(var(--halo-blur, 1.8px));
+      transform: translateX(-50%) scaleX(var(--halo-stretch, 1));
+    }
+
+    .edge-cap {
+      position: absolute;
+      top: 0;
+      right: -4px;
+      width: 10px;
+      height: 12px;
+      border-radius: 50%;
+      opacity: 0;
+      background: radial-gradient(circle, rgba(255,255,255,.85), rgba(218,231,250,.28) 45%, transparent 72%);
+      filter: blur(2px);
+    }
+
+    .caption {
+      display: flex;
+      gap: 9px;
+      align-items: center;
+      margin: 0;
+      color: #8b8f9b;
+      font-size: 10px;
+      line-height: 1.6;
+    }
+
+    .caption::before {
+      flex: 0 0 auto;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      content: "";
+      background: #7465a5;
+      box-shadow: 0 0 0 4px rgba(91, 74, 145, .07);
+    }
+
+    /* 01 · 平衡型：一次清晰回弹，推荐作为默认。 */
+    .soft-spring { --cycle: 1380ms; --spot-width: 37%; --halo-size: 18px; }
+    .soft-spring .word.is-active::after,
+    .soft-spring .focus-beam { animation: soft-spring calc(var(--cycle) / var(--speed)) both; }
+
+    @keyframes soft-spring {
+      0% { --beam-x: -18%; }
+      58% { --beam-x: 109%; }
+      76% { --beam-x: 89%; }
+      89% { --beam-x: 103%; }
+      100% { --beam-x: 100%; }
+    }
+
+    /* 02 · 拉伸型：光斑撞边时横向拉长，接近 Android stretch。 */
+    .stretch-caustic { --cycle: 1440ms; --spot-width: 29%; --halo-size: 19px; }
+    .stretch-caustic .word.is-active::after,
+    .stretch-caustic .focus-beam { animation: stretch-spring calc(var(--cycle) / var(--speed)) both; }
+    .stretch-caustic .halo { animation: halo-tension calc(var(--cycle) / var(--speed)) both; }
+
+    @keyframes stretch-spring {
+      0% { --beam-x: -20%; }
+      54% { --beam-x: 113%; }
+      68% { --beam-x: 83%; }
+      82% { --beam-x: 105%; }
+      93% { --beam-x: 97%; }
+      100% { --beam-x: 100%; }
+    }
+
+    @keyframes halo-tension {
+      0%, 35% { --halo-stretch: .8; opacity: .48; }
+      54% { --halo-stretch: 1.75; opacity: .86; }
+      68% { --halo-stretch: .72; opacity: .58; }
+      82% { --halo-stretch: 1.22; opacity: .74; }
+      100% { --halo-stretch: 1; opacity: .68; }
+    }
+
+    /* 03 · 柔镜型：宽而柔，回弹幅度小，接近 iOS 的克制感。 */
+    .soft-lens {
+      --cycle: 1520ms;
+      --spot-width: 54%;
+      --halo-size: 25px;
+      --halo-blur: 3px;
+      --halo-alpha: .52;
+      --text-glow: 6px;
+    }
+    .soft-lens .word.is-active::after,
+    .soft-lens .focus-beam { animation: soft-lens-spring calc(var(--cycle) / var(--speed)) both; }
+    .soft-lens .rail { height: 1.5px; background: radial-gradient(circle at var(--beam-x) 50%, #fff 0 5%, rgba(230,238,250,.7) 12%, transparent 35%), #494550; }
+
+    @keyframes soft-lens-spring {
+      0% { --beam-x: -25%; }
+      63% { --beam-x: 105%; }
+      80% { --beam-x: 94%; }
+      92% { --beam-x: 101.5%; }
+      100% { --beam-x: 100%; }
+    }
+
+    /* 04 · 边缘冲击型：抵达末端时出现一次局部亮边。 */
+    .edge-pulse { --cycle: 1320ms; --spot-width: 31%; --halo-size: 16px; }
+    .edge-pulse .word.is-active::after,
+    .edge-pulse .focus-beam { animation: edge-pulse-spring calc(var(--cycle) / var(--speed)) both; }
+    .edge-pulse .edge-cap { animation: edge-cap-pulse calc(var(--cycle) / var(--speed)) both; }
+
+    @keyframes edge-pulse-spring {
+      0% { --beam-x: -16%; }
+      48% { --beam-x: 112%; }
+      66% { --beam-x: 86%; }
+      81% { --beam-x: 104%; }
+      92% { --beam-x: 98%; }
+      100% { --beam-x: 100%; }
+    }
+
+    @keyframes edge-cap-pulse {
+      0%, 40%, 66%, 100% { opacity: 0; transform: scale(.65); }
+      49% { opacity: .88; transform: scale(1.45, 1); }
+      55% { opacity: .2; transform: scale(.9); }
+    }
+
+    /* 05 · 彗星型：核心更小、拖尾更明显，速度感最强。 */
+    .comet-snap { --cycle: 1370ms; --spot-width: 23%; --halo-size: 14px; --core-alpha: 1; }
+    .comet-snap .word.is-active::after,
+    .comet-snap .focus-beam { animation: comet-spring calc(var(--cycle) / var(--speed)) both; }
+    .comet-snap .halo::after {
+      position: absolute;
+      top: 4px;
+      right: 48%;
+      width: 23px;
+      height: 3px;
+      border-radius: 99px;
+      content: "";
+      opacity: .42;
+      background: linear-gradient(90deg, transparent, rgba(231,239,255,.72));
+      filter: blur(1px);
+    }
+
+    @keyframes comet-spring {
+      0% { --beam-x: -14%; }
+      51% { --beam-x: 111%; }
+      69% { --beam-x: 87%; }
+      83% { --beam-x: 104%; }
+      94% { --beam-x: 98%; }
+      100% { --beam-x: 100%; }
+    }
+
+    /* 06 · 匀速通过：没有减速、越界或回弹。 */
+    .linear-pass { --cycle: 1320ms; --spot-width: 34%; --halo-size: 17px; }
+    .linear-pass .word.is-active::after,
+    .linear-pass .focus-beam { animation: linear-pass calc(var(--cycle) / var(--speed)) linear both; }
+
+    @keyframes linear-pass {
+      from { --beam-x: -18%; }
+      to { --beam-x: 112%; }
+    }
+
+    /* 07 · 减速停靠：只减速到终点，不越界、不反向。 */
+    .ease-dock { --cycle: 1420ms; --spot-width: 39%; --halo-size: 19px; }
+    .ease-dock .word.is-active::after,
+    .ease-dock .focus-beam {
+      animation: ease-dock calc(var(--cycle) / var(--speed)) cubic-bezier(.13,.72,.18,1) both;
+    }
+
+    @keyframes ease-dock {
+      from { --beam-x: -20%; }
+      to { --beam-x: 100%; }
+    }
+
+    /* 08 · 边缘消隐：抵达边缘后直接淡出，不停靠也不回头。 */
+    .edge-dissolve { --cycle: 1370ms; --spot-width: 46%; --halo-size: 23px; --halo-blur: 2.8px; }
+    .edge-dissolve .word.is-active::after { animation: dissolve-text calc(var(--cycle) / var(--speed)) linear both; }
+    .edge-dissolve .focus-beam { animation: dissolve-position calc(var(--cycle) / var(--speed)) linear both; }
+    .edge-dissolve .halo { animation: dissolve-halo calc(var(--cycle) / var(--speed)) linear both; }
+
+    @keyframes dissolve-position {
+      from { --beam-x: -22%; }
+      to { --beam-x: 112%; }
+    }
+
+    @keyframes dissolve-text {
+      0% { --beam-x: -22%; opacity: 0; }
+      14% { opacity: 1; }
+      78% { opacity: 1; }
+      100% { --beam-x: 112%; opacity: 0; }
+    }
+
+    @keyframes dissolve-halo {
+      0% { opacity: 0; transform: translateX(-50%) scale(.72); }
+      16% { opacity: .54; }
+      76% { opacity: .54; }
+      100% { opacity: 0; transform: translateX(-50%) scale(1.18); }
+    }
+
+    /* 09 · 单向彗光：带速度拖尾，但终点只吸附，不回弹。 */
+    .one-way-comet { --cycle: 1340ms; --spot-width: 25%; --halo-size: 15px; --core-alpha: 1; }
+    .one-way-comet .word.is-active::after,
+    .one-way-comet .focus-beam {
+      animation: one-way-comet calc(var(--cycle) / var(--speed)) cubic-bezier(.18,.62,.22,1) both;
+    }
+    .one-way-comet .halo::after {
+      position: absolute;
+      top: 4px;
+      right: 48%;
+      width: 28px;
+      height: 3px;
+      border-radius: 99px;
+      content: "";
+      opacity: .46;
+      background: linear-gradient(90deg, transparent, rgba(231,239,255,.76));
+      filter: blur(1.2px);
+    }
+
+    @keyframes one-way-comet {
+      from { --beam-x: -16%; }
+      to { --beam-x: 100%; }
+    }
+
+    .is-paused *,
+    .is-paused *::before,
+    .is-paused *::after { animation-play-state: paused !important; }
+
+    .references {
+      margin-top: 20px;
+      padding: 15px 18px;
+      border: 1px solid rgba(48, 51, 64, .08);
+      border-radius: 15px;
+      color: #858995;
+      background: rgba(246, 247, 250, .55);
+      font-size: 10px;
+      line-height: 1.7;
+    }
+
+    .references strong { color: #666a76; }
+    .references a { color: #65529b; text-decoration: none; }
+    .references a:hover { text-decoration: underline; }
+
+    @media (max-width: 780px) {
+      .page { width: min(100% - 24px, 620px); padding-top: 30px; }
+      .hero { grid-template-columns: 1fr; align-items: start; }
+      .controls { width: 100%; flex-wrap: wrap; }
+      .speed-control { flex: 1 1 110px; }
+      .gallery { grid-template-columns: 1fr; }
+      .concept:last-child { grid-column: auto; }
+      .concept { min-height: 235px; padding: 20px; }
+      .sentence { font-size: clamp(19px, 5vw, 24px); }
+    }
+  </style>
+</head>
+<body>
+  <main class="page" id="app">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Specular motion study · 09</p>
+        <h1>让光扫过文字，也可以不回来</h1>
+        <p class="intro">深色字形与深色线段始终不动。上组比较越界回弹，下组比较四种完全不反向的运动：匀速、减速停靠、边缘消隐与单向拖尾。</p>
+      </div>
+
+      <div class="controls" aria-label="演示控制">
+        <button class="play-button" id="playButton" type="button" aria-label="暂停动画">
+          <span class="play-symbol">
+            <svg id="playIcon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.6c0-.55.45-1 1-1s1 .45 1 1v10.8c0 .55-.45 1-1 1s-1-.45-1-1V2.6Zm6 0c0-.55.45-1 1-1s1 .45 1 1v10.8c0 .55-.45 1-1 1s-1-.45-1-1V2.6Z"/></svg>
+          </span>
+          <span class="play-copy"><strong id="playState">正在演示</strong><small id="playHint">点击暂停</small></span>
+        </button>
+        <div class="speed-control">
+          <label for="speed">动画速度</label>
+          <output class="speed-output" id="speedOutput">1.0×</output>
+          <input id="speed" type="range" min="0.65" max="1.5" value="1" step="0.05">
+        </div>
+      </div>
+    </header>
+
+    <section class="gallery" aria-label="五种白色光斑回弹方案">
+      <article class="concept soft-spring">
+        <div class="concept-head">
+          <div><span class="index">01</span><h2>柔性回弹 <span>Soft Spring</span></h2></div>
+          <span class="tag">平衡 · 推荐</span>
+        </div>
+        <div class="stage"><p class="sentence"></p><span class="focus-beam"><span class="rail"></span><span class="halo"></span><span class="edge-cap"></span></span></div>
+        <p class="caption">一次明显但不过分的越界、回拉和落稳，最接近系统级反馈。</p>
+      </article>
+
+      <article class="concept stretch-caustic">
+        <div class="concept-head">
+          <div><span class="index">02</span><h2>拉伸焦散 <span>Stretch Caustic</span></h2></div>
+          <span class="tag">Android · 弹性</span>
+        </div>
+        <div class="stage"><p class="sentence"></p><span class="focus-beam"><span class="rail"></span><span class="halo"></span><span class="edge-cap"></span></span></div>
+        <p class="caption">光斑撞上右端时被横向拉长，回弹时短暂收缩，材质感最强。</p>
+      </article>
+
+      <article class="concept soft-lens">
+        <div class="concept-head">
+          <div><span class="index">03</span><h2>柔镜回弹 <span>Soft Lens</span></h2></div>
+          <span class="tag">iOS · 克制</span>
+        </div>
+        <div class="stage"><p class="sentence"></p><span class="focus-beam"><span class="rail"></span><span class="halo"></span><span class="edge-cap"></span></span></div>
+        <p class="caption">光斑更宽、更柔，越界和回拉幅度较小，适合长时间阅读。</p>
+      </article>
+
+      <article class="concept edge-pulse">
+        <div class="concept-head">
+          <div><span class="index">04</span><h2>边缘冲击 <span>Edge Pulse</span></h2></div>
+          <span class="tag">明确 · 有触感</span>
+        </div>
+        <div class="stage"><p class="sentence"></p><span class="focus-beam"><span class="rail"></span><span class="halo"></span><span class="edge-cap"></span></span></div>
+        <p class="caption">抵达右端时亮边吸收冲击，再把光斑推回，边界感最清楚。</p>
+      </article>
+
+      <article class="concept comet-snap">
+        <div class="concept-head">
+          <div><span class="index">05</span><h2>磁性彗光 <span>Magnetic Comet</span></h2></div>
+          <span class="tag">快速 · 有拖尾</span>
+        </div>
+        <div class="stage"><p class="sentence"></p><span class="focus-beam"><span class="rail"></span><span class="halo"></span><span class="edge-cap"></span></span></div>
+        <p class="caption">更小的白色核心与淡拖尾强调速度，回弹像被右端磁力吸回。</p>
+      </article>
+    </section>
+
+    <div class="section-heading"><strong>无回弹方案 <span>No rebound</span></strong></div>
+
+    <section class="gallery no-bounce-gallery" aria-label="四种无回弹白色光斑方案">
+      <article class="concept linear-pass">
+        <div class="concept-head">
+          <div><span class="index">06</span><h2>匀速通过 <span>Linear Pass</span></h2></div>
+          <span class="tag">最纯粹 · 不停留</span>
+        </div>
+        <div class="stage"><p class="sentence"></p><span class="focus-beam"><span class="rail"></span><span class="halo"></span><span class="edge-cap"></span></span></div>
+        <p class="caption">白光保持恒定速度穿过文字和线段，抵达右侧后直接结束。</p>
+      </article>
+
+      <article class="concept ease-dock">
+        <div class="concept-head">
+          <div><span class="index">07</span><h2>减速停靠 <span>Ease-out Dock</span></h2></div>
+          <span class="tag">自然 · 无反向</span>
+        </div>
+        <div class="stage"><p class="sentence"></p><span class="focus-beam"><span class="rail"></span><span class="halo"></span><span class="edge-cap"></span></span></div>
+        <p class="caption">前段移动较快，接近右端时逐渐减速并停住，不越界也不回头。</p>
+      </article>
+
+      <article class="concept edge-dissolve">
+        <div class="concept-head">
+          <div><span class="index">08</span><h2>边缘消隐 <span>Edge Dissolve</span></h2></div>
+          <span class="tag">柔和 · 无停顿</span>
+        </div>
+        <div class="stage"><p class="sentence"></p><span class="focus-beam"><span class="rail"></span><span class="halo"></span><span class="edge-cap"></span></span></div>
+        <p class="caption">宽光斑经过后在右侧自然散开、淡出，没有吸附或碰撞感。</p>
+      </article>
+
+      <article class="concept one-way-comet">
+        <div class="concept-head">
+          <div><span class="index">09</span><h2>单向彗光 <span>One-way Comet</span></h2></div>
+          <span class="tag">快速 · 有拖尾</span>
+        </div>
+        <div class="stage"><p class="sentence"></p><span class="focus-beam"><span class="rail"></span><span class="halo"></span><span class="edge-cap"></span></span></div>
+        <p class="caption">小光核带着轻微拖尾单向滑到终点，速度感明显但没有回弹。</p>
+      </article>
+    </section>
+
+    <aside class="references">
+      <strong>动效依据：</strong>
+      <a href="https://developer.android.com/develop/ui/views/touch-and-input/gestures/scroll">Android EdgeEffect</a> 的拉伸与回弹、
+      <a href="https://developer.apple.com/documentation/uikit/uiscrollview">UIScrollView</a> 的越界返回，以及
+      <a href="https://motion.dev/docs/react-transitions">Motion inertia / spring</a> 的边界碰撞与阻尼参数。此页面未加载这些库，仅复现其运动原则。
+    </aside>
+  </main>
+
+  <script>
+    (() => {
+      const tokens = ["当", "声音", "经过", "文字，", "注意力", "随光", "自然", "流动。"];
+      const app = document.querySelector("#app");
+      const sentences = [...document.querySelectorAll(".sentence")];
+      const playButton = document.querySelector("#playButton");
+      const playIcon = document.querySelector("#playIcon");
+      const playState = document.querySelector("#playState");
+      const playHint = document.querySelector("#playHint");
+      const speedInput = document.querySelector("#speed");
+      const speedOutput = document.querySelector("#speedOutput");
+      const pausePath = "M4 2.6c0-.55.45-1 1-1s1 .45 1 1v10.8c0 .55-.45 1-1 1s-1-.45-1-1V2.6Zm6 0c0-.55.45-1 1-1s1 .45 1 1v10.8c0 .55-.45 1-1 1s-1-.45-1-1V2.6Z";
+      const playPath = "M4.1 2.35c0-.78.85-1.26 1.52-.86l8.1 4.82a1 1 0 0 1 0 1.72l-8.1 4.82a1 1 0 0 1-1.52-.86V2.35Z";
+      const baseDelay = 1760;
+      let current = 0;
+      let playing = true;
+      let timer = 0;
+
+      sentences.forEach((sentence) => {
+        const fragment = document.createDocumentFragment();
+        tokens.forEach((token, index) => {
+          const word = document.createElement("span");
+          word.className = "word";
+          word.dataset.index = String(index);
+          word.dataset.word = token;
+          word.textContent = token;
+          fragment.append(word);
+        });
+        sentence.append(fragment);
+      });
+
+      function boxWithin(element, container) {
+        const box = element.getBoundingClientRect();
+        const root = container.getBoundingClientRect();
+        return {
+          left: box.left - root.left,
+          top: box.bottom - root.top - 6,
+          width: box.width
+        };
+      }
+
+      function placeBeam(sentence, activeWord, instant = false) {
+        const stage = sentence.parentElement;
+        const beam = stage.querySelector(".focus-beam");
+        const target = boxWithin(activeWord, stage);
+        beam.classList.toggle("is-instant", instant);
+        beam.style.left = `${target.left - 2}px`;
+        beam.style.top = `${target.top}px`;
+        beam.style.width = `${target.width + 4}px`;
+        if (instant) requestAnimationFrame(() => beam.classList.remove("is-instant"));
+      }
+
+      function restartEffect(element) {
+        element.style.animation = "none";
+        void element.offsetWidth;
+        element.style.removeProperty("animation");
+      }
+
+      function render(instant = false) {
+        sentences.forEach((sentence) => {
+          const words = [...sentence.querySelectorAll(".word")];
+          const activeWord = words[current];
+          words.forEach((word, index) => word.classList.toggle("is-active", index === current));
+          placeBeam(sentence, activeWord, instant);
+          restartEffect(sentence.parentElement.querySelector(".focus-beam"));
+          restartEffect(sentence.parentElement.querySelector(".halo"));
+          restartEffect(sentence.parentElement.querySelector(".edge-cap"));
+        });
+      }
+
+      function schedule() {
+        clearTimeout(timer);
+        if (!playing) return;
+        timer = setTimeout(() => {
+          current = (current + 1) % tokens.length;
+          render();
+          schedule();
+        }, baseDelay / Number(speedInput.value));
+      }
+
+      function updatePlayState() {
+        playIcon.querySelector("path").setAttribute("d", playing ? pausePath : playPath);
+        playButton.setAttribute("aria-label", playing ? "暂停动画" : "继续动画");
+        playState.textContent = playing ? "正在演示" : "演示已暂停";
+        playHint.textContent = playing ? "点击暂停" : "点击继续";
+        app.classList.toggle("is-paused", !playing);
+      }
+
+      playButton.addEventListener("click", () => {
+        playing = !playing;
+        updatePlayState();
+        schedule();
+      });
+
+      speedInput.addEventListener("input", () => {
+        const speed = Number(speedInput.value);
+        document.documentElement.style.setProperty("--speed", speed);
+        speedOutput.value = `${speed.toFixed(2).replace(/0$/, "")}×`;
+        schedule();
+      });
+
+      let resizeFrame = 0;
+      addEventListener("resize", () => {
+        cancelAnimationFrame(resizeFrame);
+        resizeFrame = requestAnimationFrame(() => render(true));
+      });
+
+      requestAnimationFrame(() => {
+        render(true);
+        schedule();
+      });
+    })();
+  </script>
+</body>
+</html>

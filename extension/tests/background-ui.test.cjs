@@ -46,6 +46,29 @@ test('popup broker fixes the active tab for a popup session', async () => {
   assert.equal(sent.at(-1).message.value, '1.2');
 });
 
+test('each newly opened native popup starts from the currently active tab', async () => {
+  let activeTab = { id: 7, windowId: 1, title: '第一篇文章' };
+  const chromeApi = {
+    tabs: {
+      async query() { return [activeTab]; },
+      async sendMessage(tabId, message) {
+        assert.equal(message.type, 'reader:snapshot:get');
+        return { ok: true, snapshot: { pageKey: `page:${tabId}`, title: activeTab.title, total: 1 } };
+      },
+    },
+  };
+  const broker = createPopupBroker(chromeApi, { session: memorySession() });
+
+  const first = await broker.handle({ type: 'reader:active-context' });
+  assert.equal(first.tabId, 7);
+  assert.equal(first.pageKey, 'page:7');
+
+  activeTab = { id: 8, windowId: 1, title: '第二篇文章' };
+  const second = await broker.handle({ type: 'reader:active-context' });
+  assert.equal(second.tabId, 8);
+  assert.equal(second.pageKey, 'page:8');
+});
+
 test('page editor broker maps context to source tab and cleans it when editor closes', async () => {
   const session = memorySession();
   const sent = [];
