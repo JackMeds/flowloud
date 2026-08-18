@@ -1,0 +1,12 @@
+.qr-lab-body { min-width: 0; min-height: 100vh; background: #eeebf5; }
+.qr-lab-shell { width: min(100% - 48px, 1360px); margin: 0 auto; padding: 46px 0 64px; }
+.qr-lab-header { margin-bottom: 24px; }
+.qr-lab-header p { margin: 0 0 6px; color: #7652c8; font-size: 11px; font-weight: 800; letter-spacing: .13em; }
+.qr-lab-header h1 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 38px; letter-spacing: -.04em; }
+.qr-lab-header span { display: block; margin-top: 7px; color: #746e7e; font-size: 14px; }
+.qr-lab-grid { display: grid; grid-template-columns: repeat(3, minmax(340px, 390px)); gap: 22px; align-items: start; }
+.qr-lab-card { overflow: hidden; border: 1px solid rgba(83, 57, 139, .14); border-radius: 23px; background: #f7f5fb; box-shadow: 0 17px 46px rgba(45, 29, 76, .12); }
+.qr-lab-card > h2 { margin: 0; padding: 13px 16px; border-bottom: 1px solid #e7e2ef; color: #675d74; background: #fff; font-size: 12px; }
+.qr-lab-card .qr-popup-root { width: 100%; }
+@media (max-width: 1260px) { .qr-lab-grid { grid-template-columns: repeat(2, minmax(340px, 390px)); } }
+@media (max-width: 760px) { .qr-lab-shell { width: min(100% - 24px, 1360px); padding-top: 27px; } .qr-lab-grid { grid-template-columns: 1fr; } }

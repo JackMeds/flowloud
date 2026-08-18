@@ -39,33 +39,28 @@
 
   const shell = document.createElement("div");
   shell.innerHTML = `
-    <button class="qr-orb" type="button" data-action="toggle-panel" aria-label="打开 Qwen 网页朗读">
-      <span class="qr-orb-mark" aria-hidden="true">Q</span>
-    </button>
-    <aside class="qr-panel" aria-label="Qwen 网页朗读侧栏">
-      <div class="qr-panel-inner">
-        <header class="qr-header">
-          <div>
-            <h2 class="qr-brand">Qwen 网页朗读</h2>
-            <div class="qr-status" data-role="service-status">
-              <span class="qr-status-dot" aria-hidden="true"></span>
-              <span data-role="service-label">检查本地服务…</span>
-            </div>
-          </div>
-          <button class="qr-icon-button" type="button" data-action="close-panel" aria-label="关闭侧栏">×</button>
-        </header>
-        <nav class="qr-tabs" role="tablist" aria-label="朗读功能">
-          <button class="qr-tab" type="button" role="tab" aria-selected="true" data-tab="now">正在朗读</button>
-          <button class="qr-tab" type="button" role="tab" aria-selected="false" data-tab="authors">作者配音</button>
-          <button class="qr-tab" type="button" role="tab" aria-selected="false" data-tab="voices">音色库</button>
-        </nav>
-        <div class="qr-content">
-          <section class="qr-view is-active" data-view="now"></section>
-          <section class="qr-view" data-view="authors"></section>
-          <section class="qr-view" data-view="voices"></section>
-        </div>
+    <section class="qr-mini-player" aria-label="Qwen 网页朗读控制" aria-hidden="true">
+      <div class="qr-mini-context">
+        <span class="qr-mini-avatar" data-role="speaker-avatar" aria-hidden="true">Q</span>
+        <span class="qr-mini-copy">
+          <span class="qr-mini-speaker" data-role="speaker-name">正在准备朗读</span>
+          <span class="qr-mini-meta" data-role="speaker-meta">当前网页</span>
+          <span class="qr-mini-text" data-role="segment-text"></span>
+        </span>
       </div>
-    </aside>
+      <div class="qr-mini-controls" aria-label="朗读控制">
+        <button class="qr-mini-button" type="button" data-action="previous" aria-label="上一段">
+          <span class="qr-skip-icon is-back" aria-hidden="true"></span>
+        </button>
+        <button class="qr-mini-button is-primary" type="button" data-action="play-toggle" aria-label="暂停朗读">
+          <span class="qr-pause-icon" aria-hidden="true"></span>
+        </button>
+        <button class="qr-mini-button" type="button" data-action="next" aria-label="下一段">
+          <span class="qr-skip-icon is-forward" aria-hidden="true"></span>
+        </button>
+        <button class="qr-mini-button is-stop" type="button" data-action="stop" aria-label="停止朗读并关闭控制条">×</button>
+      </div>
+    </section>
     <div class="qr-toast" role="status" aria-live="polite"></div>
   `;
   shadow.append(shell);
@@ -77,7 +72,17 @@
       outline: 3px solid rgba(118, 87, 232, .48) !important;
       outline-offset: 5px !important;
       border-radius: 8px !important;
-      transition: outline-color .2s ease !important;
+      background-image: linear-gradient(100deg, rgba(118, 87, 232, .13), rgba(164, 126, 248, .05), rgba(118, 87, 232, .13)) !important;
+      background-size: 220% 100% !important;
+      box-shadow: 0 0 0 5px rgba(118, 87, 232, .08) !important;
+      animation: qwen-reader-speaking-flow 2.2s ease-in-out infinite !important;
+    }
+    @keyframes qwen-reader-speaking-flow {
+      0%, 100% { background-position: 100% 50%; }
+      50% { background-position: 0 50%; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .qwen-reader-speaking { animation: none !important; }
     }
   `;
   (document.head || document.documentElement).appendChild(pageStyle);
@@ -86,10 +91,6 @@
   let settings = Object.assign({}, DEFAULT_SETTINGS, {
     replyVoices: (DEFAULT_SETTINGS.replyVoices || []).slice(),
   });
-  let knownVoices = unique([
-    settings.opVoice,
-    ...(settings.replyVoices || []),
-  ]).filter(Boolean);
   let currentAudio = null;
   let sessionCounter = 0;
   let activeSession = "";
@@ -105,6 +106,9 @@
   const requestCache = Player.createRequestCache(cancelSessionById);
   let highlightedElement = null;
   let toastTimer = null;
+  let pageAuthorVoices = {};
+  let stateRevision = 0;
+  let playbackRate = 1;
 
   bindEvents();
   render();
@@ -114,7 +118,6 @@
     await restoreSettings();
     startLocationWatcher();
     await scanCurrentPage("initial");
-    void checkService();
   }
 
   function bindEvents() {
@@ -123,100 +126,41 @@
       const button = event.target.closest("button");
       if (!button) return;
       const action = button.dataset.action;
-      if (action === "toggle-panel") {
-        state = Player.reduce(state, { type: "PANEL_TOGGLE" });
-        renderShell();
-      } else if (action === "close-panel") {
-        state = Player.reduce(state, { type: "PANEL_CLOSE" });
-        renderShell();
-      } else if (action === "play-toggle") {
+      if (action === "play-toggle") {
         await togglePlayback();
-      } else if (action === "scan-page") {
-        await refreshCurrentPage();
       } else if (action === "next") {
         await move(1);
       } else if (action === "previous") {
         await move(-1);
       } else if (action === "stop") {
         await stopPlayback();
-      } else if (action === "open-studio") {
-        const response = await chrome.runtime.sendMessage({
-          type: "voice:studio:open",
-        });
-        if (!response || !response.ok) {
-          window.open(chrome.runtime.getURL("voice-studio.html"), "_blank");
-        }
-      } else if (button.dataset.index != null) {
-        await seek(Number(button.dataset.index));
-      } else if (button.dataset.tab) {
-        state = Player.reduce(state, {
-          type: "TAB_SELECT",
-          tab: button.dataset.tab,
-        });
-        renderShell();
-        if (button.dataset.tab === "voices") await loadVoices();
       }
     });
 
-    shadow.addEventListener("change", async (event) => {
-      if (!event.isTrusted && !TEST_MODE) return;
-      const control = event.target;
-      if (control.dataset.setting === "preset") {
-        settings.preset = control.value;
-      } else if (control.dataset.setting === "opVoice") {
-        const nextOpVoice = control.value;
-        const nextReplyVoices = settings.replyVoices.filter(
-          (voice) => voice !== nextOpVoice,
-        );
-        if (!nextReplyVoices.length) {
-          const replacement = knownVoices.find((voice) => voice !== nextOpVoice);
-          if (!replacement) {
-            control.value = settings.opVoice;
-            showToast("请先录制另一个音色，再把当前回复音色设为楼主音色。");
-            return;
-          }
-          nextReplyVoices.push(replacement);
-        }
-        settings.opVoice = nextOpVoice;
-        settings.replyVoices = nextReplyVoices;
-      } else if (control.dataset.setting === "replyVoice") {
-        const nextReplyVoices = Array.from(
-          shadow.querySelectorAll('[data-setting="replyVoice"]:checked'),
-        ).map((input) => input.value);
-        if (!nextReplyVoices.length) {
-          control.checked = true;
-          showToast("至少保留一个回复音色；楼主音色不会分配给其他作者。");
-          return;
-        }
-        settings.replyVoices = nextReplyVoices;
-      } else {
-        return;
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (!message || typeof message.type !== "string") return undefined;
+      const type = message.type;
+      if (
+        type !== "reader:snapshot:get" &&
+        type !== "reader:command" &&
+        type !== "reader:page-context:get" &&
+        type !== "reader:page-context:apply"
+      ) {
+        return undefined;
       }
-      await saveSettings();
-      if (state.segments.length) {
-        try {
-          const baseSegments = state.segments.map(stripPlaybackFields);
-          const assigned = assignSegments(baseSegments);
-          state = Player.reduce(state, {
-            type: "LOAD_SUCCESS",
-            scanId: state.scanId,
-            document: state.document,
-            segments: assigned,
-            index: state.index,
-          });
-          await stopPlayback();
-        } catch (error) {
-          showToast(error.message);
-        }
-      }
-      render();
-    });
-
-    chrome.runtime.onMessage.addListener((message) => {
-      if (message && message.type === "ui:toggle") {
-        state = Player.reduce(state, { type: "PANEL_TOGGLE" });
-        renderShell();
-      }
+      const respond = (response) => {
+        if (typeof sendResponse === "function") sendResponse(response);
+      };
+      Promise.resolve(handleReaderMessage(message)).then(respond, (error) => {
+        respond({
+          ok: false,
+          error: {
+            code: "reader_command_failed",
+            message: (error && error.message) || "网页朗读操作失败。",
+          },
+        });
+      });
+      return true;
     });
 
     if (chrome.storage.onChanged && typeof chrome.storage.onChanged.addListener === "function") {
@@ -224,30 +168,219 @@
         const change = changes && changes[SETTINGS_KEY];
         if (areaName !== "local") return;
         const settingsChanged = Boolean(change && adoptSettings(change.newValue));
-        if (changes && changes.voiceProfiles) void loadVoices();
         if (!settingsChanged) return;
         void (async () => {
           await stopPlayback();
-          if (state.segments.length) {
-            try {
-              const assigned = assignSegments(
-                state.segments.map(stripPlaybackFields),
-              );
-              state = Player.reduce(state, {
-                type: "LOAD_SUCCESS",
-                scanId: state.scanId,
-                document: state.document,
-                segments: assigned,
-                index: state.index,
-              });
-            } catch (error) {
-              showToast(error.message);
-            }
-          }
-          render();
+          reassignCurrentSegments();
         })();
       });
     }
+  }
+
+  async function handleReaderMessage(message) {
+    switch (message.type) {
+      case "reader:snapshot:get":
+        return { ok: true, snapshot: getReaderSnapshot() };
+      case "reader:command":
+        return runReaderCommand(message);
+      case "reader:page-context:get":
+        return { ok: true, pageContext: getPageContext() };
+      case "reader:page-context:apply":
+        return applyPageContext(message);
+      default:
+        return {
+          ok: false,
+          error: { code: "unknown_reader_message", message: "不支持的网页朗读请求。" },
+        };
+    }
+  }
+
+  async function runReaderCommand(message) {
+    const requestedPageKey = String(message && message.pageKey || "");
+    const statePageKey = String(state.pageKey || "");
+    const livePageKey = getCurrentPageKey();
+    if (
+      !requestedPageKey ||
+      requestedPageKey !== livePageKey ||
+      (statePageKey && statePageKey !== livePageKey)
+    ) {
+      return {
+        ok: false,
+        error: "page_context_mismatch",
+        errorDetail: {
+          code: "page_context_mismatch",
+          message: "网页已发生变化，请重新打开扩展弹窗后再操作。",
+        },
+        snapshot: getReaderSnapshot(),
+      };
+    }
+    const payload = message && message.payload && typeof message.payload === "object"
+      ? message.payload
+      : {};
+    const command = String(message.command || message.action || payload.command || "")
+      .trim()
+      .toLowerCase();
+    switch (command) {
+      case "toggle":
+      case "play-toggle":
+        await togglePlayback();
+        break;
+      case "play":
+      case "resume":
+        if (state.status !== "playing") await togglePlayback();
+        break;
+      case "pause":
+        if (state.status === "playing") await togglePlayback();
+        break;
+      case "previous":
+      case "prev":
+        await move(-1);
+        break;
+      case "next":
+        await move(1);
+        break;
+      case "seek": {
+        const index = Number(message.index == null ? payload.index : message.index);
+        if (!Number.isInteger(index)) {
+          return {
+            ok: false,
+            error: { code: "invalid_reader_index", message: "朗读位置无效。" },
+            snapshot: getReaderSnapshot(),
+          };
+        }
+        await seek(index);
+        break;
+      }
+      case "set-speed": {
+        const requestedRate = Number(
+          message.value == null ? payload.value : message.value,
+        );
+        if (!Number.isFinite(requestedRate) || requestedRate < 0.5 || requestedRate > 2) {
+          return {
+            ok: false,
+            error: { code: "invalid_playback_rate", message: "朗读速度应在 0.5× 到 2.0× 之间。" },
+            snapshot: getReaderSnapshot(),
+          };
+        }
+        playbackRate = Math.round(requestedRate * 100) / 100;
+        if (currentAudio) currentAudio.playbackRate = playbackRate;
+        render();
+        break;
+      }
+      case "scan":
+      case "scan-page":
+      case "refresh":
+        await refreshCurrentPage();
+        break;
+      case "stop":
+      case "close":
+        await stopPlayback();
+        break;
+      default:
+        return {
+          ok: false,
+          error: { code: "unknown_reader_command", message: "不支持的朗读操作。" },
+          snapshot: getReaderSnapshot(),
+        };
+    }
+    return { ok: true, snapshot: getReaderSnapshot() };
+  }
+
+  async function applyPageContext(message) {
+    const context = message && message.context && typeof message.context === "object"
+      ? message.context
+      : message && message.pageContext && typeof message.pageContext === "object"
+        ? message.pageContext
+        : message || {};
+    const currentPageKey = state.pageKey || getCurrentPageKey();
+    const requestedPageKey = String(context.pageKey || "");
+    if (requestedPageKey && requestedPageKey !== currentPageKey) {
+      return {
+        ok: false,
+        error: {
+          code: "page_context_mismatch",
+          message: "该配音设置不属于当前网页。",
+        },
+        pageContext: getPageContext(),
+      };
+    }
+    const normalize = VoiceAssignment.normalizeAuthorVoices;
+    pageAuthorVoices = typeof normalize === "function"
+      ? normalize(context.authorVoices)
+      : normalizeAuthorVoicesFallback(context.authorVoices);
+    if (state.segments.length) {
+      await stopPlayback();
+      reassignCurrentSegments();
+    } else {
+      render();
+    }
+    return { ok: true, pageContext: getPageContext() };
+  }
+
+  function getReaderSnapshot() {
+    const authors = getAuthorSummary();
+    const current = state.current;
+    return {
+      pageKey: state.pageKey || getCurrentPageKey(),
+      revision: stateRevision,
+      title: cleanTitle(document.title),
+      status: state.status,
+      index: state.index,
+      total: state.segments.length,
+      segmentCount: state.segments.length,
+      speed: playbackRate,
+      rate: playbackRate,
+      hasMultipleAuthors: authors.length > 1,
+      authorSummary: authors,
+      current: current
+        ? {
+            authorKey: getAuthorKey(current, state.index),
+            authorName: getDisplayAuthor(current),
+            role: getRoleLabel(current),
+            voice: current.voice || "",
+            text: truncateText(current.text, 120),
+          }
+        : null,
+    };
+  }
+
+  function getPageContext() {
+    const snapshot = getReaderSnapshot();
+    return {
+      pageKey: snapshot.pageKey,
+      revision: snapshot.revision,
+      authorVoices: Object.assign({}, pageAuthorVoices),
+      hasMultipleAuthors: snapshot.hasMultipleAuthors,
+      authorSummary: snapshot.authorSummary,
+      // These aliases are intentionally compact and let the separate page
+      // editor use the exact same canonical author key as the assignment code.
+      authors: snapshot.authorSummary.map((author) => ({
+        id: author.key,
+        name: author.name,
+        role: author.role,
+        isOp: author.isOp,
+        count: author.count,
+        // effectiveVoice is the result after global strategy plus an optional
+        // page override. authorVoices below contains only explicit overrides.
+        effectiveVoice: author.voice,
+      })),
+      voices: unique([
+        settings.opVoice,
+        ...(settings.replyVoices || []),
+        ...Object.values(pageAuthorVoices),
+      ]).filter(Boolean),
+    };
+  }
+
+  function normalizeAuthorVoicesFallback(value) {
+    const result = {};
+    if (!value || typeof value !== "object" || Array.isArray(value)) return result;
+    Object.entries(value).forEach(([key, voice]) => {
+      const normalizedKey = String(key || "").trim();
+      const normalizedVoice = String(voice || "").trim();
+      if (normalizedKey && normalizedVoice) result[normalizedKey] = normalizedVoice;
+    });
+    return result;
   }
 
   async function restoreSettings() {
@@ -283,64 +416,7 @@
       if (fallback) next.replyVoices = [fallback];
     }
     settings = next;
-    knownVoices = unique([
-      ...knownVoices,
-      settings.opVoice,
-      ...settings.replyVoices,
-    ]).filter(Boolean);
     return before !== JSON.stringify(settings);
-  }
-
-  async function saveSettings() {
-    await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
-  }
-
-  async function checkService() {
-    try {
-      const response = await chrome.runtime.sendMessage({ type: "tts:status" });
-      if (!response || !response.ok) throw response && response.error;
-      const backend = response.status && response.status.backend;
-      setServiceStatus(
-        backend === "loaded" ? "模型已加载 · Vulkan" : "网关在线 · 模型休眠",
-        "ready",
-      );
-    } catch (_) {
-      setServiceStatus("本地服务未运行", "error");
-    }
-  }
-
-  function setServiceStatus(label, kind) {
-    const status = shadow.querySelector('[data-role="service-status"]');
-    const text = shadow.querySelector('[data-role="service-label"]');
-    if (!status || !text) return;
-    status.className = `qr-status is-${kind}`;
-    text.textContent = label;
-  }
-
-  async function loadVoices() {
-    setServiceStatus("正在加载音色库…", "online");
-    try {
-      const response = await chrome.runtime.sendMessage({ type: "voice:list" });
-      if (!response || !response.ok) {
-        throw new Error(
-          (response && response.error && response.error.message) ||
-            "无法读取音色库",
-        );
-      }
-      knownVoices = unique([
-        ...(response.voices || []).map((voice) =>
-          typeof voice === "string" ? voice : voice.name,
-        ),
-        settings.opVoice,
-        ...settings.replyVoices,
-      ]).filter(Boolean);
-      setServiceStatus("模型已加载 · Vulkan", "ready");
-      renderAuthors();
-      renderVoices(response.voices || []);
-    } catch (error) {
-      setServiceStatus("音色库加载失败", "error");
-      renderVoices([], error.message);
-    }
   }
 
   async function togglePlayback() {
@@ -492,7 +568,28 @@
       mode: settings.preset,
       opVoice: settings.opVoice,
       replyVoices: settings.replyVoices,
+      authorVoices: pageAuthorVoices,
     });
+  }
+
+  function reassignCurrentSegments() {
+    if (!state.segments.length) {
+      render();
+      return;
+    }
+    try {
+      const assigned = assignSegments(state.segments.map(stripPlaybackFields));
+      state = Player.reduce(state, {
+        type: "LOAD_SUCCESS",
+        scanId: state.scanId,
+        document: state.document,
+        segments: assigned,
+        index: state.index,
+      });
+    } catch (error) {
+      showToast(error.message || "无法更新本页音色分配。");
+    }
+    render();
   }
 
   async function playIndex(index) {
@@ -544,6 +641,7 @@
       const audio = new Audio(
         `data:${audioResult.mimeType || "audio/wav"};base64,${audioResult.audioBase64}`,
       );
+      audio.playbackRate = playbackRate;
       currentAudio = audio;
       audio.addEventListener("ended", () => {
         if (!playbackGate.isCurrent(playbackId) || currentAudio !== audio) return;
@@ -564,6 +662,7 @@
           type: "ERROR",
           message: "音频无法播放，请重新加载扩展后重试。",
         });
+        clearHighlight();
         render();
         flushPendingDynamicScan();
       });
@@ -595,7 +694,8 @@
           (error && error.message) ||
           "本地 Qwen 合成失败，请检查托盘服务。",
       });
-      setServiceStatus("合成失败", "error");
+      clearHighlight();
+      showToast("合成失败，请检查本地服务后重试。");
       render();
       flushPendingDynamicScan();
     }
@@ -762,6 +862,9 @@
     const pageKey = getCurrentPageKey();
     if (pageKey === lastObservedPageKey) return;
     lastObservedPageKey = pageKey;
+    // Per-page assignments are deliberately ephemeral. The popup/background can
+    // restore the matching page context after navigation through reader:page-context:apply.
+    pageAuthorVoices = {};
     dynamicScanPending = false;
     dynamicResumeIndex = null;
     clearTimeout(mutationTimer);
@@ -863,184 +966,128 @@
   }
 
   function render() {
-    renderShell();
-    renderNow();
-    renderAuthors();
-    renderVoices();
+    stateRevision += 1;
+    renderMiniPlayer();
+    void publishSnapshot();
   }
 
-  function renderShell() {
-    const panel = shadow.querySelector(".qr-panel");
-    const orb = shadow.querySelector(".qr-orb");
-    panel.classList.toggle("is-open", state.panelOpen);
-    orb.classList.toggle("is-shifted", state.panelOpen);
-    orb.setAttribute(
-      "aria-label",
-      state.panelOpen ? "收起 Qwen 网页朗读" : "打开 Qwen 网页朗读",
-    );
-    shadow.querySelectorAll('[role="tab"]').forEach((tab) => {
-      tab.setAttribute("aria-selected", String(tab.dataset.tab === state.tab));
-    });
-    shadow.querySelectorAll(".qr-view").forEach((view) => {
-      view.classList.toggle("is-active", view.dataset.view === state.tab);
+  function publishSnapshot() {
+    if (!chrome.runtime || typeof chrome.runtime.sendMessage !== "function") return;
+    Promise.resolve(chrome.runtime.sendMessage({
+      type: "reader:snapshot",
+      snapshot: getReaderSnapshot(),
+    })).catch(() => {
+      // The background worker may be restarting. Popup reads still request a
+      // fresh snapshot directly from this page, so publishing is best-effort.
     });
   }
 
-  function renderNow() {
-    const view = shadow.querySelector('[data-view="now"]');
+  function renderMiniPlayer() {
+    const player = shadow.querySelector(".qr-mini-player");
+    if (!player) return;
+    const isVisible = ["loading", "playing", "paused"].includes(state.status);
     const current = state.current;
-    const total = state.segments.length;
-    const progress = total ? ((state.index + 1) / total) * 100 : 0;
-    const isBusy = ["extracting", "loading"].includes(state.status);
+    const isLoading = state.status === "loading";
     const isPlaying = state.status === "playing";
-    const isScanning = state.status === "extracting";
-    const scanLabel = isScanning
-      ? "正在读取…"
-      : state.document
-        ? "重新读取"
-        : "读取本页";
-    const adapterLabel =
-      state.document && (state.document.adapter || state.document.adapterId);
-    const mainIcon = isPlaying
-      ? '<span class="qr-pause-icon" aria-hidden="true"></span>'
-      : '<span class="qr-play-icon" aria-hidden="true"></span>';
-    const mainLabel = isPlaying ? "暂停" : state.status === "paused" ? "继续" : "播放";
-    const queue = state.segments.slice(0, 40).map((segment, index) => `
-      <button class="qr-queue-item ${index === state.index ? "is-current" : ""}" type="button" data-index="${index}">
-        <span class="qr-mini-avatar">${escapeHtml(initials(segment.authorName || (segment.isOp ? "楼主" : "文")))}</span>
-        <span class="qr-queue-copy">
-          <span class="qr-queue-name">${escapeHtml(segment.authorName || (segment.isOp ? "楼主" : "正文"))}</span>
-          <span class="qr-queue-text">第 ${escapeHtml(segment.floor || index + 1)} 段 · ${escapeHtml(segment.text)}</span>
-        </span>
-        <span class="qr-voice-badge">${escapeHtml(segment.voice || "未分配")}</span>
-      </button>
-    `).join("");
+    const canMove = state.segments.length > 0 && !isLoading;
+    player.classList.toggle("is-visible", isVisible);
+    player.classList.toggle("is-loading", isLoading);
+    player.dataset.state = state.status;
+    player.setAttribute("aria-hidden", String(!isVisible));
+    player.setAttribute("aria-busy", String(isLoading));
 
-    view.innerHTML = `
-      <p class="qr-kicker">当前主题 · ${total ? `第 ${state.index + 1} / ${total} 段` : "等待识别"}</p>
-      <h3 class="qr-title">${escapeHtml(cleanTitle(document.title))}</h3>
-      <div class="qr-scan-row">
-        <span class="qr-scan-summary">${total ? `已识别 ${total} 段${adapterLabel ? ` · ${escapeHtml(adapterLabel)}` : ""}` : isScanning ? "正在分析正文和作者…" : "自动识别未得到结果"}</span>
-        <button class="qr-primary qr-scan-button" type="button" data-action="scan-page" ${isScanning ? "disabled" : ""}>${scanLabel}</button>
-      </div>
-      ${state.status === "error" ? `<div class="qr-error">${escapeHtml(state.error)}</div>` : ""}
-      <div class="qr-speaker">
-        <span class="qr-avatar ${current && !current.isOp ? "is-reply" : ""}">${escapeHtml(initials(current && current.authorName || "Q"))}</span>
-        <span class="qr-speaker-meta">
-          <span class="qr-speaker-name">${escapeHtml(current && current.authorName || "尚未开始")}</span>
-          <span class="qr-speaker-voice">${escapeHtml(current && current.voice || (isScanning ? "正在识别正文" : "识别完成后可播放"))}</span>
-        </span>
-        ${current && current.isOp ? '<span class="qr-op-badge">楼主</span>' : ""}
-      </div>
-      <div class="qr-reading-box"><strong>${isBusy ? "正在准备：" : "当前句："}</strong> ${escapeHtml(current && current.text || "页面会自动识别，但不会自动发声。")}</div>
-      <div class="qr-progress" aria-label="朗读进度"><span style="width:${progress}%"></span></div>
-      <div class="qr-progress-labels"><span>${total ? state.index + 1 : 0}</span><span>${total}</span></div>
-      <div class="qr-controls">
-        <button class="qr-control" type="button" data-action="previous" aria-label="上一段" ${!total || isBusy ? "disabled" : ""}><span class="qr-skip-icon is-back" aria-hidden="true"></span></button>
-        <button class="qr-control is-main" type="button" data-action="play-toggle" aria-label="${mainLabel}" ${isBusy || !total ? "disabled" : ""}>${mainIcon}</button>
-        <button class="qr-control" type="button" data-action="next" aria-label="下一段" ${!total || isBusy ? "disabled" : ""}><span class="qr-skip-icon is-forward" aria-hidden="true"></span></button>
-      </div>
-      <div class="qr-section">
-        <div class="qr-section-head">
-          <h4 class="qr-section-title">朗读预设</h4>
-          <select class="qr-select" data-setting="preset" aria-label="朗读预设">
-            <option value="op-exclusive" ${settings.preset === "op-exclusive" ? "selected" : ""}>楼主专属</option>
-            <option value="stable-author" ${settings.preset === "stable-author" ? "selected" : ""}>作者稳定</option>
-            <option value="round-robin" ${settings.preset === "round-robin" ? "selected" : ""}>顺序轮换</option>
-          </select>
-        </div>
-      </div>
-      <div class="qr-section">
-        <div class="qr-section-head"><h4 class="qr-section-title">即将朗读</h4><button class="qr-icon-button" type="button" data-action="stop" aria-label="停止朗读">■</button></div>
-        <div class="qr-queue">${queue || '<div class="qr-empty">识别完成后会显示作者、楼层与分配音色</div>'}</div>
-      </div>
-    `;
+    const avatar = shadow.querySelector('[data-role="speaker-avatar"]');
+    const name = shadow.querySelector('[data-role="speaker-name"]');
+    const meta = shadow.querySelector('[data-role="speaker-meta"]');
+    const text = shadow.querySelector('[data-role="segment-text"]');
+    const displayAuthor = getDisplayAuthor(current);
+    if (avatar) avatar.textContent = initials(displayAuthor);
+    if (name) {
+      name.textContent = isLoading
+        ? `正在为 ${displayAuthor} 合成`
+        : displayAuthor;
+    }
+    if (meta) {
+      const context = [getRoleLabel(current), current && current.voice, getPlaybackStatusLabel()]
+        .filter(Boolean)
+        .join(" · ");
+      meta.textContent = context || "当前网页";
+    }
+    if (text) text.textContent = current ? truncateText(current.text, 94) : "";
+
+    const previous = shadow.querySelector('[data-action="previous"]');
+    const next = shadow.querySelector('[data-action="next"]');
+    const toggle = shadow.querySelector('[data-action="play-toggle"]');
+    if (previous) previous.disabled = !canMove || state.index <= 0;
+    if (next) next.disabled = !canMove || state.index >= state.segments.length - 1;
+    if (toggle) {
+      toggle.disabled = isLoading || !state.segments.length;
+      toggle.setAttribute("aria-label", isPlaying ? "暂停朗读" : "继续朗读");
+      toggle.innerHTML = isPlaying
+        ? '<span class="qr-pause-icon" aria-hidden="true"></span>'
+        : '<span class="qr-play-icon" aria-hidden="true"></span>';
+    }
   }
 
-  function renderAuthors() {
-    const view = shadow.querySelector('[data-view="authors"]');
-    const authors = [];
-    const seen = new Set();
-    state.segments.forEach((segment) => {
-      const key = segment.authorId || segment.authorName || "article";
-      if (!seen.has(key)) {
-        seen.add(key);
-        authors.push(segment);
+  function getPlaybackStatusLabel() {
+    if (state.status === "loading") return "正在合成";
+    if (state.status === "playing") return "正在朗读";
+    if (state.status === "paused") return "已暂停";
+    return "";
+  }
+
+  function getAuthorSummary() {
+    const authors = new Map();
+    state.segments.forEach((segment, index) => {
+      const key = getAuthorKey(segment, index);
+      const existing = authors.get(key);
+      if (existing) {
+        existing.count += 1;
+        return;
       }
+      authors.set(key, {
+        key,
+        name: getDisplayAuthor(segment),
+        role: getRoleLabel(segment),
+        voice: segment.voice || pageAuthorVoices[key] || "",
+        isOp: Boolean(segment.isOp),
+        count: 1,
+      });
     });
-    const voiceOptions = knownVoices.map((voice) =>
-      `<option value="${escapeAttribute(voice)}" ${voice === settings.opVoice ? "selected" : ""}>${escapeHtml(voice)}</option>`
-    ).join("");
-    const replyOptions = knownVoices
-      .filter((voice) => voice !== settings.opVoice)
-      .map((voice) => `
-        <label class="qr-list-card">
-          <input type="checkbox" data-setting="replyVoice" value="${escapeAttribute(voice)}" ${settings.replyVoices.includes(voice) ? "checked" : ""}>
-          <span class="qr-list-copy">
-            <span class="qr-list-name">${escapeHtml(voice)}</span>
-            <span class="qr-list-subtitle">用于非楼主发言</span>
-          </span>
-        </label>
-      `).join("");
-    const authorCards = authors.map((author) => `
-      <div class="qr-list-card">
-        <span class="qr-avatar ${author.isOp ? "" : "is-reply"}">${escapeHtml(initials(author.authorName || "文"))}</span>
-        <span class="qr-list-copy">
-          <span class="qr-list-name">${escapeHtml(author.authorName || "文章正文")}</span>
-          <span class="qr-list-subtitle">${author.isOp ? "楼主专属" : "回复作者"} · ${escapeHtml(author.voice || "等待分配")}</span>
-        </span>
-        ${author.isOp ? '<span class="qr-op-badge">A</span>' : '<span class="qr-voice-badge">回复</span>'}
-      </div>
-    `).join("");
-    view.innerHTML = `
-      <p class="qr-kicker">音色分配</p>
-      <h3 class="qr-title">楼主固定，其他作者轮换</h3>
-      <div class="qr-form-row">
-        <label for="qr-op-voice">楼主专属音色 A</label>
-        <select id="qr-op-voice" class="qr-select" data-setting="opVoice">${voiceOptions}</select>
-      </div>
-      <p class="qr-help">A 只给楼主使用；其他作者不会占用楼主音色。</p>
-      <div class="qr-form-row">
-        <label>回复音色池 B / C / …</label>
-        <div>${replyOptions || '<div class="qr-error">请先在音色库录制一个不同于楼主的音色。</div>'}</div>
-      </div>
-      <div class="qr-section">
-        <div class="qr-section-head"><h4 class="qr-section-title">当前作者</h4><span class="qr-voice-badge">${authors.length} 人</span></div>
-        <div class="qr-author-list">${authorCards || '<div class="qr-empty">开始朗读后显示作者映射</div>'}</div>
-      </div>
-    `;
+    return Array.from(authors.values()).slice(0, 12);
   }
 
-  function renderVoices(voices, errorMessage) {
-    const view = shadow.querySelector('[data-view="voices"]');
-    const list = Array.isArray(voices) && voices.length
-      ? voices
-      : knownVoices.map((name) => ({ name, kind: "configured" }));
-    const cards = list.map((voice) => {
-      const name = typeof voice === "string" ? voice : voice.name;
-      const kind = typeof voice === "string" ? "registered" : voice.kind;
-      return `
-        <div class="qr-list-card">
-          <span class="qr-avatar">${escapeHtml(initials(name))}</span>
-          <span class="qr-list-copy">
-            <span class="qr-list-name">${escapeHtml(name)}</span>
-            <span class="qr-list-subtitle">${kind === "registered" ? "已注册到本地 Qwen" : "已配置"}</span>
-          </span>
-          <span class="qr-voice-badge">${name === settings.opVoice ? "楼主 A" : "可选"}</span>
-        </div>
-      `;
-    }).join("");
-    view.innerHTML = `
-      <p class="qr-kicker">完全本地 · 不上传录音</p>
-      <h3 class="qr-title">管理克隆音色</h3>
-      ${errorMessage ? `<div class="qr-error">${escapeHtml(errorMessage)}</div>` : ""}
-      <p class="qr-help">录制 5～15 秒干净人声，保存后即可加入楼主或回复音色池。切换音色不需要重启模型。</p>
-      <button class="qr-primary" type="button" data-action="open-studio">＋ 录制新音色</button>
-      <div class="qr-section">
-        <div class="qr-section-head"><h4 class="qr-section-title">可用音色</h4><span class="qr-voice-badge">${list.length}</span></div>
-        <div class="qr-voice-list">${cards || '<div class="qr-empty">还没有可用音色</div>'}</div>
-      </div>
-    `;
+  function getAuthorKey(segment, index) {
+    if (VoiceAssignment && typeof VoiceAssignment.authorKey === "function") {
+      return VoiceAssignment.authorKey(segment, index);
+    }
+    const source = segment || {};
+    return String(source.authorId || source.authorName || source.sourceKey || source.id || index || "article");
+  }
+
+  function getDisplayAuthor(segment) {
+    const source = segment || {};
+    return String(
+      source.character || source.speaker || source.authorName ||
+      (source.isOp ? "楼主" : source.type === "selection" ? "选中文本" : "正文"),
+    ).trim() || "正文";
+  }
+
+  function getRoleLabel(segment) {
+    const source = segment || {};
+    const explicitRole = String(source.role || source.characterRole || "").trim();
+    if (explicitRole) return explicitRole;
+    if (source.isOp) return "楼主";
+    if (source.type === "selection") return "选中文本";
+    if (source.type === "article") return "正文";
+    if (source.authorId || source.authorName) return "回复作者";
+    return "正文";
+  }
+
+  function truncateText(value, maxLength) {
+    const text = String(value || "").replace(/\s+/gu, " ").trim();
+    const limit = Math.max(1, Number(maxLength) || 1);
+    return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
   }
 
   function showToast(message) {

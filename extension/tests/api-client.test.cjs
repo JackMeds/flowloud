@@ -205,7 +205,7 @@ test('background opens the voice studio through its message contract', async () 
   assert.equal(opened, 1);
 });
 
-test('install wires toolbar and keyboard actions to the active tab', async () => {
+test('install uses the native popup and maps the keyboard shortcut to playback', async () => {
   const { install } = require('../background.js');
   const listeners = {};
   const sent = [];
@@ -220,22 +220,44 @@ test('install wires toolbar and keyboard actions to the active tab', async () =>
       getURL(path) { return `chrome-extension://reader/${path}`; },
       onMessage: { addListener(listener) { listeners.message = listener; } },
     },
-    action: { onClicked: { addListener(listener) { listeners.action = listener; } } },
+    action: {},
     commands: { onCommand: { addListener(listener) { listeners.command = listener; } } },
     tabs: {
       async query() { return [{ id: 17 }]; },
-      async sendMessage(tabId, message) { sent.push({ tabId, message }); },
+      async sendMessage(tabId, message) {
+        sent.push({ tabId, message });
+        if (message.type === 'reader:snapshot:get') {
+          return { ok: true, snapshot: { pageKey: 'page-17', status: 'ready', segmentCount: 1 } };
+        }
+        return { ok: true, snapshot: { pageKey: 'page-17', status: 'playing', segmentCount: 1 } };
+      },
       async create() {},
     },
   };
 
   install(chromeApi);
-  await listeners.action({ id: 8 });
   await listeners.command('toggle-reader');
 
   assert.deepEqual(sent, [
-    { tabId: 8, message: { type: 'ui:toggle' } },
-    { tabId: 17, message: { type: 'ui:toggle' } },
+    {
+      tabId: 17,
+      message: {
+        type: 'reader:snapshot:get',
+        request: 'snapshot',
+        source: 'popup',
+      },
+    },
+    {
+      tabId: 17,
+      message: {
+        type: 'reader:command',
+        command: 'play-toggle',
+        action: 'play-toggle',
+        source: 'shortcut',
+        contextId: '',
+        pageKey: 'page-17',
+      },
+    },
   ]);
 });
 

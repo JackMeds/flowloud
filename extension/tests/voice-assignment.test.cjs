@@ -111,6 +111,40 @@ test('single-author article and selection blocks use the narrator voice instead 
   assert.deepEqual(assigned.map((item) => item.voice), ['旁白', '旁白', '旁白']);
 });
 
+test('author keys are stable across chunks and normalized page-context inputs', () => {
+  const { authorKey, normalizeAuthorVoices } = loadVoiceAssignment();
+  assert.equal(authorKey({ authorId: 'user-7', id: 'post-1:0' }), 'id:user-7');
+  assert.equal(authorKey({ authorId: 'user-7', id: 'post-1:1' }), 'id:user-7');
+  assert.equal(authorKey({ authorName: '  Alice   Smith ' }), 'name:alice smith');
+  assert.equal(authorKey({ type: 'article' }), 'document:article');
+  assert.deepEqual(normalizeAuthorVoices({
+    'name:Alice   Smith': '角色音色',
+    'user-7': '用户音色',
+    '': '忽略'
+  }), {
+    'name:alice smith': '角色音色',
+    'id:user-7': '用户音色'
+  });
+});
+
+test('page author voice overrides take priority over OP and reply assignment rules', () => {
+  const { assignVoices } = loadVoiceAssignment();
+  const assigned = assignVoices(thread, {
+    mode: 'round-robin',
+    opVoice: 'A',
+    replyVoices: ['B', 'C'],
+    authorVoices: {
+      'id:op': '旁白',
+      'id:yu': '角色小雨'
+    }
+  });
+
+  assert.deepEqual(assigned.map((segment) => segment.voice), [
+    '旁白', 'B', '角色小雨', 'B', '旁白'
+  ]);
+  assert.equal(thread.some((segment) => Object.hasOwn(segment, 'voice')), false);
+});
+
 test('assignVoices rejects an empty reply voice pool with a Chinese error', () => {
   const { assignVoices } = loadVoiceAssignment();
 

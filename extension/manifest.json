@@ -3,10 +3,11 @@
   "name": "Qwen 网页朗读",
   "version": "0.3.1",
   "description": "自动识别论坛、小说与长文章，并使用本机 Qwen3-TTS 多音色朗读。",
-  "permissions": ["storage", "offscreen"],
+  "permissions": ["storage", "offscreen", "tabs"],
   "host_permissions": ["http://127.0.0.1:7811/*"],
   "action": {
-    "default_title": "Qwen 网页朗读"
+    "default_title": "Qwen 网页朗读",
+    "default_popup": "popup.html"
   },
   "background": {
     "service_worker": "background.js"
@@ -16,7 +17,7 @@
       "suggested_key": {
         "default": "Alt+O"
       },
-      "description": "打开或收起 Qwen 朗读侧栏"
+      "description": "播放或暂停当前页面的 Qwen 朗读"
     }
   },
   "content_scripts": [

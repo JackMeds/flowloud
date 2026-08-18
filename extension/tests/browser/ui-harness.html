@@ -28,17 +28,14 @@
       extractCalls: 0,
       synthCalls: 0,
       audioPlays: 0,
-      holdSynthesis: false,
-      pendingSynthesis: null,
       storageListener: null,
-      voiceNames: ["邵思萌", "音色B", "音色C", "音色D"]
+      readerMessageListener: null,
+      storageSets: 0,
+      lastAudio: null
     };
     window.__QWEN_READER_TEST__ = true;
     window.Audio = class HarnessAudio {
-      constructor(src) {
-        this.src = src;
-        this.listeners = new Map();
-      }
+      constructor(src) { this.src = src; this.listeners = new Map(); window.__qrHarness.lastAudio = this; }
       addEventListener(type, listener) { this.listeners.set(type, listener); }
       async play() { window.__qrHarness.audioPlays += 1; }
       pause() {}
@@ -47,33 +44,20 @@
     };
     window.QwenReaderDefaults = {
       SETTINGS_KEY: "qwenReaderSettings",
-      DEFAULT_SETTINGS: {
-        preset: "op-exclusive",
-        opVoice: "邵思萌",
-        replyVoices: ["音色B", "音色C"]
-      }
+      DEFAULT_SETTINGS: { preset: "op-exclusive", opVoice: "邵思萌", replyVoices: ["音色B", "音色C"] }
     };
-    window.QwenReaderText = {
-      splitText(text) { return [text]; }
-    };
+    window.QwenReaderText = { splitText(text) { return [text]; } };
     window.QwenReaderExtractors = {
       async extractPage() {
         window.__qrHarness.extractCalls += 1;
         const segments = [
-          {id:"p1", floor:1, authorId:"op", authorName:"oprin", isOp:true, text:"今天继续记录一下最近的变化。", sourceKey:"post-1"},
-          {id:"p2", floor:2, authorId:"ler", authorName:"LeR", isOp:false, text:"很短的回复。", sourceKey:"post-2"}
+          {id:"p1", floor:1, authorId:"op", authorName:"oprin", isOp:true, text:"今天继续记录一下最近的变化。", sourceKey:"post-1", sourceSelector:"article[data-qwen-source='post-1']"},
+          {id:"p2", floor:2, authorId:"ler", authorName:"LeR", isOp:false, text:"很短的回复。", sourceKey:"post-2", sourceSelector:"article[data-qwen-source='post-2']"}
         ];
         if (document.querySelector('[data-dynamic-reply]')) {
           segments.push({id:"p3", floor:3, authorId:"new", authorName:"新回复", isOp:false, text:"播放期间动态加载的回复", sourceKey:"post-3"});
         }
         return segments;
-      }
-    };
-    window.QwenReaderVoices = {
-      assignVoices(segments, options) {
-        return segments.map((segment, index) => Object.assign({}, segment, {
-          voice: index ? options.replyVoices[0] : options.opVoice
-        }));
       }
     };
     window.chrome = {
@@ -82,33 +66,33 @@
         sendMessage(message) {
           if (message.type === "tts:synthesize") {
             window.__qrHarness.synthCalls += 1;
-            if (window.__qrHarness.holdSynthesis) {
-              return new Promise(resolve => { window.__qrHarness.pendingSynthesis = resolve; });
-            }
             return Promise.resolve({ok:true, audioBase64:"UklGRg==", mimeType:"audio/wav"});
-          }
-          if (message.type === "tts:status") return Promise.resolve({ok:true, status:{backend:"unloaded"}});
-          if (message.type === "tts:voices" || message.type === "voice:list") {
-            return Promise.resolve({ok:true, voices:window.__qrHarness.voiceNames.map(name => ({
-              name, kind:"registered"
-            }))});
           }
           return Promise.resolve({ok:true});
         },
-        onMessage: { addListener() {} }
+        onMessage: {
+          addListener(listener) { window.__qrHarness.readerMessageListener = listener; }
+        }
       },
       storage: {
-        onChanged: {
-          addListener(listener) { window.__qrHarness.storageListener = listener; }
-        },
+        onChanged: { addListener(listener) { window.__qrHarness.storageListener = listener; } },
         local: {
           get() { return Promise.resolve({}); },
-          set() { return Promise.resolve(); }
+          set() { window.__qrHarness.storageSets += 1; return Promise.resolve(); }
         }
       }
     };
+    window.__sendReaderMessage = function(message) {
+      const listener = window.__qrHarness.readerMessageListener;
+      if (!listener) return Promise.reject(new Error("reader message listener missing"));
+      return new Promise((resolve) => {
+        const keptOpen = listener(message, {}, resolve);
+        if (keptOpen !== true) resolve(undefined);
+      });
+    };
   </script>
   <script src="../../shared/normalized-document.js"></script>
+  <script src="../../shared/voice-assignment.js"></script>
   <script src="../../shared/player-state.js"></script>
   <script src="../../content/reader.js"></script>
   <script>
@@ -121,77 +105,127 @@
         if (host.shadowRoot !== null) throw new Error("production Shadow DOM must be closed");
         const root = window.__QWEN_READER_TEST_ROOT__;
         if (!root) throw new Error("test-only Shadow DOM hook missing");
-        const orb = root.querySelector('[data-action="toggle-panel"]');
-        if (!orb) throw new Error("floating orb missing");
-        orb.click();
-        await new Promise(resolve => setTimeout(resolve, 20));
-        if (!root.querySelector(".qr-panel.is-open")) throw new Error("panel did not open");
-        if (root.textContent.includes("Ⅱ")) throw new Error("Roman numeral pause glyph is present");
+        if (root.querySelector(".qr-orb, .qr-panel, [role=tablist]")) {
+          throw new Error("legacy floating orb or sidebar still rendered");
+        }
+        const mini = root.querySelector(".qr-mini-player");
+        if (!mini || mini.classList.contains("is-visible")) {
+          throw new Error("mini player must exist but stay hidden before playback");
+        }
         if (window.__qrHarness.extractCalls !== 1) throw new Error("initial page scan should run exactly once");
         if (window.__qrHarness.synthCalls !== 0) throw new Error("initial page scan must not synthesize audio");
-        const scanButton = root.querySelector('[data-action="scan-page"]');
-        if (!scanButton || !scanButton.textContent.includes("重新读取")) throw new Error("rescan button missing after automatic scan");
-        scanButton.click();
-        await new Promise(resolve => setTimeout(resolve, 80));
-        if (window.__qrHarness.extractCalls !== 2) throw new Error("manual rescan did not run once");
-        if (window.__qrHarness.synthCalls !== 0) throw new Error("manual rescan must not synthesize audio");
-        const tabs = root.querySelectorAll('[role="tab"]');
-        if (tabs.length !== 3) throw new Error("expected three tabs");
-        tabs[1].click();
-        if (!root.querySelector('[data-view="authors"].is-active')) throw new Error("authors tab did not activate");
-        tabs[2].click();
-        if (!root.querySelector('[data-view="voices"].is-active')) throw new Error("voices tab did not activate");
-        history.pushState({}, "", `?topic=${Date.now()}`);
-        await new Promise(resolve => setTimeout(resolve, 1300));
-        if (window.__qrHarness.extractCalls !== 3) throw new Error("SPA navigation did not trigger one fresh scan");
-        if (window.__qrHarness.synthCalls !== 0) throw new Error("SPA scan must not auto play");
 
-        tabs[0].click();
-        window.__qrHarness.holdSynthesis = true;
-        root.querySelector('.qr-queue-item[data-index="1"]').click();
+        const initial = await window.__sendReaderMessage({type:"reader:snapshot:get"});
+        if (!initial.ok || initial.snapshot.segmentCount !== 2 || !initial.snapshot.hasMultipleAuthors) {
+          throw new Error("compact reader snapshot lost page author context");
+        }
+        if (!initial.snapshot.pageKey || !Number.isInteger(initial.snapshot.revision)) {
+          throw new Error("snapshot must include pageKey and revision");
+        }
+        const pageKey = initial.snapshot.pageKey;
+
+        const legacyToggle = await window.__sendReaderMessage({type:"ui:toggle"});
+        if (legacyToggle !== undefined || window.__qrHarness.synthCalls !== 0) {
+          throw new Error("legacy ui:toggle must not remain as an independent control path");
+        }
+        const unboundCommand = await window.__sendReaderMessage({
+          type:"reader:command", command:"play"
+        });
+        if (unboundCommand.ok || unboundCommand.error !== "page_context_mismatch") {
+          throw new Error("page-bound commands must include the current page key");
+        }
+        const wrongPageCommand = await window.__sendReaderMessage({
+          type:"reader:command", command:"play", pageKey:"https://example.invalid/stale"
+        });
+        if (wrongPageCommand.ok || wrongPageCommand.error !== "page_context_mismatch") {
+          throw new Error("page-bound commands must reject a stale page key");
+        }
+
+        const play = await window.__sendReaderMessage({type:"reader:command", command:"play", pageKey});
+        if (!play.ok || play.snapshot.status !== "playing") throw new Error("reader command did not start playback");
+        if (!mini.classList.contains("is-visible")) throw new Error("mini player did not appear during playback");
+        if (!document.querySelector(".qwen-reader-speaking")) throw new Error("current paragraph highlight disappeared");
+        if (!root.querySelector('[data-action="previous"], [data-action="next"], [data-action="stop"]')) {
+          throw new Error("mini player controls missing");
+        }
+
+        const speed = await window.__sendReaderMessage({type:"reader:command", command:"set-speed", value:"1.2", pageKey});
+        if (!speed.ok || speed.snapshot.speed !== 1.2 || window.__qrHarness.lastAudio.playbackRate !== 1.2) {
+          throw new Error("temporary playback speed was not applied to the current audio");
+        }
+
+        root.querySelector('[data-action="play-toggle"]').click();
         await new Promise(resolve => setTimeout(resolve, 30));
+        if (!mini.classList.contains("is-visible") || mini.dataset.state !== "paused") {
+          throw new Error("mini player should remain available while paused");
+        }
+
+        const pageContext = await window.__sendReaderMessage({type:"reader:page-context:get"});
+        if (Object.keys(pageContext.pageContext.authorVoices).length) {
+          throw new Error("global assignments must not be reported as page overrides");
+        }
+        if (!pageContext.pageContext.authors.every(author => author.effectiveVoice && !("voice" in author))) {
+          throw new Error("page context must separate effective voices from explicit overrides");
+        }
+        const applied = await window.__sendReaderMessage({
+          type:"reader:page-context:apply",
+          context: {
+            pageKey: pageContext.pageContext.pageKey,
+            authorVoices: {"id:op":"音色C", "id:ler":"音色D"}
+          }
+        });
+        if (!applied.ok || applied.pageContext.authorVoices["id:op"] !== "音色C") {
+          throw new Error("page author voice context was not applied");
+        }
+        if (window.__qrHarness.storageSets !== 0) {
+          throw new Error("page author context must not write global settings");
+        }
+        const overridden = await window.__sendReaderMessage({type:"reader:snapshot:get"});
+        if (!overridden.snapshot.authorSummary.some(item => item.key === "id:op" && item.voice === "音色C")) {
+          throw new Error("page author override did not take precedence in snapshot");
+        }
+
+        const mismatch = await window.__sendReaderMessage({
+          type:"reader:page-context:apply",
+          context: {pageKey:"https://example.invalid/other", authorVoices:{"id:op":"不应应用"}}
+        });
+        if (mismatch.ok || mismatch.error.code !== "page_context_mismatch") {
+          throw new Error("page context must be scoped to the active page");
+        }
+
+        await window.__sendReaderMessage({type:"reader:command", command:"play", pageKey});
         const dynamicReply = document.createElement("p");
         dynamicReply.textContent = "播放期间动态加载的回复";
         dynamicReply.dataset.dynamicReply = "true";
         document.querySelector("main").append(dynamicReply);
         await new Promise(resolve => setTimeout(resolve, 30));
-        const releaseSynthesis = window.__qrHarness.pendingSynthesis;
-        if (!releaseSynthesis) throw new Error("held synthesis did not start");
-        window.__qrHarness.holdSynthesis = false;
-        releaseSynthesis({ok:true, audioBase64:"UklGRg==", mimeType:"audio/wav"});
-        await new Promise(resolve => setTimeout(resolve, 60));
-        root.querySelector('[data-action="stop"]').click();
+        await window.__sendReaderMessage({type:"reader:command", command:"stop", pageKey});
         await new Promise(resolve => setTimeout(resolve, 1000));
-        if (window.__qrHarness.extractCalls !== 4) throw new Error("dynamic content added during playback was not rescanned after stop");
-        const currentAfterDynamicScan = root.querySelector('.qr-queue-item.is-current');
-        if (!currentAfterDynamicScan || currentAfterDynamicScan.dataset.index !== "1") throw new Error("dynamic rescan reset the current queue position");
+        const afterDynamic = await window.__sendReaderMessage({type:"reader:snapshot:get"});
+        if (window.__qrHarness.extractCalls !== 2 || afterDynamic.snapshot.segmentCount !== 3) {
+          throw new Error("dynamic content added during playback was not rescanned after stop");
+        }
+        if (mini.classList.contains("is-visible") || document.querySelector(".qwen-reader-speaking")) {
+          throw new Error("stop must hide the mini player and clear page highlight");
+        }
 
-        if (!window.__qrHarness.storageListener) throw new Error("voice settings storage listener missing");
-        window.__qrHarness.storageListener({
-          qwenReaderSettings: {
-            newValue: {preset:"op-exclusive", opVoice:"音色C", replyVoices:["音色B"]}
-          }
-        }, "local");
-        await new Promise(resolve => setTimeout(resolve, 80));
-        const firstVoice = root.querySelector('.qr-queue-item .qr-voice-badge');
-        if (!firstVoice || firstVoice.textContent !== "音色C") throw new Error("saved voice repair did not update the open reader");
-        tabs[2].click();
-        await new Promise(resolve => setTimeout(resolve, 80));
-        const beforeDeleteNames = Array.from(root.querySelectorAll('[data-view="voices"] .qr-list-name'))
-          .map(node => node.textContent);
-        if (!beforeDeleteNames.includes("音色D")) throw new Error("unselected available voice disappeared after settings update");
-        window.__qrHarness.voiceNames = ["音色B", "音色C"];
-        window.__qrHarness.storageListener({voiceProfiles:{newValue:[]}}, "local");
-        await new Promise(resolve => setTimeout(resolve, 80));
-        tabs[2].click();
-        await new Promise(resolve => setTimeout(resolve, 80));
-        const visibleVoiceNames = Array.from(root.querySelectorAll('[data-view="voices"] .qr-list-name'))
-          .map(node => node.textContent);
-        if (visibleVoiceNames.includes("邵思萌")) throw new Error("deleted unused voice remained in the open reader catalog");
-        tabs[1].click();
-        const authorVoiceValues = Array.from(root.querySelectorAll('[data-view="authors"] option, [data-view="authors"] input[data-setting="replyVoice"]'))
-          .map(node => node.value);
-        if (authorVoiceValues.includes("音色D")) throw new Error("deleted unused voice remained selectable for authors");
+        history.pushState({}, "", `?topic=${Date.now()}`);
+        const synthesisBeforeStaleCommand = window.__qrHarness.synthCalls;
+        const staleAfterNavigation = await window.__sendReaderMessage({
+          type:"reader:command", command:"play", pageKey
+        });
+        if (
+          staleAfterNavigation.ok ||
+          staleAfterNavigation.error !== "page_context_mismatch" ||
+          window.__qrHarness.synthCalls !== synthesisBeforeStaleCommand
+        ) {
+          throw new Error("a stale popup command controlled the new SPA route");
+        }
+        await new Promise(resolve => setTimeout(resolve, 1300));
+        const afterNavigation = await window.__sendReaderMessage({type:"reader:page-context:get"});
+        if (window.__qrHarness.extractCalls !== 3 || Object.keys(afterNavigation.pageContext.authorVoices).length) {
+          throw new Error("SPA navigation should rescan and clear old page-only assignments");
+        }
         result.value = "PASS";
         result.style.background = "#d9fbe7";
         document.documentElement.dataset.testStatus = "pass";

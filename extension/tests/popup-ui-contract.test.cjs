@@ -1,0 +1,69 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const extensionRoot = path.resolve(__dirname, '..');
+const read = (file) => fs.readFileSync(path.join(extensionRoot, file), 'utf8');
+
+test('popup and the comparison lab load the shared production renderer and CSS', () => {
+  const popup = read('popup.html');
+  const lab = read('popup-lab.html');
+  assert.match(popup, /popup\.css/);
+  assert.match(lab, /popup\.css/);
+  assert.match(popup, /popup-view\.js/);
+  assert.match(lab, /popup-view\.js/);
+  assert.doesNotMatch(popup, /<script[^>]*>[^<]/);
+  assert.doesNotMatch(lab, /<script[^>]*>[^<]/);
+});
+
+test('popup controller uses the B+C message contract and keeps advanced editing separate', () => {
+  const source = read('popup.js');
+  for (const type of ['reader:active-context', 'reader:snapshot:get', 'reader:command', 'reader:page-editor:open']) {
+    assert.match(source, new RegExp(type));
+  }
+  assert.match(read('page-voices.js'), /reader:page-context:get/);
+  assert.match(read('page-voices.js'), /reader:page-context:apply/);
+  assert.match(read('popup-view.js'), /mountPopup/);
+  assert.match(read('popup-view.js'), /mountPageVoices/);
+});
+
+test('popup renderer accepts a compact snapshot without the full segment queue', () => {
+  const source = read('popup-view.js');
+  assert.match(source, /snapshot\.segmentCount/);
+  assert.match(source, /snapshot\.current/);
+  assert.match(source, /snapshot\.speed \|\| snapshot\.rate \|\| model\.speed/);
+  assert.doesNotMatch(source, /previous\.disabled = !segments\.length/);
+});
+
+test('rerendering cannot accumulate delegated control listeners', () => {
+  const source = read('popup-view.js');
+  assert.match(source, /const boundRoots = new WeakSet\(\)/);
+  assert.match(source, /if \(boundRoots\.has\(root\)\) return/);
+  assert.match(source, /boundRoots\.add\(root\)/);
+});
+
+test('page editor trusts contextId, keeps global voice choices implicit, and only closes after success', () => {
+  const editor = read('page-voices.js');
+  const view = read('popup-view.js');
+  assert.match(editor, /query\.get\('contextId'\)/);
+  assert.doesNotMatch(editor, /query\.get\('tabId'\)/);
+  assert.match(editor, /reader:page-context:get'[\s\S]*\{ contextId \}/);
+  assert.match(editor, /reader:page-context:apply'[\s\S]*contextId/);
+  assert.match(editor, /filter\(\(select\) => Boolean\(select\.value\)\)/);
+  assert.match(view, /跟随全局策略（当前：/);
+  assert.match(view, /author\.effectiveVoice \|\| author\.voice \|\| '默认音色'/);
+  const errorCheck = editor.indexOf("response && response.ok === false");
+  const close = editor.indexOf('window.close();', editor.indexOf("reader:page-context:apply"));
+  assert.ok(errorCheck >= 0 && close > errorCheck);
+});
+
+test('popup commands carry the current page identity', () => {
+  const source = read('popup.js');
+  assert.match(source, /pageKey: snapshot && snapshot\.pageKey \|\| context && context\.pageKey/);
+});
+
+test('the popup has no legacy sidebar or floating-orb surface', () => {
+  const source = [read('popup.html'), read('popup.css'), read('popup-view.js')].join('\n');
+  assert.doesNotMatch(source, /qr-panel|qr-orb|侧栏/);
+});

@@ -1,6 +1,64 @@
 (function attachVoiceAssignment(global) {
   'use strict';
 
+  function cleanKeyPart(value, lowercase) {
+    const text = String(value == null ? '' : value)
+      .trim()
+      .replace(/\s+/gu, ' ');
+    return lowercase ? text.toLocaleLowerCase() : text;
+  }
+
+  function makeAuthorKey(prefix, value, lowercase) {
+    const key = cleanKeyPart(value, lowercase);
+    return key ? `${prefix}:${key}` : '';
+  }
+
+  function authorKey(segment, index) {
+    const source = segment || {};
+    const byId = makeAuthorKey('id', source.authorId, false);
+    if (byId) return byId;
+    const byName = makeAuthorKey('name', source.authorName, true);
+    if (byName) return byName;
+    if (source.isOp) return 'role:op';
+    if (source.type === 'article' || source.type === 'selection') {
+      return `document:${source.type}`;
+    }
+    const byPost = makeAuthorKey('source', source.postId || source.sourceKey, false);
+    if (byPost) return byPost;
+    const bySegment = makeAuthorKey('segment', source.id, false);
+    if (bySegment) return bySegment;
+    return `segment:${Number.isInteger(index) ? index : 0}`;
+  }
+
+  function normalizeAuthorKey(value) {
+    const raw = cleanKeyPart(value, false);
+    if (!raw) return '';
+    const match = /^(id|name|role|document|source|segment):(.*)$/u.exec(raw);
+    if (!match) return makeAuthorKey('id', raw, false);
+    const prefix = match[1];
+    const part = cleanKeyPart(match[2], prefix === 'name');
+    return part ? `${prefix}:${part}` : '';
+  }
+
+  function normalizeAuthorVoices(value) {
+    const entries = value instanceof Map
+      ? Array.from(value.entries())
+      : Array.isArray(value)
+        ? value.map((item) => Array.isArray(item)
+          ? item
+          : [item && (item.authorKey || item.key), item && item.voice])
+        : value && typeof value === 'object'
+          ? Object.entries(value)
+          : [];
+    const normalized = {};
+    entries.forEach(([key, voice]) => {
+      const author = normalizeAuthorKey(key);
+      const selectedVoice = String(voice == null ? '' : voice).trim();
+      if (author && selectedVoice) normalized[author] = selectedVoice;
+    });
+    return normalized;
+  }
+
   function assignVoices(segments, options) {
     const settings = options || {};
     const opVoice = String(settings.opVoice || '').trim();
@@ -15,6 +73,7 @@
     if (!['op-exclusive', 'stable-author', 'round-robin'].includes(mode)) {
       throw new Error('未知的音色分配预设');
     }
+    const authorVoices = normalizeAuthorVoices(settings.authorVoices);
 
     const stableVoices = new Map();
     let replyIndex = 0;
@@ -23,25 +82,23 @@
     let activeReplyVoice = '';
     return (Array.isArray(segments) ? segments : []).map((segment, index) => {
       const clone = { ...segment };
+      const key = authorKey(clone, index);
+      const overrideVoice = authorVoices[key];
       if (clone.isOp || clone.type === 'article' || clone.type === 'selection') {
-        clone.voice = opVoice;
+        clone.voice = overrideVoice || opVoice;
         return clone;
       }
 
       if (mode === 'stable-author') {
-        const authorKey = String(clone.authorId || clone.authorName || clone.id || index);
-        if (!stableVoices.has(authorKey)) {
-          stableVoices.set(authorKey, replyVoices[stableVoices.size % replyVoices.length]);
+        if (!stableVoices.has(key)) {
+          stableVoices.set(key, replyVoices[stableVoices.size % replyVoices.length]);
         }
-        clone.voice = stableVoices.get(authorKey);
+        clone.voice = stableVoices.get(key);
       } else if (mode === 'op-exclusive') {
-        const authorKey = String(
-          clone.authorId || clone.authorName || clone.postId || clone.sourceKey || clone.id || index
-        );
-        if (authorKey !== lastReplyAuthor || !activeReplyVoice) {
+        if (key !== lastReplyAuthor || !activeReplyVoice) {
           activeReplyVoice = replyVoices[replyIndex % replyVoices.length];
           replyIndex += 1;
-          lastReplyAuthor = authorKey;
+          lastReplyAuthor = key;
         }
         clone.voice = activeReplyVoice;
       } else {
@@ -55,9 +112,18 @@
         }
         clone.voice = activeReplyVoice;
       }
+      // A per-page author decision changes only this final selection. We still
+      // advance the normal allocator so the remaining authors keep their
+      // deterministic B/C ordering when an override is later removed.
+      if (overrideVoice) clone.voice = overrideVoice;
       return clone;
     });
   }
 
-  global.QwenReaderVoiceAssignment = { assignVoices };
+  global.QwenReaderVoiceAssignment = {
+    assignVoices,
+    authorKey,
+    normalizeAuthorKey,
+    normalizeAuthorVoices
+  };
 })(globalThis);
