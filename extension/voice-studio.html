@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Qwen 音色工作室</title>
+  <title>Qwen Reader 设置</title>
   <link rel="stylesheet" href="voice-studio.css?v=0.4.5-final">
 </head>
 <body>
@@ -13,14 +13,98 @@
         <img class="brand-logo" src="assets/qwen-reader-48.png" alt="">
         <div>
           <strong>Qwen Reader</strong>
-          <span>音色工作室</span>
+          <span>设置中心</span>
         </div>
       </div>
-      <p id="status" class="status" role="status" aria-live="polite">正在读取本地音色库…</p>
+      <div class="app-bar-actions">
+        <nav class="settings-nav" aria-label="设置分类">
+          <button class="settings-nav-button is-active" type="button" data-settings-section="reader" aria-current="page">阅读与显示</button>
+          <button class="settings-nav-button" type="button" data-settings-section="voices">音色与克隆</button>
+        </nav>
+        <p id="status" class="status" role="status" aria-live="polite">设置会自动同步到所有网页</p>
+      </div>
     </div>
   </header>
 
-  <main class="studio-shell">
+  <main id="reader-settings-pane" class="settings-shell settings-pane" data-settings-pane="reader">
+    <header class="studio-intro settings-intro">
+      <div>
+        <p class="kicker">READING EXPERIENCE</p>
+        <h1>阅读与显示</h1>
+        <p>这些设置会应用到所有网页；本页作者的临时配音仍从 Popup 的“本页配音”进入。</p>
+      </div>
+      <button id="reset-reader-settings" class="text-button" type="button">恢复默认</button>
+    </header>
+
+    <form id="reader-settings-form" class="settings-grid">
+      <section class="settings-card settings-card-wide" aria-labelledby="interaction-title">
+        <header class="settings-card-header">
+          <div><p class="settings-eyebrow">INTERACTION</p><h2 id="interaction-title">阅读交互</h2></div>
+          <span id="settings-save-status" class="settings-save-status" role="status" aria-live="polite">自动保存</span>
+        </header>
+        <div class="settings-row">
+          <div><strong>网页点读</strong><p>点击正文中的句子，直接从该位置开始朗读。</p></div>
+          <label class="settings-switch"><input type="checkbox" name="clickToRead"><span aria-hidden="true"></span></label>
+        </div>
+        <label class="settings-field">
+          <span><strong>作者配音策略</strong><small>决定论坛楼主和回复作者如何分配音色。</small></span>
+          <select name="preset">
+            <option value="op-exclusive">楼主专属</option>
+            <option value="stable-author">作者固定</option>
+            <option value="round-robin">按楼层轮换</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="settings-card" aria-labelledby="focus-title">
+        <header class="settings-card-header"><div><p class="settings-eyebrow">FOCUS</p><h2 id="focus-title">正文聚焦</h2></div></header>
+        <label class="settings-field settings-field-stack">
+          <span><strong>聚焦范围</strong><small>逐词动画始终独立，不受此项影响。</small></span>
+          <select name="readingFocus">
+            <option value="off">关闭聚焦</option>
+            <option value="line">当前行</option>
+            <option value="sentence">当前句</option>
+          </select>
+        </label>
+        <fieldset class="theme-options" data-setting-group="readingFocusStyle">
+          <legend>聚焦主题</legend>
+          <label class="theme-option"><input type="radio" name="readingFocusStyle" value="soft-glow"><span><i class="theme-swatch is-soft-glow"></i><strong>浅色光晕</strong><small>轻柔背景，适合长文</small></span></label>
+          <label class="theme-option"><input type="radio" name="readingFocusStyle" value="edge-glow"><span><i class="theme-swatch is-edge-glow"></i><strong>字体柔光</strong><small>强调字形边缘</small></span></label>
+          <label class="theme-option"><input type="radio" name="readingFocusStyle" value="paper-wash"><span><i class="theme-swatch is-paper-wash"></i><strong>淡色衬底</strong><small>类似纸张标记</small></span></label>
+          <label class="theme-option"><input type="radio" name="readingFocusStyle" value="underline-guide"><span><i class="theme-swatch is-underline-guide"></i><strong>细线导读</strong><small>最克制的提示</small></span></label>
+        </fieldset>
+      </section>
+
+      <section class="settings-card" aria-labelledby="word-title">
+        <header class="settings-card-header"><div><p class="settings-eyebrow">WORD MOTION</p><h2 id="word-title">逐词动画</h2></div></header>
+        <fieldset class="theme-options" data-setting-group="wordHighlightStyle">
+          <legend>动画主题</legend>
+          <label class="theme-option"><input type="radio" name="wordHighlightStyle" value="edge-dissolve"><span><i class="theme-swatch is-edge-dissolve"></i><strong>边缘消隐</strong><small>当前默认，清晰自然</small></span></label>
+          <label class="theme-option"><input type="radio" name="wordHighlightStyle" value="classic-glow"><span><i class="theme-swatch is-classic-glow"></i><strong>经典光晕</strong><small>稳定的发光强调</small></span></label>
+          <label class="theme-option"><input type="radio" name="wordHighlightStyle" value="aurora-tide"><span><i class="theme-swatch is-aurora-tide"></i><strong>极光底线</strong><small>颜色沿文字底部流动</small></span></label>
+          <label class="theme-option"><input type="radio" name="wordHighlightStyle" value="custom"><span><i class="theme-swatch is-custom"></i><strong>自定义</strong><small>调整颜色、光晕与速度</small></span></label>
+        </fieldset>
+        <div id="word-custom-settings" class="custom-theme-controls" hidden>
+          <label><span>主色</span><input type="color" name="wordHighlightColor"></label>
+          <label><span>光晕 <output data-output="wordHighlightGlow">48%</output></span><input type="range" name="wordHighlightGlow" min="0" max="100" step="1"></label>
+          <label><span>扫光速度 <output data-output="wordHighlightSpeed">1.0×</output></span><input type="range" name="wordHighlightSpeed" min="0.6" max="1.8" step="0.1"></label>
+        </div>
+      </section>
+
+      <section class="settings-card settings-card-wide" aria-labelledby="voices-title">
+        <header class="settings-card-header">
+          <div><p class="settings-eyebrow">VOICE ASSIGNMENT</p><h2 id="voices-title">默认音色分配</h2></div>
+          <button class="text-button" type="button" data-open-voice-studio>添加或管理音色</button>
+        </header>
+        <div class="voice-assignment-grid">
+          <label class="settings-field settings-field-stack"><span><strong>楼主 / 旁白音色</strong><small>文章正文和论坛楼主优先使用。</small></span><select name="opVoice" data-role="op-voice-select"></select></label>
+          <fieldset class="reply-voice-fieldset"><legend>回复音色池</legend><p>至少选择一个；楼主音色不会重复分配给回复作者。</p><div id="reply-voice-options" class="reply-voice-options"></div></fieldset>
+        </div>
+      </section>
+    </form>
+  </main>
+
+  <main id="voice-settings-pane" class="studio-shell settings-pane" data-settings-pane="voices" hidden>
     <header class="studio-intro">
       <div>
         <p class="kicker">VOICE LIBRARY</p>
@@ -124,12 +208,14 @@
     </div>
   </main>
 
+  <script src="shared/defaults.js?v=0.5.2"></script>
   <script src="shared/wav.js?v=0.4.5-final"></script>
   <script src="shared/recording-state.js?v=0.4.5-final"></script>
   <script src="shared/voice-naming.js?v=0.4.5-final"></script>
   <script src="shared/audio-import.js?v=0.4.5-final"></script>
   <script src="shared/transcription.js?v=0.4.5-final"></script>
   <script src="shared/voice-library.js?v=0.4.5-final"></script>
+  <script src="settings-center.js?v=0.5.2"></script>
   <script src="voice-studio.js?v=0.4.5-final"></script>
 </body>
 </html>

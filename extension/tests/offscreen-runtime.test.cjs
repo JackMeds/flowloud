@@ -171,6 +171,43 @@ test('offscreen cancellation aborts only the matching immutable playback identit
   assert.equal(resultB.audioBase64, 'Qg==');
 });
 
+test('offscreen cancellation by source tab stops all owned jobs and leaves other tabs alone', async () => {
+  const api = {
+    async ensureLocalVoices() {},
+    async synthesize(request, signal) {
+      if (request.input === 'other-tab') {
+        return { blob: new Blob(['B'], { type: 'audio/wav' }), mimeType: 'audio/wav' };
+      }
+      return new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        }, { once: true });
+      });
+    },
+  };
+  const broker = createBroker({ api, blobToBase64 });
+  const first = broker.handle({
+    type: 'tts:synthesize', sourceTabId: 7, clientId: 'tab-7-a', playbackId: 'play-a', requestId: 'req-a',
+    request: { input: 'same-tab-a', voice: 'voice-a' }, profiles: [],
+  });
+  const second = broker.handle({
+    type: 'tts:synthesize', sourceTabId: 7, clientId: 'tab-7-b', playbackId: 'play-b', requestId: 'req-b',
+    request: { input: 'same-tab-b', voice: 'voice-b' }, profiles: [],
+  });
+  const other = broker.handle({
+    type: 'tts:synthesize', sourceTabId: 8, clientId: 'tab-8', playbackId: 'play-c', requestId: 'req-c',
+    request: { input: 'other-tab', voice: 'voice-c' }, profiles: [],
+  });
+
+  const cancelled = await broker.handle({ type: 'tts:cancel', sourceTabId: 7 });
+  const [firstResult, secondResult, otherResult] = await Promise.all([first, second, other]);
+
+  assert.deepEqual(cancelled, { ok: true, cancelled: true, count: 2 });
+  assert.equal(firstResult.error.code, 'cancelled');
+  assert.equal(secondResult.error.code, 'cancelled');
+  assert.equal(otherResult.ok, true);
+});
+
 test('offscreen cancellation optionally notifies the provider once with matching IDs', async () => {
   const cancelCalls = [];
   const broker = createBroker({

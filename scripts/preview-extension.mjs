@@ -74,6 +74,32 @@ const lab = await context.newPage();
 await lab.goto(`${extensionOrigin}/popup-lab.html`, { waitUntil: 'domcontentloaded' });
 await lab.screenshot({ path: path.join(output, 'popup-lab.png'), fullPage: true });
 
+async function captureSettings(name, hash, selector) {
+  const page = await context.newPage();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(`${extensionOrigin}/voice-studio.html#${hash}`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector(selector, { state: 'visible', timeout: 10000 });
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: path.join(output, name), fullPage: true });
+  await page.close();
+}
+
+await captureSettings('settings-reading.png', 'reader', '#reader-settings-form');
+await captureSettings('settings-voices.png', 'voices', '#record-pane');
+
+const settingsSmoke = await context.newPage();
+await settingsSmoke.goto(`${extensionOrigin}/voice-studio.html#reader`, { waitUntil: 'domcontentloaded' });
+await settingsSmoke.selectOption('[name="readingFocus"]', 'line');
+await settingsSmoke.waitForFunction(async () => {
+  const saved = await chrome.storage.local.get('qwenReaderSettings');
+  return saved.qwenReaderSettings?.readingFocus === 'line';
+}, null, { timeout: 10000 });
+await settingsSmoke.click('[data-settings-section="voices"]');
+await settingsSmoke.click('#import-tab');
+await settingsSmoke.waitForSelector('#import-pane', { state: 'visible' });
+await settingsSmoke.screenshot({ path: path.join(output, 'settings-voice-upload.png'), fullPage: true });
+await settingsSmoke.close();
+
 // The page harness loads the production content reader and its real CSS in a
 // deterministic article fixture. This captures the other half of B+C: the
 // active-only mini player plus the inline author/voice and word indicators.

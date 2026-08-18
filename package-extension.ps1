@@ -80,6 +80,7 @@ $required = @(
     "page-voices.html",
     "page-voices.css",
     "page-voices.js",
+    "settings-center.js",
     "voice-studio.html",
     "voice-studio.css",
     "voice-studio.js",

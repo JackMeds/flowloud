@@ -2,11 +2,60 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  cancelPlaybackForTab,
   chromeStorage,
   createMessageRouter,
   createOffscreenManager,
   install,
 } = require('../background.js');
+
+test('closing a source tab requests cancellation for every offscreen job owned by that tab', async () => {
+  const calls = [];
+  const result = await cancelPlaybackForTab({
+    async cancel(message) {
+      calls.push(message);
+      return { ok: true, cancelled: true, count: 2 };
+    },
+  }, 42);
+
+  assert.deepEqual(calls, [{ type: 'tts:cancel', sourceTabId: 42, reason: 'source-tab-closed' }]);
+  assert.deepEqual(result, { ok: true, cancelled: true, count: 2 });
+});
+
+test('installed background wires tab removal to offscreen source-tab cancellation', async () => {
+  let onRemoved = null;
+  const sent = [];
+  const chromeApi = {
+    storage: {
+      local: { async get() { return {}; }, async set() {} },
+      session: { async get() { return {}; }, async set() {}, async remove() {} },
+    },
+    runtime: {
+      getURL(path) { return `chrome-extension://reader/${path}`; },
+      async getContexts() { return [{ contextType: 'OFFSCREEN_DOCUMENT', documentUrl: 'chrome-extension://reader/offscreen.html' }]; },
+      async sendMessage(message) { sent.push(message); return { ok: true, cancelled: true, count: 1 }; },
+      onMessage: { addListener() {} },
+    },
+    action: {},
+    commands: { onCommand: { addListener() {} } },
+    tabs: {
+      onRemoved: { addListener(listener) { onRemoved = listener; } },
+      async query() { return []; },
+      async sendMessage() { return null; },
+    },
+  };
+
+  install(chromeApi);
+  assert.equal(typeof onRemoved, 'function');
+  onRemoved(55);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(sent, [{
+    target: 'qwen-reader-offscreen',
+    type: 'tts:cancel',
+    sourceTabId: 55,
+    reason: 'source-tab-closed',
+  }]);
+});
 
 test('renaming a local voice registers the new name before one atomic storage update and old-name deletion', async () => {
   const forwarded = [];

@@ -600,6 +600,25 @@ if (typeof importScripts === 'function') {
     };
   }
 
+  async function cancelPlaybackForTab(offscreen, tabId) {
+    const sourceTabId = Number(tabId);
+    if (!Number.isInteger(sourceTabId) || sourceTabId < 0) {
+      return { ok: false, error: { code: 'invalid_source_tab', message: '来源标签页无效。' } };
+    }
+    if (!offscreen || typeof offscreen.cancel !== 'function') {
+      return { ok: true, cancelled: false, count: 0 };
+    }
+    try {
+      return await offscreen.cancel({
+        type: 'tts:cancel',
+        sourceTabId,
+        reason: 'source-tab-closed',
+      });
+    } catch (_) {
+      return { ok: true, cancelled: false, count: 0 };
+    }
+  }
+
   // The popup is transient, so it owns a fixed tab target for its lifetime and
   // requests a compact snapshot from the content script. Playback itself stays
   // in the page/offscreen pipeline when the popup closes.
@@ -955,7 +974,7 @@ if (typeof importScripts === 'function') {
     const api = apiModule.createApiClient({ storage });
     const offscreen = createOffscreenManager(chromeApi);
     const openVoiceStudio = () => chromeApi.tabs.create({
-      url: chromeApi.runtime.getURL('voice-studio.html'),
+      url: `${chromeApi.runtime.getURL('voice-studio.html')}#voices`,
     });
     const router = createMessageRouter({ api, storage, openVoiceStudio, offscreen });
 
@@ -1094,11 +1113,12 @@ if (typeof importScripts === 'function') {
     }
     if (chromeApi.tabs && chromeApi.tabs.onRemoved && typeof chromeApi.tabs.onRemoved.addListener === 'function') {
       chromeApi.tabs.onRemoved.addListener((tabId) => {
+        void cancelPlaybackForTab(offscreen, tabId);
         void popupBroker.forgetTab(tabId);
         void pageEditorBroker.forgetTab(tabId);
       });
     }
-    return { popupBroker, pageEditorBroker };
+    return { popupBroker, pageEditorBroker, stopPlaybackForTab: (tabId) => cancelPlaybackForTab(offscreen, tabId) };
   }
 
   return {
@@ -1108,6 +1128,7 @@ if (typeof importScripts === 'function') {
     REQUIRED_ORIGIN,
     SETTINGS_KEY,
     CLEANUP_QUEUE_KEY,
+    cancelPlaybackForTab,
     POPUP_TARGET_KEY,
     POPUP_SNAPSHOTS_KEY,
     PAGE_EDITOR_CONTEXTS_KEY,

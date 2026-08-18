@@ -897,7 +897,9 @@
       if (body.sessionId && String(body.sessionId) !== job.identity.sessionId) return false;
       if (body.playbackId && String(body.playbackId) !== job.identity.playbackId) return false;
       if (body.requestId && String(body.requestId) !== job.identity.requestId) return false;
-      return Boolean(body.clientId || body.sessionId || body.playbackId || body.requestId);
+      const hasSourceTabId = body.sourceTabId != null && body.sourceTabId !== '';
+      if (hasSourceTabId && Number(body.sourceTabId) !== job.identity.sourceTabId) return false;
+      return Boolean(body.clientId || body.sessionId || body.playbackId || body.requestId || hasSourceTabId);
     }
 
     function notifyRemoteCancel(job) {
@@ -950,8 +952,8 @@
         const result = emit(payload);
         if (result && typeof result.catch === 'function') result.catch(() => {});
       } catch (_) {
-        // Playback is independent from event delivery; a closed tab must not
-        // interrupt a stream that is already audible in the offscreen page.
+        // Event delivery can race with tab closure. The background's tab
+        // removal handler separately cancels every job owned by that tab.
       }
     }
 

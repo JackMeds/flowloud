@@ -570,9 +570,17 @@
       chrome.storage.onChanged.addListener((changes, areaName) => {
         const change = changes && changes[SETTINGS_KEY];
         if (areaName !== "local") return;
+        const previousVoiceAssignment = voiceAssignmentSignature(settings);
         const settingsChanged = Boolean(change && adoptSettings(change.newValue));
+        const voiceAssignmentChanged = previousVoiceAssignment !== voiceAssignmentSignature(settings);
         if (changes && changes.voiceProfiles) void loadVoices();
         if (!settingsChanged) return;
+        if (!voiceAssignmentChanged) {
+          refreshReadingFocus();
+          refreshActiveWordStyle();
+          render();
+          return;
+        }
         void (async () => {
           await stopPlayback();
           if (state.segments.length) {
@@ -659,6 +667,15 @@
 
   function normalizeReadingFocus(value) {
     return ["off", "line", "sentence"].includes(value) ? value : "sentence";
+  }
+
+  function voiceAssignmentSignature(value) {
+    const source = value || {};
+    return JSON.stringify({
+      preset: String(source.preset || "op-exclusive"),
+      opVoice: String(source.opVoice || ""),
+      replyVoices: unique(Array.isArray(source.replyVoices) ? source.replyVoices : []).sort(),
+    });
   }
 
   function normalizeReadingFocusStyle(value) {
