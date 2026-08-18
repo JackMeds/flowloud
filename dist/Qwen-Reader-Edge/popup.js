@@ -2,10 +2,44 @@
   'use strict';
   const root = document.getElementById('popup-root');
   const api = globalThis.chrome;
+  const SETTINGS_KEY = 'qwenReaderSettings';
+  const defaults = globalThis.QwenReaderDefaults || {};
   let context = null;
   let snapshot = null;
   let view = 'reader';
   let pageContext = null;
+  let quickSettings = normalizeQuickSettings(null);
+
+  function normalizeQuickSettings(value) {
+    const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const preset = ['op-exclusive', 'stable-author', 'round-robin'].includes(source.preset || source.voiceMode)
+      ? source.preset || source.voiceMode
+      : defaults.voiceMode || 'op-exclusive';
+    return {
+      clickToRead: Number(source.interactionVersion || 0) >= 3 && source.clickToRead === true,
+      preset,
+      interactionVersion: 3
+    };
+  }
+
+  async function loadQuickSettings() {
+    const saved = await api.storage.local.get(SETTINGS_KEY);
+    quickSettings = normalizeQuickSettings(saved && saved[SETTINGS_KEY]);
+  }
+
+  async function saveQuickSetting(setting, value) {
+    if (!['clickToRead', 'preset'].includes(setting)) return;
+    const saved = await api.storage.local.get(SETTINGS_KEY);
+    const current = Object.assign({}, defaults, saved && saved[SETTINGS_KEY] || {});
+    if (setting === 'clickToRead') current.clickToRead = value === true;
+    if (setting === 'preset') {
+      if (!['op-exclusive', 'stable-author', 'round-robin'].includes(value)) return;
+      current.preset = value;
+    }
+    current.interactionVersion = 3;
+    await api.storage.local.set({ [SETTINGS_KEY]: current });
+    quickSettings = normalizeQuickSettings(current);
+  }
 
   function request(type, payload) {
     return api.runtime.sendMessage(Object.assign({ type }, payload || {}));
@@ -20,14 +54,15 @@
       return;
     }
     if (!context || !context.tabId) {
-      globalThis.QwenPopupView.mountPopup(root, { empty: true, message: message || '正在读取当前网页…' });
+      globalThis.QwenPopupView.mountPopup(root, { empty: true, settings: quickSettings, message: message || '正在读取当前网页…' });
       return;
     }
-    globalThis.QwenPopupView.mountPopup(root, Object.assign({}, context || {}, { snapshot, message }));
+    globalThis.QwenPopupView.mountPopup(root, Object.assign({}, context || {}, { snapshot, settings: quickSettings, message }));
   }
 
   async function refresh() {
     try {
+      await loadQuickSettings();
       context = await request('reader:active-context');
       if (!context || !context.tabId) return render('当前标签页不支持朗读。');
       snapshot = await request('reader:snapshot:get', { tabId: context.tabId });
@@ -40,6 +75,11 @@
   root.addEventListener('qwen-popup-command', async (event) => {
     const detail = event.detail || {};
     try {
+      if (detail.action === 'setting-change') {
+        await saveQuickSetting(detail.setting, detail.value);
+        render();
+        return;
+      }
       if (detail.action === 'open-page-editor') {
         const response = await request('reader:page-voices:get', {
           tabId: context && context.tabId,
@@ -113,4 +153,9 @@
     }
   }, 900);
   window.addEventListener('unload', () => window.clearInterval(poller), { once: true });
+  api.storage.onChanged?.addListener((changes, areaName) => {
+    if (areaName !== 'local' || !changes[SETTINGS_KEY]) return;
+    quickSettings = normalizeQuickSettings(changes[SETTINGS_KEY].newValue);
+    if (view === 'reader') render();
+  });
 })();

@@ -14,12 +14,14 @@ test('options page unifies reading settings and the complete voice studio', () =
   assert.match(html, /data-settings-section="reader"/u);
   assert.match(html, /data-settings-section="voices"/u);
   for (const name of [
-    'clickToRead', 'preset', 'readingFocus', 'readingFocusStyle',
+    'readingFocus', 'readingFocusStyle',
     'wordHighlightStyle', 'wordHighlightColor', 'wordHighlightGlow',
     'wordHighlightSpeed', 'opVoice',
   ]) {
     assert.match(html, new RegExp(`name="${name}"`));
   }
+  assert.doesNotMatch(html, /name="(?:clickToRead|preset)"/u);
+  assert.match(html, /网页点读与配音策略可直接在 Popup 中快速调整/u);
   assert.match(html, /开始录音/u);
   assert.match(html, /type="file"[^>]+multiple/u);
   assert.match(html, /音色库/u);

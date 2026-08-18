@@ -39,6 +39,55 @@
       if (action === 'save-page-voices') return dispatch(root, action);
       if (action === 'cancel-page-voices') return dispatch(root, action);
     });
+    root.addEventListener('change', (event) => {
+      const control = event.target.closest('[data-setting]');
+      if (!control) return;
+      dispatch(root, 'setting-change', {
+        setting: control.dataset.setting,
+        value: control.type === 'checkbox' ? control.checked : control.value
+      });
+    });
+  }
+
+  function quickSettingsSection(model) {
+    const settings = model && model.settings || {};
+    const section = element('section', 'qr-quick-settings');
+    const heading = element('div', 'qr-quick-settings-head');
+    heading.append(element('h2', '', '阅读交互'), element('span', '', '全局生效'));
+    section.append(heading);
+
+    const clickRow = element('label', 'qr-quick-row');
+    const clickCopy = element('span', 'qr-quick-copy');
+    clickCopy.append(element('strong', '', '网页点读'), element('small', '', '点击正文句子后从该处朗读'));
+    const clickSwitch = element('span', 'qr-popup-switch');
+    const clickInput = element('input');
+    clickInput.type = 'checkbox';
+    clickInput.dataset.setting = 'clickToRead';
+    clickInput.checked = settings.clickToRead === true;
+    clickInput.setAttribute('aria-label', '网页点读');
+    clickSwitch.append(clickInput, element('span'));
+    clickRow.append(clickCopy, clickSwitch);
+    section.append(clickRow);
+
+    const strategyRow = element('label', 'qr-quick-row qr-quick-row-stack');
+    const strategyCopy = element('span', 'qr-quick-copy');
+    strategyCopy.append(element('strong', '', '作者配音策略'), element('small', '', '决定楼主与回复作者如何分配音色'));
+    const strategy = element('select', 'qr-quick-select');
+    strategy.dataset.setting = 'preset';
+    strategy.setAttribute('aria-label', '作者配音策略');
+    [
+      ['op-exclusive', '楼主专属'],
+      ['stable-author', '作者固定'],
+      ['round-robin', '按楼层轮换']
+    ].forEach(([value, label]) => {
+      const option = element('option', '', label);
+      option.value = value;
+      option.selected = value === (settings.preset || 'op-exclusive');
+      strategy.append(option);
+    });
+    strategyRow.append(strategyCopy, strategy);
+    section.append(strategyRow);
+    return section;
   }
 
   function mountPopup(root, model) {
@@ -58,6 +107,7 @@
     shell.append(header);
     if (!model || model.empty) {
       shell.append(element('section', 'qr-empty-card', model && model.message || '打开一篇文章或讨论页后，即可从这里开始朗读。'));
+      shell.append(quickSettingsSection(model));
       root.append(shell);
       setControlEvents(root);
       return;
@@ -90,6 +140,7 @@
     pageCard.append(controls);
     pageCard.append(element('p', 'qr-runtime-note', '播放会在关闭弹窗后继续；正文将保持当前句与逐词高亮。'));
     shell.append(pageCard);
+    shell.append(quickSettingsSection(model));
     const authors = model.authors || [];
     if (authors.length) {
       const summary = element('section', 'qr-voice-summary');
@@ -105,7 +156,6 @@
       summary.append(chips);
       shell.append(summary);
     }
-    shell.append(element('p', 'qr-footer-note', '朗读将在关闭弹窗后继续；网页正文会跟随高亮。'));
     root.append(shell);
     setControlEvents(root);
   }

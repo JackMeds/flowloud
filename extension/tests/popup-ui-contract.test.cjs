@@ -10,6 +10,7 @@ test('popup and the comparison lab load the shared production renderer and CSS',
   const popup = read('popup.html');
   const lab = read('popup-lab.html');
   assert.match(popup, /popup\.css/);
+  assert.match(popup, /shared\/defaults\.js/);
   assert.match(lab, /popup\.css/);
   assert.match(popup, /popup-view\.js/);
   assert.match(lab, /popup-view\.js/);
@@ -36,6 +37,19 @@ test('popup renderer accepts a compact snapshot without the full segment queue o
   assert.doesNotMatch(source, /data-speed/);
   assert.match(source, /open-options/);
   assert.doesNotMatch(source, /previous\.disabled = !segments\.length/);
+});
+
+test('click-to-read and author strategy are quick settings in the popup', () => {
+  const view = read('popup-view.js');
+  const controller = read('popup.js');
+  const settingsPage = read('voice-studio.html');
+  assert.match(view, /dataset\.setting = 'clickToRead'/);
+  assert.match(view, /dataset\.setting = 'preset'/);
+  assert.match(view, /网页点读/);
+  assert.match(view, /作者配音策略/);
+  assert.match(controller, /api\.storage\.local\.set/);
+  assert.match(controller, /qwenReaderSettings/);
+  assert.doesNotMatch(settingsPage, /name="(?:clickToRead|preset)"/);
 });
 
 test('rerendering cannot accumulate delegated control listeners', () => {

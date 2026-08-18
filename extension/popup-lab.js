@@ -4,6 +4,7 @@
     title: '如何让浏览器朗读真正融入阅读？',
     sourceLabel: 'V2EX · 当前主题',
     speed: '1.0',
+    settings: { clickToRead: false, preset: 'op-exclusive' },
     authors: [
       { id: 'op', name: '楼主', voice: '邵思萌', count: 8, isOp: true },
       { id: 'a1', name: 'Mina', voice: '清朗', count: 4 },

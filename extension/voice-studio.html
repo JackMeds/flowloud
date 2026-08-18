@@ -31,31 +31,12 @@
       <div>
         <p class="kicker">READING EXPERIENCE</p>
         <h1>阅读与显示</h1>
-        <p>这些设置会应用到所有网页；本页作者的临时配音仍从 Popup 的“本页配音”进入。</p>
+        <p>这里保留正文聚焦、逐词动画和默认音色；网页点读与配音策略可直接在 Popup 中快速调整。</p>
       </div>
       <button id="reset-reader-settings" class="text-button" type="button">恢复默认</button>
     </header>
 
     <form id="reader-settings-form" class="settings-grid">
-      <section class="settings-card settings-card-wide" aria-labelledby="interaction-title">
-        <header class="settings-card-header">
-          <div><p class="settings-eyebrow">INTERACTION</p><h2 id="interaction-title">阅读交互</h2></div>
-          <span id="settings-save-status" class="settings-save-status" role="status" aria-live="polite">自动保存</span>
-        </header>
-        <div class="settings-row">
-          <div><strong>网页点读</strong><p>点击正文中的句子，直接从该位置开始朗读。</p></div>
-          <label class="settings-switch"><input type="checkbox" name="clickToRead"><span aria-hidden="true"></span></label>
-        </div>
-        <label class="settings-field">
-          <span><strong>作者配音策略</strong><small>决定论坛楼主和回复作者如何分配音色。</small></span>
-          <select name="preset">
-            <option value="op-exclusive">楼主专属</option>
-            <option value="stable-author">作者固定</option>
-            <option value="round-robin">按楼层轮换</option>
-          </select>
-        </label>
-      </section>
-
       <section class="settings-card" aria-labelledby="focus-title">
         <header class="settings-card-header"><div><p class="settings-eyebrow">FOCUS</p><h2 id="focus-title">正文聚焦</h2></div></header>
         <label class="settings-field settings-field-stack">

@@ -14,7 +14,7 @@
   let saveRevision = 0;
 
   const settingKeys = [
-    'clickToRead', 'preset', 'readingFocus', 'readingFocusStyle',
+    'readingFocus', 'readingFocusStyle',
     'wordHighlightStyle', 'wordHighlightColor', 'wordHighlightGlow',
     'wordHighlightSpeed', 'opVoice', 'replyVoices', 'interactionVersion',
   ];
@@ -107,8 +107,6 @@
 
   function render() {
     if (!form) return;
-    setControlValue('clickToRead', settings.clickToRead);
-    setControlValue('preset', settings.preset);
     setControlValue('readingFocus', settings.readingFocus);
     setControlValue('readingFocusStyle', settings.readingFocusStyle);
     setControlValue('wordHighlightStyle', settings.wordHighlightStyle);
@@ -121,8 +119,6 @@
 
   function readForm() {
     const next = Object.assign({}, settings);
-    next.clickToRead = Boolean(form.elements.clickToRead.checked);
-    next.preset = form.elements.preset.value;
     next.readingFocus = form.elements.readingFocus.value;
     next.readingFocusStyle = form.querySelector('[name="readingFocusStyle"]:checked')?.value;
     next.wordHighlightStyle = form.querySelector('[name="wordHighlightStyle"]:checked')?.value;
