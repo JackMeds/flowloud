@@ -1,0 +1,14 @@
+{
+  "extensionId": "pnhplmenepakomhgaiieienhnaeicbeh",
+  "extensionOrigin": "chrome-extension://pnhplmenepakomhgaiieienhnaeicbeh",
+  "profile": "C:\\Users\\15300\\Documents\\浏览器TTS\\.tmp-flowloud-beta-chromium",
+  "output": "C:\\Users\\15300\\Documents\\浏览器TTS\\store-assets\\screenshots\\chrome",
+  "actionPopupMode": "direct-extension-page",
+  "actionPopupError": "worker.evaluate: Error: Could not find an active browser window.",
+  "readerHarness": {
+    "playing": "AUDIT READY · Popup-first active mini player, marker and word motion",
+    "minimized": "AUDIT READY · Three-control compact mini player",
+    "stopped": "PASS"
+  },
+  "manualSmokeTest": "openPopup 自动化不可用；需人工确认工具栏锚点和失焦自动关闭。"
+}

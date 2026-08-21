@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>欢迎使用 Flowloud / 流声</title>
+  <link rel="stylesheet" href="design-system.css">
+  <link rel="stylesheet" href="onboarding.css">
+</head>
+<body>
+  <main>
+    <header><p class="brand">FLOWLOUD / 流声</p><h1>让网页自然地流动起来</h1><p>安装后即可使用系统语音。不会自动下载模型，也不会自动发送网页正文。</p></header>
+    <ol class="steps">
+      <li><span class="step-number">1</span><div><h2>立即开始</h2><p><strong>浏览器系统语音</strong>是默认来源，本机处理、无需下载。打开文章或讨论页，点击扩展即可朗读。</p></div></li>
+      <li><span class="step-number">2</span><div><h2>需要时再选择其他引擎</h2><p>浏览器模型会先说明大小和许可；本地 Qwen 连接 Windows 服务并支持音色克隆；在线 TTS 仅发送你主动朗读的文本。</p></div></li>
+      <li><span class="step-number">3</span><div><h2>隐私与页面导览</h2><p>产品无遥测、无广告、无后台收集。页面导览只定位与朗读，不点击链接、不修改表单，也不替代读屏软件。</p></div></li>
+    </ol>
+    <footer><button id="start" type="button">使用系统语音开始</button><button id="settings" type="button">查看朗读引擎设置</button></footer>
+  </main>
+  <script src="shared/defaults.js"></script><script src="shared/settings-schema.js"></script><script src="onboarding.js"></script>
+</body>
+</html>

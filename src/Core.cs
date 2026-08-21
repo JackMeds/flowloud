@@ -31,6 +31,7 @@ namespace QwenTrayGateway
         public string VoiceName { get; set; }
         public string VoiceAlias { get; set; }
         public string ManagementToken { get; set; }
+        public string ClientToken { get; set; }
         public string LogDirectory { get; set; }
 
         public static GatewayConfig CreateDefaults(string runtimeDirectory)
@@ -55,6 +56,7 @@ namespace QwenTrayGateway
             config.VoiceName = "邵思萌";
             config.VoiceAlias = "qwen-clone";
             config.ManagementToken = CreateToken();
+            config.ClientToken = CreateToken();
             config.LogDirectory = Path.Combine(runtimeDirectory, "logs");
             return config;
         }
@@ -73,8 +75,10 @@ namespace QwenTrayGateway
                 Save(path, config);
             }
 
+            bool upgradedClientToken = string.IsNullOrWhiteSpace(config.ClientToken);
             ApplyDefaults(config);
             Validate(config);
+            if (upgradedClientToken) { Save(path, config); }
             Directory.CreateDirectory(config.LogDirectory);
             return config;
         }
@@ -132,6 +136,10 @@ namespace QwenTrayGateway
             {
                 throw new InvalidDataException("ManagementToken is required.");
             }
+            if (string.IsNullOrWhiteSpace(config.ClientToken))
+            {
+                throw new InvalidDataException("ClientToken is required.");
+            }
         }
 
         private static void ApplyDefaults(GatewayConfig config)
@@ -142,6 +150,7 @@ namespace QwenTrayGateway
             if (config.RequestTimeoutSeconds <= 0) { config.RequestTimeoutSeconds = 120; }
             if (config.MaxStreamBytes <= 0) { config.MaxStreamBytes = 64 * 1024 * 1024; }
             if (config.StreamChunkBytes <= 0) { config.StreamChunkBytes = 32 * 1024; }
+            if (string.IsNullOrWhiteSpace(config.ClientToken)) { config.ClientToken = CreateToken(); }
         }
 
         private static string CreateToken()
@@ -260,6 +269,36 @@ namespace QwenTrayGateway
                 clientHeader,
                 "qwen-reader-extension-v1",
                 StringComparison.Ordinal);
+        }
+
+        public static string BearerToken(string authorization)
+        {
+            const string prefix = "Bearer ";
+            if (string.IsNullOrWhiteSpace(authorization) ||
+                !authorization.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Empty;
+            }
+            return authorization.Substring(prefix.Length).Trim();
+        }
+
+        public static bool IsTrustedExtensionOrigin(string origin)
+        {
+            if (string.IsNullOrEmpty(origin)) { return true; }
+            Uri parsed;
+            if (!Uri.TryCreate(origin, UriKind.Absolute, out parsed) ||
+                !string.Equals(parsed.Scheme, "chrome-extension", StringComparison.OrdinalIgnoreCase) ||
+                !string.IsNullOrEmpty(parsed.Query) || !string.IsNullOrEmpty(parsed.Fragment))
+            {
+                return false;
+            }
+            string host = parsed.Host;
+            if (host.Length != 32) { return false; }
+            for (int index = 0; index < host.Length; index++)
+            {
+                if (host[index] < 'a' || host[index] > 'p') { return false; }
+            }
+            return true;
         }
 
         public static string StripQuery(string path)

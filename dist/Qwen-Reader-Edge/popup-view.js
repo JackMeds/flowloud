@@ -13,7 +13,28 @@
     const node = element('button', className, label);
     node.type = 'button';
     node.dataset.action = action;
+    node.dataset.focusKey = `action:${action}`;
     return node;
+  }
+
+  function captureFocus(root) {
+    const active = document.activeElement;
+    if (!active || !root.contains(active)) return null;
+    return {
+      key: active.dataset && active.dataset.focusKey || '',
+      name: active.getAttribute && active.getAttribute('name') || ''
+    };
+  }
+
+  function restoreFocus(root, previous) {
+    if (!previous) return;
+    const controls = Array.from(root.querySelectorAll('button, input, select, textarea, [tabindex]'));
+    const target = controls.find((control) =>
+      previous.key && control.dataset && control.dataset.focusKey === previous.key
+    ) || controls.find((control) =>
+      previous.name && control.getAttribute('name') === previous.name
+    );
+    if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
   }
 
   function dispatch(root, action, detail) {
@@ -56,6 +77,20 @@
     heading.append(element('h2', '', '阅读交互'), element('span', '', '全局生效'));
     section.append(heading);
 
+    const floatingRow = element('label', 'qr-quick-row');
+    const floatingCopy = element('span', 'qr-quick-copy');
+    floatingCopy.append(element('strong', '', '网页悬浮窗'), element('small', '', '在网页上显示播放、定位与缩放控制'));
+    const floatingSwitch = element('span', 'qr-popup-switch');
+    const floatingInput = element('input');
+    floatingInput.type = 'checkbox';
+    floatingInput.dataset.setting = 'showFloatingPlayer';
+    floatingInput.dataset.focusKey = 'setting:showFloatingPlayer';
+    floatingInput.checked = settings.showFloatingPlayer !== false;
+    floatingInput.setAttribute('aria-label', '显示网页悬浮窗');
+    floatingSwitch.append(floatingInput, element('span'));
+    floatingRow.append(floatingCopy, floatingSwitch);
+    section.append(floatingRow);
+
     const clickRow = element('label', 'qr-quick-row');
     const clickCopy = element('span', 'qr-quick-copy');
     clickCopy.append(element('strong', '', '网页点读'), element('small', '', '点击正文句子后从该处朗读'));
@@ -63,6 +98,7 @@
     const clickInput = element('input');
     clickInput.type = 'checkbox';
     clickInput.dataset.setting = 'clickToRead';
+    clickInput.dataset.focusKey = 'setting:clickToRead';
     clickInput.checked = settings.clickToRead === true;
     clickInput.setAttribute('aria-label', '网页点读');
     clickSwitch.append(clickInput, element('span'));
@@ -74,6 +110,7 @@
     strategyCopy.append(element('strong', '', '作者配音策略'), element('small', '', '决定楼主与回复作者如何分配音色'));
     const strategy = element('select', 'qr-quick-select');
     strategy.dataset.setting = 'preset';
+    strategy.dataset.focusKey = 'setting:preset';
     strategy.setAttribute('aria-label', '作者配音策略');
     [
       ['op-exclusive', '楼主专属'],
@@ -91,6 +128,7 @@
   }
 
   function mountPopup(root, model) {
+    const previousFocus = captureFocus(root);
     const snapshot = model && model.snapshot || {};
     const status = snapshot.status || model && model.status || 'idle';
     const segmentCount = Math.max(0, Number(snapshot.segmentCount || model.segmentCount || model.total || (snapshot.segments || []).length) || 0);
@@ -102,6 +140,9 @@
     const headerActions = element('div', 'qr-popup-actions');
     const headerRight = element('span', 'qr-status', status === 'playing' ? '正在朗读' : status === 'paused' ? '已暂停' : status === 'error' ? '连接异常' : '准备就绪');
     headerRight.dataset.state = status === 'idle' ? 'ready' : status;
+    headerRight.setAttribute('role', 'status');
+    headerRight.setAttribute('aria-live', 'polite');
+    headerRight.setAttribute('aria-atomic', 'true');
     headerActions.append(headerRight, button('qr-text-button', '设置', 'open-options'));
     header.append(headerActions);
     shell.append(header);
@@ -110,6 +151,7 @@
       shell.append(quickSettingsSection(model));
       root.append(shell);
       setControlEvents(root);
+      restoreFocus(root, previousFocus);
       return;
     }
     const pageCard = element('section', 'qr-page-card');
@@ -122,6 +164,11 @@
     const total = Math.max(segmentCount, 1);
     const index = Math.max(0, Number.isInteger(snapshot.index) ? snapshot.index : Number(model.index) || 0);
     const progress = element('div', 'qr-progress');
+    progress.setAttribute('role', 'progressbar');
+    progress.setAttribute('aria-label', '朗读进度');
+    progress.setAttribute('aria-valuemin', '1');
+    progress.setAttribute('aria-valuemax', String(total));
+    progress.setAttribute('aria-valuenow', String(Math.min(index + 1, total)));
     const progressInner = element('span');
     progressInner.style.width = `${Math.min(100, ((index + 1) / total) * 100)}%`;
     progress.append(progressInner);
@@ -130,10 +177,13 @@
     progressLabel.append(element('span', '', `第 ${Math.min(index + 1, total)} 段`), element('span', '', `共 ${total} 段`));
     pageCard.append(progressLabel);
     const controls = element('div', 'qr-controls');
+    controls.setAttribute('role', 'group');
+    controls.setAttribute('aria-label', '朗读控制');
     const previous = button('qr-control', '上一句', 'previous');
     previous.disabled = !segmentCount || status === 'loading';
     const primary = button('qr-control qr-control-primary', status === 'playing' ? '暂停朗读' : '开始朗读', 'toggle-playback');
-    primary.disabled = !segmentCount || status === 'loading';
+    primary.textContent = status === 'playing' ? '暂停朗读' : status === 'loading' ? '暂停准备' : status === 'paused' ? '继续朗读' : '开始朗读';
+    primary.disabled = !segmentCount;
     const next = button('qr-control', '下一句', 'next');
     next.disabled = !segmentCount || status === 'loading';
     controls.append(previous, primary, next);
@@ -158,9 +208,11 @@
     }
     root.append(shell);
     setControlEvents(root);
+    restoreFocus(root, previousFocus);
   }
 
   function mountPageVoices(root, model) {
+    const previousFocus = captureFocus(root);
     const authors = model && model.authors || [];
     const voices = model && model.voices || [];
     const authorVoices = model && model.authorVoices || {};
@@ -196,6 +248,8 @@
       const select = element('select', 'qr-voice-select');
       select.name = `voice:${author.id || author.name}`;
       select.dataset.authorId = author.id || author.name || '';
+      select.dataset.focusKey = `voice:${author.id || author.name || ''}`;
+      select.setAttribute('aria-label', `${author.name || '未署名作者'}的音色`);
       const effectiveVoice = author.effectiveVoice || author.voice || '默认音色';
       const followGlobal = element('option', '', `跟随全局策略（当前：${effectiveVoice}）`);
       followGlobal.value = '';
@@ -217,6 +271,7 @@
     shell.append(actions);
     root.append(shell);
     setControlEvents(root);
+    restoreFocus(root, previousFocus);
   }
 
   global.QwenPopupView = Object.freeze({ mountPopup, mountPageVoices });

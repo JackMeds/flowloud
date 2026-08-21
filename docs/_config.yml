@@ -1,0 +1,11 @@
+title: Flowloud / 流声
+description: Local-first web reading for Edge and Chrome
+theme: minima
+exclude:
+  - audits
+  - superpowers
+  - ux-audit-2026-08-17
+  - spotlight-rebound-showcase.html
+  - word-motion-showcase.html
+  - voice-studio-audit-current.png
+  - voice-studio-audit-reader-reference.png

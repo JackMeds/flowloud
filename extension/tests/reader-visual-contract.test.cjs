@@ -29,7 +29,7 @@ test('popup-first reader has no rendered sidebar or permanent floating launcher'
   assert.doesNotMatch(readerSource, /<aside class="qr-panel"/);
   assert.doesNotMatch(readerSource, /data-role="floating-orb"/);
   assert.doesNotMatch(readerSource, /ui:toggle/);
-  assert.match(readerSource, /\["loading", "playing", "paused"\]\.includes\(state\.status\)/);
+  assert.match(readerSource, /\["extracting", "loading", "playing", "paused", "ready", "error"\]\.includes\(state\.status\)/);
 });
 
 test('active mini player has touch-safe controls and a restrained shadow', () => {
@@ -40,29 +40,87 @@ test('active mini player has touch-safe controls and a restrained shadow', () =>
   assert.match(player, /visibility:\s*hidden/);
   assert.match(player, /box-shadow:\s*0 8px 22px rgba\(36, 29, 57, \.14\)/);
   assert.match(readerCss, /\.qr-mini-player\.is-visible[\s\S]*?pointer-events:\s*auto/);
-  assert.match(control, /width:\s*42px/);
-  assert.match(control, /height:\s*42px/);
-  assert.match(primary, /width:\s*44px/);
-  assert.match(primary, /height:\s*44px/);
+  assert.match(control, /width:\s*36px/);
+  assert.match(control, /height:\s*36px/);
+  assert.match(primary, /width:\s*38px/);
+  assert.match(primary, /height:\s*38px/);
   assert.match(readerCss, /@media \(max-width: 520px\)[\s\S]*?\.qr-mini-button \{ width: 40px; height: 40px; \}/);
-  for (const action of ['previous', 'play-toggle', 'next', 'stop']) {
+  for (const action of ['previous', 'play-toggle', 'next', 'toggle-mini-size', 'resume-follow']) {
     assert.match(readerSource, new RegExp(`data-action="${action}"`));
   }
+  assert.doesNotMatch(readerSource, /qr-mini-window-button is-close|data-role="mini-reopen"/);
 });
 
-test('content keeps its marker, author cue, follow chip, and word motion', () => {
+test('floating player exposes lifecycle status, minimization, and basic accessibility', () => {
+  assert.match(readerSource, /role="region"[^>]*aria-labelledby="qr-mini-title"/);
+  assert.match(readerSource, /data-role="mini-status"[^>]*role="status"[^>]*aria-live="polite"/);
+  assert.match(readerSource, /正在加载和识别网页文本/);
+  assert.match(readerSource, /正在加载朗读模型/);
+  assert.match(readerSource, /正在合成当前句/);
+  assert.match(readerSource, /朗读失败/);
+  assert.match(readerSource, /miniPlayerMinimized = !miniPlayerMinimized/);
+  assert.match(readerSource, /settings\.showFloatingPlayer !== false/);
+  assert.match(readerSource, /data-mini-ui-version="diagonal-size-v2"/);
+  assert.match(readerSource, /data-role="mini-size-icon"/);
+  assert.match(readerSource, /miniPlayerMinimized \? miniSizeIconPaths\.expand : miniSizeIconPaths\.shrink/);
+  assert.doesNotMatch(readerSource, /qr-mini-follow-glyph|>↗</);
+  assert.match(readerSource, /player\.inert = !active/);
+  assert.match(readerSource, /visualViewport\.addEventListener\("resize", positionFloatingPlayer/);
+  assert.match(readerCss, /\.qr-mini-player\.is-minimized[\s\S]*?\.qr-mini-compact-controls/);
+  assert.match(readerCss, /\.qr-mini-player\.is-minimized\s*\{[\s\S]*?width:\s*auto/);
+  assert.match(readerCss, /\.qr-mini-player\.is-minimized \.qr-mini-context[\s\S]*?display:\s*none/);
+  assert.doesNotMatch(readerCss, /\.qr-mini-reopen|\.qr-mini-window-button\.is-close/);
+  assert.match(readerCss, /\.qr-mini-button\[hidden\][\s\S]*?display:\s*none/);
+  assert.match(readerSource, /button\.hidden = !followNeeded/);
+  assert.match(readerCss, /@media \(forced-colors: active\)/);
+});
+
+test('content keeps its marker, author cue, in-player follow control, and word motion', () => {
   assert.match(readerSource, /data-role="reading-marker"/);
   assert.match(readerSource, /function renderReadingMarker/);
   assert.match(readerSource, /data-action="marker-play"/);
   assert.match(readerSource, /qr-marker-voice/);
   assert.match(readerSource, /qr-marker-context/);
-  assert.match(readerSource, /data-action="resume-follow"/);
+  assert.match(readerSource, /qr-mini-button is-follow[^>]*data-action="resume-follow"/);
   assert.match(readerSource, /QwenReaderWordTimeline/);
   assert.match(readerSource, /data-role="word-motion-layer"/);
   assert.match(readerSource, /followController\.markManual\(\)/);
   assert.match(readerCss, /\.qr-reading-marker\s*\{[\s\S]*?position:\s*fixed/);
-  assert.match(readerCss, /\.qr-follow-chip\.is-visible/);
+  assert.doesNotMatch(readerSource, /class="qr-follow-chip"/);
+  assert.match(readerCss, /\.qr-mini-button\.is-follow\.is-needed/);
   assert.match(readerCss, /\.qr-word-motion-layer\s*\{[\s\S]*?position:\s*fixed/);
+});
+
+test('mini player supports bounded persistent dragging without stealing clicks', () => {
+  assert.match(readerSource, /MINI_PLAYER_POSITION_KEY/);
+  assert.match(readerSource, /function beginMiniPlayerDrag/);
+  assert.match(readerSource, /Math\.hypot\(deltaX, deltaY\) < 5/);
+  assert.match(readerSource, /normalizedMiniPlayerPosition/);
+  assert.match(readerSource, /saveMiniPlayerPosition/);
+  assert.match(readerSource, /miniPlayerSuppressClickUntil/);
+  const dragStart = readerSource.match(/function beginMiniPlayerDrag\(event\)\s*\{([\s\S]*?)\n\s*\}/);
+  assert.ok(dragStart, 'missing mini player drag start handler');
+  assert.doesNotMatch(dragStart[1], /setPointerCapture/, 'pointer capture must not steal ordinary button clicks');
+  assert.doesNotMatch(readerSource, /setPointerCapture|releasePointerCapture|Number\.POSITIVE_INFINITY/);
+  assert.match(readerSource, /window\.addEventListener\("pointermove", moveMiniPlayerDrag/);
+  assert.match(readerSource, /window\.addEventListener\("pointerup", endMiniPlayerDrag/);
+  assert.match(readerSource, /window\.addEventListener\("pointercancel", cancelMiniPlayerDrag/);
+  assert.match(readerSource, /window\.addEventListener\("blur", abortMiniPlayerDrag/);
+  assert.match(readerCss, /\.qr-mini-player[\s\S]*?touch-action:\s*none/);
+  assert.match(readerCss, /\.qr-mini-player\.is-dragging/);
+  assert.match(readerCss, /\.qr-mini-player\.is-snapping/);
+});
+
+test('mini caption pans from the shared active-word timeline', () => {
+  assert.match(readerSource, /data-role="mini-caption-track"/);
+  assert.match(readerSource, /function renderMiniCaption/);
+  assert.match(readerSource, /function updateMiniCaptionWord/);
+  assert.match(readerSource, /result\.changed\) updateMiniCaptionWord/);
+  assert.match(readerSource, /safeStart = viewportWidth \* \.28/);
+  assert.match(readerSource, /safeEnd = viewportWidth \* \.68/);
+  assert.match(readerCss, /\.qr-mini-caption-track[\s\S]*?transition:\s*transform 220ms/);
+  assert.match(readerCss, /\.qr-mini-caption-word\.is-active/);
+  assert.match(readerCss, /prefers-reduced-motion:\s*reduce[\s\S]*?\.qr-mini-caption-track/);
 });
 
 test('manual rescans await playback cancellation and only rebuild document state', () => {
@@ -98,7 +156,8 @@ test('active sentence remains a restrained translucent native highlight', () => 
   assert.ok(rule, 'Missing page highlight rule');
   assert.match(rule[1], /background-color:\s*rgba\(116,\s*88,\s*232,\s*\.075\)/);
   assert.doesNotMatch(rule[1], /animation\s*:/);
-  assert.deepEqual(manifest.content_scripts[0].css, ['content/page-highlight.css']);
+  assert.equal(manifest.content_scripts, undefined);
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8'), /insertCSS\(\{ target: \{ tabId \}, files: \['content\/page-highlight\.css'\]/);
 });
 
 test('click-to-read and manual follow behavior remain independent of the popup', () => {

@@ -1016,7 +1016,7 @@ if (typeof importScripts === 'function') {
     async function setBadge(target, snapshot) {
       if (!target || target.tabId == null || !chromeApi.action) return;
       const status = String(snapshot && snapshot.status || 'idle');
-      const text = status === 'playing' ? '▶' : status === 'paused' ? 'Ⅱ' : status === 'error' ? '!' : '';
+      const text = status === 'playing' ? '▶' : status === 'paused' ? '❚❚' : status === 'error' ? '!' : '';
       try {
         if (typeof chromeApi.action.setBadgeText === 'function') {
           await chromeApi.action.setBadgeText({ tabId: target.tabId, text });
@@ -1024,8 +1024,11 @@ if (typeof importScripts === 'function') {
         if (typeof chromeApi.action.setBadgeBackgroundColor === 'function' && text) {
           await chromeApi.action.setBadgeBackgroundColor({
             tabId: target.tabId,
-            color: status === 'error' ? '#dc2626' : status === 'paused' ? '#d97706' : '#6d28d9',
+            color: status === 'error' ? '#dc2626' : status === 'paused' ? '#475569' : '#6d28d9',
           });
+        }
+        if (typeof chromeApi.action.setBadgeTextColor === 'function' && text) {
+          await chromeApi.action.setBadgeTextColor({ tabId: target.tabId, color: '#ffffff' });
         }
       } catch (_) {
         // The badge is a convenience, never a playback dependency.

@@ -81,6 +81,8 @@ namespace QwenTrayGateway
         {
             Dictionary<string, object> result = new Dictionary<string, object>();
             result["gateway"] = "ok";
+            result["gatewayVersion"] = "0.9.0-beta.1";
+            result["protocolVersion"] = 3;
             result["backend"] = backend.State;
             result["backendPid"] = backend.ProcessId;
             result["activeRequests"] = ActiveRequests;
@@ -162,12 +164,19 @@ namespace QwenTrayGateway
             bool requiresBackend = GatewayProtocol.RequiresBackend(
                 request.Method,
                 request.PathAndQuery);
-            if (GatewayProtocol.RequiresTrustedClient(request.Method, request.PathAndQuery) &&
-                !GatewayProtocol.IsTrustedBackendClient(
-                    request.Header("X-Qwen-Reader-Client")))
+            if (!GatewayProtocol.IsTrustedExtensionOrigin(request.Header("Origin")))
             {
-                logger.Write("request_rejected reason=missing_client_header path=" + Safe(path));
-                WriteJson(output, 403, "Forbidden", ErrorJson("forbidden_client", "A trusted Qwen Reader client header is required."));
+                logger.Write("request_rejected reason=invalid_origin path=" + Safe(path));
+                WriteJson(output, 403, "Forbidden", ErrorJson("forbidden_origin", "Only a Flowloud extension origin may access the local gateway."));
+                return;
+            }
+            if (GatewayProtocol.RequiresTrustedClient(request.Method, request.PathAndQuery) &&
+                (!GatewayProtocol.IsTrustedBackendClient(request.Header("X-Qwen-Reader-Client")) ||
+                 !GatewayProtocol.IsAuthorized(config.ClientToken,
+                     GatewayProtocol.BearerToken(request.Header("Authorization")))))
+            {
+                logger.Write("request_rejected reason=client_auth path=" + Safe(path));
+                WriteJson(output, 401, "Unauthorized", ErrorJson("client_auth_required", "A valid Flowloud local client token is required."));
                 return;
             }
             if (request.Method == "OPTIONS")
@@ -554,8 +563,8 @@ namespace QwenTrayGateway
             if (!string.IsNullOrEmpty(contentType)) { backendRequest.ContentType = contentType; }
             string accept = request.Header("Accept");
             if (!string.IsNullOrEmpty(accept)) { backendRequest.Accept = accept; }
-            string authorization = request.Header("Authorization");
-            if (!string.IsNullOrEmpty(authorization)) { backendRequest.Headers["Authorization"] = authorization; }
+            // Authorization authenticates the browser extension to this loopback
+            // gateway. Never forward that client secret to the backend process.
             return backendRequest;
         }
 

@@ -32,6 +32,7 @@ internal static class TestRunner
         Run("backend trigger routing is exact", TestBackendRouting);
         Run("idle policy respects requests and setting", TestIdlePolicy);
         Run("management token is required", TestManagementToken);
+        Run("extension origin and bearer token are validated", TestClientAuthentication);
         Run("executable path comparison is normalized", TestPathSafety);
         Run("HTTP parser preserves UTF-8 request body", TestHttpParser);
         Run("large voice reference serializes without truncation", TestLargeVoicePayload);
@@ -106,6 +107,20 @@ internal static class TestRunner
         Equal(true, method.Invoke(null, new object[] { "secret-token", "secret-token" }), "matching token");
         Equal(false, method.Invoke(null, new object[] { "secret-token", "" }), "missing token");
         Equal(false, method.Invoke(null, new object[] { "secret-token", "secret-tokeN" }), "different token");
+    }
+
+    private static void TestClientAuthentication()
+    {
+        Type type = RequiredType("QwenTrayGateway.GatewayProtocol");
+        MethodInfo bearer = type.GetMethod("BearerToken");
+        MethodInfo origin = type.GetMethod("IsTrustedExtensionOrigin");
+        Equal("secret-token", bearer.Invoke(null, new object[] { "Bearer secret-token" }), "bearer token");
+        Equal("secret-token", bearer.Invoke(null, new object[] { "bearer secret-token" }), "case-insensitive bearer scheme");
+        Equal("", bearer.Invoke(null, new object[] { "Basic secret-token" }), "wrong authorization scheme");
+        Equal(true, origin.Invoke(null, new object[] { null }), "extension request without Origin");
+        Equal(true, origin.Invoke(null, new object[] { "chrome-extension://abcdefghijklmnopabcdefghijklmnop" }), "valid extension origin");
+        Equal(false, origin.Invoke(null, new object[] { "https://example.com" }), "web origin rejected");
+        Equal(false, origin.Invoke(null, new object[] { "chrome-extension://invalid" }), "invalid extension id rejected");
     }
 
     private static void TestPathSafety()
@@ -197,9 +212,9 @@ internal static class TestRunner
             gatewayType.GetMethod("Dispatch", BindingFlags.Instance | BindingFlags.NonPublic)
                 .Invoke(gateway, new object[] { request, output });
             string response = Encoding.ASCII.GetString(output.ToArray());
-            if (!response.StartsWith("HTTP/1.1 403 Forbidden", StringComparison.Ordinal))
+            if (!response.StartsWith("HTTP/1.1 401 Unauthorized", StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("Missing client header did not return HTTP 403.");
+                throw new InvalidOperationException("Missing client authentication did not return HTTP 401.");
             }
         }
         Equal("unloaded", Property(backend, "State"), "backend remains unloaded");
@@ -307,6 +322,7 @@ internal static class TestRunner
         Directory.CreateDirectory(temp);
         Type configType = RequiredType("QwenTrayGateway.GatewayConfig");
         object config = configType.GetMethod("CreateDefaults").Invoke(null, new object[] { temp });
+        configType.GetProperty("ClientToken").SetValue(config, "test-client-token", null);
         Type loggerType = RequiredType("QwenTrayGateway.GatewayLogger");
         object logger = Activator.CreateInstance(loggerType, new object[] { temp });
         Type backendType = RequiredType("QwenTrayGateway.BackendController");
@@ -328,6 +344,7 @@ internal static class TestRunner
             "POST /v1/audio/speech/cancel HTTP/1.1\r\n" +
             "Host: 127.0.0.1\r\n" +
             "X-Qwen-Reader-Client: qwen-reader-extension-v1\r\n" +
+            "Authorization: Bearer test-client-token\r\n" +
             "Content-Type: application/json\r\n" +
             "Content-Length: " + cancelBody.Length + "\r\n\r\n");
         byte[] cancelRaw = new byte[cancelHead.Length + cancelBody.Length];
@@ -352,6 +369,7 @@ internal static class TestRunner
                 "GET /v1/audio/speech/status/req-a HTTP/1.1\r\n" +
                 "Host: 127.0.0.1\r\n" +
                 "X-Qwen-Reader-Client: qwen-reader-extension-v1\r\n" +
+                "Authorization: Bearer test-client-token\r\n" +
                 "X-Qwen-Request-Id: req-a\r\n" +
                 "X-Qwen-Playback-Id: play-b\r\n" +
                 "Content-Length: 0\r\n\r\n")
@@ -546,7 +564,9 @@ internal static class TestRunner
         if (json.IndexOf("transportStreaming", StringComparison.Ordinal) < 0 ||
             json.IndexOf("backendIncrementalGeneration", StringComparison.Ordinal) < 0 ||
             json.IndexOf("\"cancel\":true", StringComparison.Ordinal) < 0 ||
-            json.IndexOf("maxConcurrentRequests", StringComparison.Ordinal) < 0)
+            json.IndexOf("maxConcurrentRequests", StringComparison.Ordinal) < 0 ||
+            json.IndexOf("\"protocolVersion\":3", StringComparison.Ordinal) < 0 ||
+            json.IndexOf("ClientToken", StringComparison.OrdinalIgnoreCase) >= 0)
         {
             throw new InvalidOperationException("Health capabilities are incomplete.");
         }

@@ -1,0 +1,6 @@
+{
+  "extensionName": { "message": "Flowloud / 流声" },
+  "extensionDescription": { "message": "识别网页内容并使用系统语音、浏览器模型、本地 Qwen 或在线 TTS 朗读。" },
+  "actionTitle": { "message": "Flowloud / 流声" },
+  "toggleReader": { "message": "播放或暂停当前页面朗读" }
+}

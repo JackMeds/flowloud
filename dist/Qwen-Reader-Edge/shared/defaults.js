@@ -17,6 +17,7 @@
     opVoice: '邵思萌',
     replyVoices: ['qwen-clone'],
     clickToRead: false,
+    showFloatingPlayer: true,
     readingFocus: 'sentence',
     readingFocusStyle: 'soft-glow',
     wordHighlightStyle: 'edge-dissolve',

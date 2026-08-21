@@ -23,6 +23,7 @@
   }
 
   const SETTINGS_KEY = Defaults.SETTINGS_KEY || "qwenReaderSettings";
+  const MINI_PLAYER_POSITION_KEY = "qwenReaderMiniPlayerPositionV1";
   const DEFAULT_SETTINGS = Defaults.DEFAULT_SETTINGS || {
     preset: Defaults.voiceMode || "op-exclusive",
     opVoice: Defaults.opVoice || "邵思萌",
@@ -31,6 +32,7 @@
         ? Defaults.replyVoices.slice()
         : ["qwen-clone"],
     clickToRead: false,
+    showFloatingPlayer: true,
     readingFocus: "sentence",
     readingFocusStyle: Defaults.readingFocusStyle || "soft-glow",
     wordHighlightStyle: Defaults.wordHighlightStyle || "edge-dissolve",
@@ -77,22 +79,37 @@
     close: chrome.runtime.getURL("assets/icons/x.svg"),
     stop: chrome.runtime.getURL("assets/icons/stop.svg"),
   });
+  const miniSizeIconPaths = Object.freeze({
+    shrink: "M3 3l6 6M9 5v4H5M21 21l-6-6M15 19v-4h4",
+    expand: "M9 9L3 3M3 7V3h4M15 15l6 6M17 21h4v-4",
+  });
   const shell = document.createElement("div");
   shell.innerHTML = `
-    <section class="qr-mini-player" data-role="mini-player" aria-label="Qwen 网页朗读控制" aria-hidden="true">
+    <section class="qr-mini-player" data-role="mini-player" data-mini-ui-version="diagonal-size-v2" role="region" aria-labelledby="qr-mini-title" aria-describedby="qr-mini-status" aria-hidden="true">
+      <span class="qr-sr-only" id="qr-mini-title">Qwen 网页朗读悬浮播放器</span>
+      <div class="qr-mini-window-controls" aria-label="悬浮播放器窗口操作">
+        <button class="qr-mini-window-button is-minimize" type="button" data-action="toggle-mini-size" aria-label="最小化悬浮播放器" aria-pressed="false" title="最小化">
+          <svg class="qr-mini-window-glyph" viewBox="0 0 24 24" aria-hidden="true"><path data-role="mini-size-icon" d="${miniSizeIconPaths.shrink}" /></svg>
+        </button>
+      </div>
       <div class="qr-mini-context">
         <span class="qr-mini-avatar" data-role="mini-avatar" aria-hidden="true">Q</span>
         <span class="qr-mini-copy">
           <span class="qr-mini-speaker" data-role="mini-speaker">正在准备朗读</span>
           <span class="qr-mini-meta" data-role="mini-meta">当前网页</span>
-          <span class="qr-mini-text" data-role="mini-text"></span>
+          <span class="qr-mini-status" id="qr-mini-status" data-role="mini-status" role="status" aria-live="polite" aria-atomic="true">准备就绪</span>
+          <span class="qr-mini-text" data-role="mini-text" aria-label="当前朗读台词"><span class="qr-mini-caption-track" data-role="mini-caption-track"></span></span>
         </span>
       </div>
-      <div class="qr-mini-controls" aria-label="朗读控制">
+      <div class="qr-mini-controls" data-role="mini-full-controls" aria-label="朗读控制">
         <button class="qr-mini-button" type="button" data-action="previous" aria-label="上一句"><img class="qr-mini-icon" src="${iconUrls.previous}" alt=""></button>
         <button class="qr-mini-button is-primary" type="button" data-action="play-toggle" aria-label="暂停朗读"><img class="qr-mini-icon" data-role="mini-play-icon" src="${iconUrls.pause}" alt=""></button>
         <button class="qr-mini-button" type="button" data-action="next" aria-label="下一句"><img class="qr-mini-icon" src="${iconUrls.next}" alt=""></button>
-        <button class="qr-mini-button is-stop" type="button" data-action="stop" aria-label="停止朗读并关闭控制条"><img class="qr-mini-icon" src="${iconUrls.close}" alt=""></button>
+        <button class="qr-mini-button is-follow" type="button" data-action="resume-follow" aria-label="回到当前朗读位置" title="回到朗读位置"><svg class="qr-mini-follow-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
+      </div>
+      <div class="qr-mini-controls qr-mini-compact-controls" data-role="mini-compact-controls" aria-label="最小化朗读控制">
+        <button class="qr-mini-button is-primary" type="button" data-action="play-toggle" aria-label="暂停朗读"><img class="qr-mini-icon" data-role="mini-compact-play-icon" src="${iconUrls.pause}" alt=""></button>
+        <button class="qr-mini-button is-follow" type="button" data-action="resume-follow" aria-label="回到当前朗读位置" title="回到朗读位置"><svg class="qr-mini-follow-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
       </div>
     </section>
     <div class="qr-line-focus-layer" data-role="line-focus-layer" aria-hidden="true">
@@ -100,10 +117,6 @@
     </div>
     <div class="qr-word-motion-layer" data-role="word-motion-layer" aria-hidden="true"></div>
     <div class="qr-reading-marker" data-role="reading-marker" role="group" aria-label="当前句音色与朗读控制"></div>
-    <button class="qr-follow-chip" type="button" data-action="resume-follow" aria-label="回到当前朗读位置">
-      <span class="qr-follow-chip-dot" aria-hidden="true"></span>
-      回到朗读位置
-    </button>
     <div class="qr-toast" role="status" aria-live="polite"></div>
   `;
   shadow.append(shell);
@@ -183,6 +196,15 @@
   let pageAuthorVoices = {};
   let stateRevision = 0;
   let playbackRate = 1;
+  let miniPlayerEngaged = false;
+  let miniPlayerMinimized = false;
+  let miniPlayerPosition = null;
+  let miniPlayerDrag = null;
+  let miniPlayerSuppressClickUntil = 0;
+  let miniCaptionKey = "";
+  let miniCaptionWordIndex = -1;
+  let miniCaptionOffset = 0;
+  let miniCaptionFrame = null;
 
   applyReadingFocusSettings();
   applyWordHighlightSettings();
@@ -192,6 +214,7 @@
 
   async function initialize() {
     await restoreSettings();
+    await restoreMiniPlayerPosition();
     startLocationWatcher();
     await scanCurrentPage("initial");
     void loadVoices();
@@ -320,6 +343,7 @@
     }
     const payload = message && message.payload && typeof message.payload === "object" ? message.payload : {};
     const command = String(message && (message.command || message.action) || payload.command || "").trim().toLowerCase();
+    if (!["stop", "close", "set-speed"].includes(command)) miniPlayerEngaged = true;
     switch (command) {
       case "toggle":
       case "play-toggle": await togglePlayback(); break;
@@ -339,7 +363,11 @@
       case "scan-page":
       case "refresh": await refreshCurrentPage(); break;
       case "stop":
-      case "close": await stopPlayback(); break;
+      case "close":
+        miniPlayerEngaged = false;
+        miniPlayerMinimized = false;
+        await stopPlayback();
+        break;
       case "set-speed":
         // v0.5.2 streams playback through the offscreen Web Audio scheduler,
         // which intentionally has no per-session rate control yet.
@@ -373,10 +401,16 @@
   function bindEvents() {
     shadow.addEventListener("click", async (event) => {
       if (!event.isTrusted && !TEST_MODE) return;
+      if ((miniPlayerDrag && miniPlayerDrag.dragging) || performance.now() < miniPlayerSuppressClickUntil) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       const button = event.target.closest("button");
       if (!button) return;
       const action = button.dataset.action;
       if (action === "play-toggle") {
+        miniPlayerEngaged = true;
         await togglePlayback();
       } else if (action === "marker-play") {
         const inlineIndex = Number(button.dataset.index);
@@ -389,13 +423,19 @@
           await playIndex(inlineIndex);
         }
       } else if (action === "scan-page") {
+        miniPlayerEngaged = true;
         await refreshCurrentPage();
       } else if (action === "next") {
         await move(1);
       } else if (action === "previous") {
         await move(-1);
       } else if (action === "stop") {
+        miniPlayerEngaged = false;
+        miniPlayerMinimized = false;
         await stopPlayback();
+      } else if (action === "toggle-mini-size") {
+        miniPlayerMinimized = !miniPlayerMinimized;
+        renderNow();
       } else if (action === "resume-follow") {
         followController.resume();
         lastScrolledLocatorKey = "";
@@ -539,7 +579,20 @@
     window.addEventListener("keydown", markManualScroll, true);
     window.addEventListener("pointerdown", markManualScroll, true);
     window.addEventListener("scroll", scheduleOverlayUpdate, { capture: true, passive: true });
-    window.addEventListener("resize", scheduleOverlayUpdate, { passive: true });
+    window.addEventListener("resize", () => {
+      scheduleOverlayUpdate();
+      positionFloatingPlayer();
+    }, { passive: true });
+    if (window.visualViewport && typeof window.visualViewport.addEventListener === "function") {
+      window.visualViewport.addEventListener("resize", positionFloatingPlayer, { passive: true });
+      window.visualViewport.addEventListener("scroll", positionFloatingPlayer, { passive: true });
+    }
+    const miniPlayer = shadow.querySelector('[data-role="mini-player"]');
+    miniPlayer.addEventListener("pointerdown", beginMiniPlayerDrag);
+    window.addEventListener("pointermove", moveMiniPlayerDrag, { capture: true, passive: false });
+    window.addEventListener("pointerup", endMiniPlayerDrag, true);
+    window.addEventListener("pointercancel", cancelMiniPlayerDrag, true);
+    window.addEventListener("blur", abortMiniPlayerDrag);
     document.addEventListener("pointermove", handlePagePointerMove, { capture: true, passive: true });
     document.addEventListener("pointerleave", clearHoveredSegment, true);
     document.addEventListener("click", handlePageClick, true);
@@ -625,6 +678,7 @@
     next.clickToRead = Number(value.interactionVersion || 0) < 3
       ? false
       : Boolean(next.clickToRead);
+    next.showFloatingPlayer = next.showFloatingPlayer !== false;
     next.readingFocus = normalizeReadingFocus(next.readingFocus);
     next.readingFocusStyle = normalizeReadingFocusStyle(next.readingFocusStyle);
     next.wordHighlightStyle = normalizeWordHighlightStyle(next.wordHighlightStyle);
@@ -1062,6 +1116,7 @@
       text.textContent = label;
     }
     renderShell();
+    renderNow();
   }
 
   async function loadVoices() {
@@ -1241,6 +1296,7 @@
   }
 
   async function refreshCurrentPage() {
+    miniPlayerEngaged = true;
     dynamicResumeIndex = null;
     await stopPlayback();
     await scanCurrentPage("manual");
@@ -1551,6 +1607,7 @@
   }
 
   async function playIndex(index) {
+    miniPlayerEngaged = true;
     index = findNextSpeakableIndex(state.segments, index);
     if (index < 0 || !state.segments[index]) {
       state = Player.reduce(state, { type: "STOP" });
@@ -1930,6 +1987,8 @@
     const pageKey = getCurrentPageKey();
     if (pageKey === lastObservedPageKey) return;
     lastObservedPageKey = pageKey;
+    miniPlayerEngaged = false;
+    miniPlayerMinimized = false;
     dynamicScanPending = false;
     dynamicResumeIndex = null;
     followController.reset();
@@ -2574,6 +2633,7 @@
     cancelHighlightRetry();
     highlightRetryKey = `${playbackId}:${index}`;
     clearWordHighlight();
+    renderMiniCaption(segment, true);
   }
 
   function applyWordProgress(progress) {
@@ -2589,6 +2649,7 @@
     if (!result.ignored && result.index >= 0 && result.index !== highlightedWordIndex) {
       highlightWord(result.index);
     }
+    if (!result.ignored && result.changed) updateMiniCaptionWord(result.index, false);
     if (!result.ignored && settings.readingFocus === "line") positionReadingFocus();
     return result;
   }
@@ -2949,13 +3010,10 @@
 
   function renderReadingMarker() {
     const controller = shadow.querySelector('[data-role="reading-marker"]');
-    const followChip = shadow.querySelector(".qr-follow-chip");
-    if (!controller || !followChip) return;
+    if (!controller) return;
     const active = isPlaybackActive();
     const displayIndex = active ? state.index : settings.clickToRead ? hoveredSegmentIndex : -1;
     const segment = displayIndex >= 0 ? state.segments[displayIndex] : null;
-    const showFollow = active && followController.mode === "manual";
-    followChip.classList.toggle("is-visible", showFollow);
     if (!segment) {
       controller.classList.remove("is-visible", "is-active");
       controller.replaceChildren();
@@ -3077,6 +3135,7 @@
     clearNativeHighlight();
     clearWordMotion();
     wordTimeline = null;
+    updateMiniCaptionWord(-1, true);
     highlightedElement = null;
     highlightedRange = null;
     highlightedIndex = -1;
@@ -3096,26 +3155,325 @@
     syncWordMotionPlaybackState();
   }
 
+  async function restoreMiniPlayerPosition() {
+    try {
+      const saved = await chrome.storage.local.get(MINI_PLAYER_POSITION_KEY);
+      const value = saved && saved[MINI_PLAYER_POSITION_KEY];
+      const x = Number(value && value.x);
+      const y = Number(value && value.y);
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        miniPlayerPosition = {
+          x: Math.min(1, Math.max(0, x)),
+          y: Math.min(1, Math.max(0, y)),
+        };
+      }
+    } catch (error) {
+      console.warn("Qwen Reader mini player position could not be restored", error);
+    }
+  }
+
+  async function saveMiniPlayerPosition() {
+    if (!miniPlayerPosition) return;
+    try {
+      await chrome.storage.local.set({ [MINI_PLAYER_POSITION_KEY]: miniPlayerPosition });
+    } catch (error) {
+      console.warn("Qwen Reader mini player position could not be saved", error);
+    }
+  }
+
+  function miniPlayerStatus() {
+    if (state.status === "error" || state.error) {
+      return { key: "error", label: `朗读失败：${state.error || serviceStatus.label || "请重试"}`, busy: false };
+    }
+    if (state.status === "extracting") {
+      return { key: "extracting", label: "正在加载和识别网页文本", busy: true };
+    }
+    if (state.status === "loading") {
+      const kind = String(serviceStatus.kind || "");
+      if (["model-loading", "connecting", "provider-connecting"].includes(kind)) {
+        return { key: "model-loading", label: "正在加载朗读模型", busy: true };
+      }
+      if (["pause-queued", "pausing"].includes(kind)) {
+        return { key: kind, label: serviceStatus.label || "正在暂停", busy: true };
+      }
+      return { key: "synthesizing", label: serviceStatus.label || "正在合成当前句", busy: true };
+    }
+    if (state.status === "playing") return { key: "playing", label: "正在朗读", busy: false };
+    if (state.status === "paused") return { key: "paused", label: "朗读已暂停", busy: false };
+    if (state.status === "ready") return { key: "ready", label: "朗读已就绪", busy: false };
+    return { key: "idle", label: serviceStatus.label || "准备就绪", busy: false };
+  }
+
+  function miniCaptionWords(segment) {
+    if (!segment) return [];
+    if (wordTimeline && wordTimeline.segmentIndex === state.index && wordTimeline.words.length) {
+      return wordTimeline.words;
+    }
+    const speechMap = segment.speechSourceMap;
+    return speechMap && Array.isArray(speechMap.words) ? speechMap.words : [];
+  }
+
+  function renderMiniCaption(segment, force) {
+    const viewport = shadow.querySelector('[data-role="mini-text"]');
+    const track = shadow.querySelector('[data-role="mini-caption-track"]');
+    if (!viewport || !track) return;
+    const sourceText = String(segment && segment.text || "正在连接本地朗读服务…").replace(/\s+/gu, " ").trim();
+    const words = miniCaptionWords(segment);
+    const key = `${state.index}:${segment && segment.id || "none"}:${sourceText}:${words.length}`;
+    viewport.setAttribute("aria-label", sourceText);
+    if (!force && key === miniCaptionKey) return;
+    miniCaptionKey = key;
+    miniCaptionWordIndex = -1;
+    miniCaptionOffset = 0;
+    if (miniCaptionFrame != null) cancelAnimationFrame(miniCaptionFrame);
+    miniCaptionFrame = null;
+    track.replaceChildren();
+    const fragment = document.createDocumentFragment();
+    let cursor = 0;
+    let appendedWords = 0;
+    words.forEach((word, index) => {
+      const start = Number(word && word.sourceStart);
+      const end = Number(word && word.sourceEnd);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start < cursor || end <= start || end > sourceText.length) return;
+      if (start > cursor) fragment.append(document.createTextNode(sourceText.slice(cursor, start)));
+      const span = document.createElement("span");
+      span.className = "qr-mini-caption-word";
+      span.dataset.wordIndex = String(index);
+      span.textContent = sourceText.slice(start, end) || String(word.text || "");
+      fragment.append(span);
+      cursor = end;
+      appendedWords += 1;
+    });
+    if (!appendedWords) {
+      fragment.append(document.createTextNode(sourceText));
+    } else if (cursor < sourceText.length) {
+      fragment.append(document.createTextNode(sourceText.slice(cursor)));
+    }
+    track.append(fragment);
+    track.style.transform = "translate3d(0, 0, 0)";
+    track.classList.remove("is-entering");
+    void track.offsetWidth;
+    track.classList.add("is-entering");
+    setTimeout(() => track.classList.remove("is-entering"), 220);
+    scheduleMiniCaptionPosition(-1, true);
+  }
+
+  function scheduleMiniCaptionPosition(wordIndex, instant) {
+    if (miniCaptionFrame != null) cancelAnimationFrame(miniCaptionFrame);
+    miniCaptionFrame = requestAnimationFrame(() => {
+      miniCaptionFrame = null;
+      positionMiniCaption(wordIndex, instant);
+    });
+  }
+
+  function positionMiniCaption(wordIndex, instant) {
+    const viewport = shadow.querySelector('[data-role="mini-text"]');
+    const track = shadow.querySelector('[data-role="mini-caption-track"]');
+    if (!viewport || !track || miniPlayerMinimized) return;
+    const viewportWidth = viewport.clientWidth;
+    const trackWidth = track.scrollWidth;
+    if (!viewportWidth || !trackWidth) return;
+    const minimumOffset = Math.min(0, viewportWidth - trackWidth);
+    viewport.classList.toggle("is-overflowing", trackWidth > viewportWidth + 1);
+    let nextOffset = Math.min(0, Math.max(minimumOffset, miniCaptionOffset));
+    const activeWord = wordIndex >= 0
+      ? track.querySelector(`.qr-mini-caption-word[data-word-index="${wordIndex}"]`)
+      : null;
+    if (activeWord && trackWidth > viewportWidth) {
+      const wordCenter = activeWord.offsetLeft + activeWord.offsetWidth / 2;
+      const visibleCenter = wordCenter + nextOffset;
+      const safeStart = viewportWidth * .28;
+      const safeEnd = viewportWidth * .68;
+      if (visibleCenter < safeStart || visibleCenter > safeEnd) {
+        nextOffset = Math.min(0, Math.max(minimumOffset, viewportWidth * .42 - wordCenter));
+      }
+    }
+    miniCaptionOffset = nextOffset;
+    const reducedMotion = Boolean(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    track.classList.toggle("is-instant", Boolean(instant || reducedMotion));
+    track.style.transform = `translate3d(${Math.round(nextOffset)}px, 0, 0)`;
+  }
+
+  function updateMiniCaptionWord(wordIndex, instant) {
+    const track = shadow.querySelector('[data-role="mini-caption-track"]');
+    if (!track) return;
+    if (wordIndex === miniCaptionWordIndex && !instant) return;
+    const previous = track.querySelector(".qr-mini-caption-word.is-active");
+    if (previous) previous.classList.remove("is-active");
+    const active = wordIndex >= 0
+      ? track.querySelector(`.qr-mini-caption-word[data-word-index="${wordIndex}"]`)
+      : null;
+    if (active) active.classList.add("is-active");
+    miniCaptionWordIndex = wordIndex;
+    scheduleMiniCaptionPosition(wordIndex, instant);
+  }
+
+  function miniPlayerViewportBounds() {
+    const viewport = window.visualViewport;
+    const padding = 12;
+    const left = viewport ? Number(viewport.offsetLeft) || 0 : 0;
+    const top = viewport ? Number(viewport.offsetTop) || 0 : 0;
+    const width = viewport ? Number(viewport.width) || window.innerWidth : window.innerWidth;
+    const height = viewport ? Number(viewport.height) || window.innerHeight : window.innerHeight;
+    return {
+      left: left + padding,
+      top: top + padding,
+      right: left + width - padding,
+      bottom: top + height - padding,
+      width: Math.max(1, width - padding * 2),
+      height: Math.max(1, height - padding * 2),
+    };
+  }
+
+  function normalizedMiniPlayerPosition(left, top, width, height, bounds) {
+    const horizontalRange = Math.max(0, bounds.width - width);
+    const verticalRange = Math.max(0, bounds.height - height);
+    return {
+      x: horizontalRange > 0 ? Math.min(1, Math.max(0, (left - bounds.left) / horizontalRange)) : 0,
+      y: verticalRange > 0 ? Math.min(1, Math.max(0, (top - bounds.top) / verticalRange)) : 0,
+    };
+  }
+
+  function setMiniPlayerCoordinates(player, left, top) {
+    player.style.left = `${Math.round(left)}px`;
+    player.style.top = `${Math.round(top)}px`;
+    player.style.right = "auto";
+    player.style.bottom = "auto";
+  }
+
+  function positionFloatingPlayer() {
+    const player = shadow.querySelector('[data-role="mini-player"]');
+    if (!player || !player.classList.contains("is-visible") || (miniPlayerDrag && miniPlayerDrag.dragging)) return;
+    const bounds = miniPlayerViewportBounds();
+    const position = miniPlayerPosition || { x: 1, y: 1 };
+    const width = Math.min(player.offsetWidth || 0, bounds.width);
+    const height = Math.min(player.offsetHeight || 0, bounds.height);
+    const horizontalRange = Math.max(0, bounds.width - width);
+    const verticalRange = Math.max(0, bounds.height - height);
+    setMiniPlayerCoordinates(
+      player,
+      bounds.left + horizontalRange * position.x,
+      bounds.top + verticalRange * position.y,
+    );
+  }
+
+  function beginMiniPlayerDrag(event) {
+    const player = event.currentTarget;
+    if (!player || !player.classList.contains("is-visible")) return;
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    const rect = player.getBoundingClientRect();
+    miniPlayerDrag = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+      dragging: false,
+    };
+  }
+
+  function moveMiniPlayerDrag(event) {
+    const drag = miniPlayerDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const player = shadow.querySelector('[data-role="mini-player"]');
+    if (!player) {
+      miniPlayerDrag = null;
+      miniPlayerSuppressClickUntil = 0;
+      return;
+    }
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    if (!drag.dragging && Math.hypot(deltaX, deltaY) < 5) return;
+    if (!drag.dragging) {
+      drag.dragging = true;
+      player.classList.add("is-dragging");
+    }
+    miniPlayerSuppressClickUntil = performance.now() + 750;
+    if (event.cancelable) event.preventDefault();
+    const bounds = miniPlayerViewportBounds();
+    const maximumLeft = Math.max(bounds.left, bounds.right - drag.width);
+    const maximumTop = Math.max(bounds.top, bounds.bottom - drag.height);
+    const left = Math.min(maximumLeft, Math.max(bounds.left, drag.left + deltaX));
+    const top = Math.min(maximumTop, Math.max(bounds.top, drag.top + deltaY));
+    setMiniPlayerCoordinates(player, left, top);
+    miniPlayerPosition = normalizedMiniPlayerPosition(left, top, drag.width, drag.height, bounds);
+  }
+
+  function finishMiniPlayerDrag(player, drag) {
+    if (!drag || !drag.dragging) return;
+    const bounds = miniPlayerViewportBounds();
+    const rect = player.getBoundingClientRect();
+    const position = normalizedMiniPlayerPosition(rect.left, rect.top, rect.width, rect.height, bounds);
+    miniPlayerPosition = {
+      x: rect.left + rect.width / 2 < bounds.left + bounds.width / 2 ? 0 : 1,
+      y: position.y,
+    };
+    player.classList.remove("is-dragging");
+    player.classList.add("is-snapping");
+    miniPlayerSuppressClickUntil = performance.now() + 350;
+    positionFloatingPlayer();
+    setTimeout(() => player.classList.remove("is-snapping"), 190);
+    void saveMiniPlayerPosition();
+  }
+
+  function endMiniPlayerDrag(event) {
+    const drag = miniPlayerDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    miniPlayerDrag = null;
+    const player = shadow.querySelector('[data-role="mini-player"]');
+    if (!player) {
+      miniPlayerSuppressClickUntil = 0;
+      return;
+    }
+    finishMiniPlayerDrag(player, drag);
+  }
+
+  function cancelMiniPlayerDrag(event) {
+    const drag = miniPlayerDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    abortMiniPlayerDrag();
+  }
+
+  function abortMiniPlayerDrag() {
+    const drag = miniPlayerDrag;
+    if (!drag) return;
+    miniPlayerDrag = null;
+    const player = shadow.querySelector('[data-role="mini-player"]');
+    if (player) player.classList.remove("is-dragging");
+    miniPlayerSuppressClickUntil = drag.dragging ? performance.now() + 350 : 0;
+    if (player) positionFloatingPlayer();
+  }
+
   function renderNow() {
     const player = shadow.querySelector('[data-role="mini-player"]');
     if (!player) return;
     const current = state.current;
-    const active = ["loading", "playing", "paused"].includes(state.status);
+    const active = settings.showFloatingPlayer !== false && miniPlayerEngaged && ["extracting", "loading", "playing", "paused", "ready", "error"].includes(state.status);
     const isPlaying = state.status === "playing" || (state.status === "loading" && !desiredPlaybackPaused);
-    const busy = state.status === "loading" || Boolean(playbackControlPending);
+    const status = miniPlayerStatus();
+    const busy = status.busy || Boolean(playbackControlPending);
     const avatar = shadow.querySelector('[data-role="mini-avatar"]');
     const speaker = shadow.querySelector('[data-role="mini-speaker"]');
     const meta = shadow.querySelector('[data-role="mini-meta"]');
-    const text = shadow.querySelector('[data-role="mini-text"]');
+    const statusText = shadow.querySelector('[data-role="mini-status"]');
     const playIcon = shadow.querySelector('[data-role="mini-play-icon"]');
-    const playButton = player.querySelector('[data-action="play-toggle"]');
+    const compactPlayIcon = shadow.querySelector('[data-role="mini-compact-play-icon"]');
+    const miniSizeIcon = shadow.querySelector('[data-role="mini-size-icon"]');
+    const playButtons = player.querySelectorAll('[data-action="play-toggle"]');
     const previous = player.querySelector('[data-action="previous"]');
     const next = player.querySelector('[data-action="next"]');
+    const followButtons = player.querySelectorAll('[data-action="resume-follow"]');
     const total = state.segments.length;
     player.classList.toggle("is-visible", active);
-    player.classList.toggle("is-loading", state.status === "loading");
+    player.classList.toggle("is-loading", status.busy);
     player.classList.toggle("is-paused", state.status === "paused" || desiredPlaybackPaused);
+    player.classList.toggle("is-minimized", miniPlayerMinimized);
+    player.dataset.state = status.key;
     player.setAttribute("aria-hidden", String(!active));
+    player.setAttribute("aria-busy", String(status.busy));
+    player.inert = !active;
     if (avatar) avatar.textContent = initials(current && current.authorName || "Q");
     if (speaker) speaker.textContent = current ? getDisplayAuthor(current) : "正在准备朗读";
     if (meta) {
@@ -3123,14 +3481,35 @@
       const voice = current && current.voice ? ` · ${current.voice}` : "";
       meta.textContent = `${role}${voice}`;
     }
-    if (text) text.textContent = current ? truncateText(current.text, 72) : "正在连接本地朗读服务…";
-    if (playIcon) playIcon.src = isPlaying ? iconUrls.pause : iconUrls.play;
-    if (playButton) {
-      playButton.disabled = busy && !activeSession && !playbackStartPending;
-      playButton.setAttribute("aria-label", isPlaying ? "暂停朗读" : "继续朗读");
+    if (statusText && statusText.textContent !== status.label) statusText.textContent = status.label;
+    renderMiniCaption(current, false);
+    if (wordTimeline && wordTimeline.segmentIndex === state.index) {
+      updateMiniCaptionWord(wordTimeline.activeWordIndex, true);
     }
+    if (playIcon) playIcon.src = isPlaying ? iconUrls.pause : iconUrls.play;
+    if (compactPlayIcon) compactPlayIcon.src = isPlaying ? iconUrls.pause : iconUrls.play;
+    if (miniSizeIcon) miniSizeIcon.setAttribute("d", miniPlayerMinimized ? miniSizeIconPaths.expand : miniSizeIconPaths.shrink);
+    playButtons.forEach((playButton) => {
+      playButton.disabled = (!total && state.status !== "loading") || (busy && !activeSession && !playbackStartPending && state.status !== "extracting");
+      playButton.setAttribute("aria-label", isPlaying ? "暂停朗读" : state.status === "ready" ? "重新开始朗读" : "继续朗读");
+    });
     if (previous) previous.disabled = !total || busy;
     if (next) next.disabled = !total || busy;
+    const followReady = Boolean(current) && state.status !== "extracting";
+    const followNeeded = followController.mode === "manual";
+    followButtons.forEach((button) => {
+      button.disabled = !followReady || !followNeeded;
+      button.hidden = !followNeeded;
+      button.classList.toggle("is-needed", followNeeded);
+      button.setAttribute("aria-label", followNeeded ? "回到当前朗读位置" : "已跟随当前朗读位置");
+      button.title = followNeeded ? "回到朗读位置" : "正在跟随朗读位置";
+    });
+    player.querySelectorAll('[data-action="toggle-mini-size"]').forEach((button) => {
+      button.setAttribute("aria-pressed", String(miniPlayerMinimized));
+      button.setAttribute("aria-label", miniPlayerMinimized ? "展开悬浮播放器" : "最小化悬浮播放器");
+      button.title = miniPlayerMinimized ? "展开" : "最小化";
+    });
+    positionFloatingPlayer();
   }
 
   function showToast(message) {

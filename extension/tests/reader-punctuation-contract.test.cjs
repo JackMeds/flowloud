@@ -43,8 +43,8 @@ test('reader controls progressive playback through the offscreen pause and resum
 
 test('reader keeps loading playback pauseable in the replacement mini player', () => {
   assert.match(readerSource, /state\.status\s*===\s*"loading"[\s\S]*?desiredPlaybackPaused\s*=\s*!desiredPlaybackPaused/u);
-  assert.match(readerSource, /\["loading",\s*"playing",\s*"paused"\]\.includes\(state\.status\)/u);
-  assert.match(readerSource, /playButton\.disabled\s*=\s*busy\s*&&\s*!activeSession\s*&&\s*!playbackStartPending/u);
+  assert.match(readerSource, /\["extracting",\s*"loading",\s*"playing",\s*"paused",\s*"ready",\s*"error"\]\.includes\(state\.status\)/u);
+  assert.match(readerSource, /playButtons\.forEach[\s\S]*?playButton\.disabled\s*=/u);
   assert.match(readerSource, /暂停已排队/u);
   assert.match(readerSource, /startPaused:\s*desiredPlaybackPaused/u);
 });

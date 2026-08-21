@@ -39,13 +39,15 @@ test('popup renderer accepts a compact snapshot without the full segment queue o
   assert.doesNotMatch(source, /previous\.disabled = !segments\.length/);
 });
 
-test('click-to-read and author strategy are quick settings in the popup', () => {
+test('floating player, click-to-read, and author strategy are quick settings in the popup', () => {
   const view = read('popup-view.js');
   const controller = read('popup.js');
   const settingsPage = read('voice-studio.html');
   assert.match(view, /dataset\.setting = 'clickToRead'/);
+  assert.match(view, /dataset\.setting = 'showFloatingPlayer'/);
   assert.match(view, /dataset\.setting = 'preset'/);
   assert.match(view, /网页点读/);
+  assert.match(view, /网页悬浮窗/);
   assert.match(view, /作者配音策略/);
   assert.match(controller, /api\.storage\.local\.set/);
   assert.match(controller, /qwenReaderSettings/);
@@ -57,6 +59,27 @@ test('rerendering cannot accumulate delegated control listeners', () => {
   assert.match(source, /const boundRoots = new WeakSet\(\)/);
   assert.match(source, /if \(boundRoots\.has\(root\)\) return/);
   assert.match(source, /boundRoots\.add\(root\)/);
+});
+
+test('popup polling preserves focus and keeps live announcements scoped to status', () => {
+  const html = read('popup.html');
+  const view = read('popup-view.js');
+  const controller = read('popup.js');
+  assert.doesNotMatch(html, /id="popup-root"[^>]*aria-live/);
+  assert.match(view, /function captureFocus/);
+  assert.match(view, /function restoreFocus/);
+  assert.match(view, /dataset\.focusKey/);
+  assert.match(view, /headerRight\.setAttribute\('role', 'status'\)/);
+  assert.match(view, /progress\.setAttribute\('role', 'progressbar'\)/);
+  assert.match(controller, /lastRenderSignature/);
+  assert.match(read('popup.css'), /@media \(forced-colors: active\)/);
+});
+
+test('toolbar badge uses an intuitive neutral pause treatment', () => {
+  const background = read('background.js');
+  assert.match(background, /status === 'paused' \? '❚❚'/u);
+  assert.match(background, /status === 'paused' \? '#475569'/u);
+  assert.doesNotMatch(background, /#d97706|status === 'paused' \? 'Ⅱ'/u);
 });
 
 test('page editor trusts contextId, keeps global voice choices implicit, and only closes after success', () => {
@@ -80,7 +103,14 @@ test('popup commands carry the current page identity', () => {
   assert.match(source, /pageKey: pageContext && pageContext\.pageKey/);
 });
 
-test('the popup has no legacy sidebar or floating-orb surface', () => {
+test('the popup has no legacy sidebar or floating-orb surface and exposes page guide mode', () => {
   const source = [read('popup.html'), read('popup.css'), read('popup-view.js')].join('\n');
   assert.doesNotMatch(source, /qr-panel|qr-orb|侧栏/);
+  assert.match(source, /页面导览/);
+});
+
+test('page guide uses the shared reader TTS protocol instead of an independent speech engine', () => {
+  const guide = fs.readFileSync(path.join(__dirname, '..', 'page-guide.js'), 'utf8');
+  assert.match(guide, /message\('reader\/tts'/u);
+  assert.doesNotMatch(guide, /speechSynthesis|SpeechSynthesisUtterance/u);
 });

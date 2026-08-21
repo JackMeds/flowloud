@@ -9,6 +9,7 @@
   let view = 'reader';
   let pageContext = null;
   let quickSettings = normalizeQuickSettings(null);
+  let lastRenderSignature = '';
 
   function normalizeQuickSettings(value) {
     const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -17,6 +18,7 @@
       : defaults.voiceMode || 'op-exclusive';
     return {
       clickToRead: Number(source.interactionVersion || 0) >= 3 && source.clickToRead === true,
+      showFloatingPlayer: source.showFloatingPlayer !== false,
       preset,
       interactionVersion: 3
     };
@@ -28,10 +30,11 @@
   }
 
   async function saveQuickSetting(setting, value) {
-    if (!['clickToRead', 'preset'].includes(setting)) return;
+    if (!['clickToRead', 'showFloatingPlayer', 'preset'].includes(setting)) return;
     const saved = await api.storage.local.get(SETTINGS_KEY);
     const current = Object.assign({}, defaults, saved && saved[SETTINGS_KEY] || {});
     if (setting === 'clickToRead') current.clickToRead = value === true;
+    if (setting === 'showFloatingPlayer') current.showFloatingPlayer = value !== false;
     if (setting === 'preset') {
       if (!['op-exclusive', 'stable-author', 'round-robin'].includes(value)) return;
       current.preset = value;
@@ -46,6 +49,24 @@
   }
 
   function render(message) {
+    const signature = JSON.stringify({
+      view,
+      message: message || '',
+      tabId: context && context.tabId || null,
+      title: context && context.title || '',
+      settings: quickSettings,
+      snapshot: snapshot ? {
+        pageKey: snapshot.pageKey,
+        status: snapshot.status,
+        index: snapshot.index,
+        total: snapshot.segmentCount || snapshot.total,
+        error: snapshot.error,
+        current: snapshot.current
+      } : null,
+      pageContext: view === 'page-voices' ? pageContext : null
+    });
+    if (signature === lastRenderSignature) return;
+    lastRenderSignature = signature;
     if (view === 'page-voices') {
       globalThis.QwenPopupView.mountPageVoices(root, Object.assign({}, pageContext || {}, {
         compact: true,

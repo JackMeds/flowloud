@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $source = Join-Path $PSScriptRoot "extension"
-$destination = Join-Path $PSScriptRoot "dist\Qwen-Reader-Edge"
+$destination = Join-Path $PSScriptRoot "dist\Flowloud-Edge"
 $resolvedRoot = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd("\")
 $resolvedDestination = [IO.Path]::GetFullPath($destination)
 
@@ -99,7 +99,7 @@ foreach ($relativePath in $required) {
 $sourceFiles = Get-ChildItem -LiteralPath $source -Recurse -File |
     Where-Object {
         $_.FullName -notmatch '[\\/]tests[\\/]' -and
-        $_.Name -ne "package.json"
+        $_.Name -notin @("package.json", "pnpm-lock.yaml") -and $_.Name -notlike "popup-lab.*"
     }
 $unsafeEval = $sourceFiles |
     Where-Object { $_.Extension -in @(".js", ".html") } |

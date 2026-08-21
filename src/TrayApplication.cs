@@ -49,6 +49,7 @@ namespace QwenTrayGateway
             menu.Items.Add(autoUnloadItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("打开日志目录", null, OpenLogs);
+            menu.Items.Add("复制扩展配对令牌", null, CopyClientToken);
             startupItem = new ToolStripMenuItem("开机自动启动");
             startupItem.CheckOnClick = true;
             startupItem.Checked = File.Exists(StartupShortcutPath());
@@ -59,7 +60,7 @@ namespace QwenTrayGateway
 
             notifyIcon = new NotifyIcon();
             notifyIcon.Icon = SystemIcons.Application;
-            notifyIcon.Text = "Qwen 网页朗读：模型未加载";
+            notifyIcon.Text = "Flowloud / 流声：模型未加载";
             notifyIcon.ContextMenuStrip = menu;
             notifyIcon.Visible = showTray;
 
@@ -78,7 +79,7 @@ namespace QwenTrayGateway
                 logger.Write("gateway_start_failed type=" + ex.GetType().Name + " message=" + ex.Message);
                 if (showTray)
                 {
-                    notifyIcon.ShowBalloonTip(8000, "Qwen 网页朗读启动失败", ex.Message, ToolTipIcon.Error);
+                    notifyIcon.ShowBalloonTip(8000, "Flowloud / 流声启动失败", ex.Message, ToolTipIcon.Error);
                 }
                 throw;
             }
@@ -108,7 +109,7 @@ namespace QwenTrayGateway
             else if (state == "error") { text = "后端错误"; }
             else { text = "模型未加载"; }
             statusItem.Text = "状态：" + text;
-            notifyIcon.Text = ShortTooltip("Qwen 网页朗读：" + text);
+            notifyIcon.Text = ShortTooltip("Flowloud / 流声：" + text);
         }
 
         private void LoadBackend()
@@ -116,7 +117,7 @@ namespace QwenTrayGateway
             try
             {
                 backend.EnsureStarted();
-                ShowMessage("Qwen 网页朗读", "模型已加载。", ToolTipIcon.Info);
+                ShowMessage("Flowloud / 流声", "模型已加载。", ToolTipIcon.Info);
             }
             catch (Exception ex)
             {
@@ -128,11 +129,11 @@ namespace QwenTrayGateway
         {
             if (gateway.ActiveRequests > 0)
             {
-                ShowMessage("Qwen 网页朗读", "当前仍在生成语音，暂不卸载。", ToolTipIcon.Warning);
+                ShowMessage("Flowloud / 流声", "当前仍在生成语音，暂不卸载。", ToolTipIcon.Warning);
                 return;
             }
             backend.Stop("tray unload");
-            ShowMessage("Qwen 网页朗读", "模型已卸载，显存已释放。", ToolTipIcon.Info);
+            ShowMessage("Flowloud / 流声", "模型已卸载，显存已释放。", ToolTipIcon.Info);
         }
 
         private void ToggleAutoUnload(object sender, EventArgs args)
@@ -164,6 +165,19 @@ namespace QwenTrayGateway
                 FileName = config.LogDirectory,
                 UseShellExecute = true
             });
+        }
+
+        private void CopyClientToken(object sender, EventArgs args)
+        {
+            try
+            {
+                Clipboard.SetText(config.ClientToken);
+                ShowMessage("Flowloud / 流声", "配对令牌已复制。请粘贴到扩展的“朗读引擎 → 本地 Qwen”，不要发送给他人。", ToolTipIcon.Info);
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("复制配对令牌失败", ex.Message, ToolTipIcon.Error);
+            }
         }
 
         private void RequestExitFromWorker()
@@ -233,7 +247,7 @@ namespace QwenTrayGateway
         {
             return Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.Startup),
-                "Qwen 网页朗读.lnk");
+                "Flowloud 流声.lnk");
         }
 
         private static string ShortTooltip(string text)

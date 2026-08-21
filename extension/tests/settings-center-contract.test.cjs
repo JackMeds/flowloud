@@ -46,9 +46,13 @@ test('visual setting changes update live reading without interrupting playback',
 
 test('page click-to-read is opt-in and never cancels the site click event', () => {
   assert.match(defaults, /clickToRead:\s*false/u);
+  assert.match(defaults, /showFloatingPlayer:\s*true/u);
   assert.match(defaults, /interactionVersion:\s*3/u);
   assert.match(reader, /Number\(value\.interactionVersion \|\| 0\) < 3[\s\S]*?\? false/u);
   const clickHandler = reader.slice(reader.indexOf('async function handlePageClick'), reader.indexOf('function handlePagePointerMove'));
   assert.doesNotMatch(clickHandler, /preventDefault|stopPropagation|stopImmediatePropagation/u);
   assert.match(clickHandler, /isInteractivePageTarget\(target\)/u);
+  assert.match(clickHandler, /strictPoint:\s*true/u);
+  assert.match(reader, /Math\.max\(0, Number\(segment\.floor\) - 1\)/u);
+  assert.match(reader, /maxDistance:\s*options && options\.strictPoint \? 0 : 8/u);
 });

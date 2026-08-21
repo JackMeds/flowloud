@@ -93,4 +93,11 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
 .qr-page-root-compact .qr-voice-select { width: 100%; margin-top: 9px; }
 .qr-page-root-compact .qr-page-actions { position: sticky; bottom: 0; margin-top: 12px; padding-top: 10px; background: linear-gradient(180deg, rgba(247, 245, 251, 0), #f7f5fb 30%); }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
+@media (forced-colors: active) {
+  body, .qr-page-card, .qr-voice-summary, .qr-quick-settings, .qr-author-card, .qr-empty-card { color: CanvasText; background: Canvas; }
+  .qr-page-card, .qr-voice-summary, .qr-quick-settings, .qr-author-card, .qr-empty-card, .qr-control, .qr-quick-select, .qr-voice-select { border: 1px solid CanvasText; box-shadow: none; }
+  .qr-control-primary, .qr-primary-button { color: HighlightText; background: Highlight; }
+  .qr-popup-switch input:checked + span { background: Highlight; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid Highlight; }
+}
 @media (max-width: 420px) { .qr-popup-root { width: 100%; } .qr-page-root { width: min(100% - 24px, 720px); padding-top: 28px; } .qr-page-root-compact { width: 100%; padding: 0; } }

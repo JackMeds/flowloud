@@ -46,6 +46,19 @@ test('synthesize sends the fixed local WAV request and returns a WAV Blob', asyn
   assert.deepEqual([...new Uint8Array(await result.blob.arrayBuffer())], [82, 73, 70, 70]);
 });
 
+test('local client token is sent as bearer authorization and can be rotated', async () => {
+  const fake = createFetch([
+    new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
+    new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
+  ]);
+  const client = createApiClient({ fetchImpl: fake.fetchImpl, clientToken: 'first-token' });
+  await client.status();
+  client.setClientToken('second-token');
+  await client.status();
+  assert.equal(fake.calls[0].options.headers.authorization, 'Bearer first-token');
+  assert.equal(fake.calls[1].options.headers.authorization, 'Bearer second-token');
+});
+
 test('synthesizeStream negotiates a readable stream and keeps the trusted request contract', async () => {
   const body = new ReadableStream({
     start(controller) {

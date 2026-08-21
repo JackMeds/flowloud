@@ -1,0 +1,20 @@
+body { margin: 0; background: var(--flow-paper); }
+header, nav, .notice, main { width: min(100% - 40px, 920px); margin: auto; }
+header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 42px 0 25px; border-bottom: 1px solid var(--flow-line); }
+header p { margin: 0; color: var(--flow-muted); }
+header > div > p:first-child { margin-bottom: 8px; color: var(--flow-accent); font-size: 11px; font-weight: 700; letter-spacing: .12em; }
+h1 { margin: 0 0 8px; font-size: clamp(28px, 5vw, 42px); line-height: 1.12; font-weight: 680; letter-spacing: -.03em; }
+button, select { min-height: 42px; padding: 0 13px; border: 1px solid var(--flow-line); border-radius: var(--flow-radius-sm); color: var(--flow-ink); background: var(--flow-paper-raised); }
+nav { position: sticky; z-index: 2; top: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 9px; padding: 13px 0; border-bottom: 1px solid var(--flow-line); background: color-mix(in srgb, var(--flow-paper) 94%, transparent); }
+nav label { display: flex; align-items: center; gap: 8px; margin-right: auto; color: var(--flow-muted); }
+#read { border-color: var(--flow-accent); color: #fff; background: var(--flow-accent); }
+.notice { margin-top: 18px; padding: 12px 14px; border-left: 2px solid var(--flow-accent); color: var(--flow-muted); background: #f5f1e9; font-size: 12px; }
+main { padding: 20px 0 64px; }
+ol { margin: 0; padding: 0; list-style: none; }
+li { border-bottom: 1px solid var(--flow-line); }
+li button { width: 100%; min-height: 50px; padding: 12px 4px; border: 0; border-radius: 0; background: transparent; text-align: left; }
+li button:hover { color: var(--flow-accent); background: #f6f2eb; }
+li.is-current { border-left: 2px solid var(--flow-accent); }
+li.is-current button { padding-left: 12px; color: var(--flow-accent); }
+@media (max-width: 600px) { header { flex-direction: column; padding-top: 24px; } nav label { width: 100%; } nav select { flex: 1; } }
+@media (forced-colors: active) { li.is-current { border-color: Highlight; } }
