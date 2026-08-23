@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flowloud popup state audit harness</title>
+  <link rel="stylesheet" href="../../../extension/design-system.css">
+  <link rel="stylesheet" href="../../../extension/popup.css?v=0.9.4">
+  <style>
+    body { margin: 0; min-width: 860px; min-height: 760px; background: #ece9f0; }
+    .audit-layout { display: grid; grid-template-columns: 390px 360px; gap: 48px; align-items: start; padding: 32px; }
+    .audit-frame { overflow: hidden; border: 1px solid #cfc8d4; background: var(--flow-paper); box-shadow: 0 18px 50px rgba(33, 31, 36, .13); }
+    .audit-panel { padding: 22px; border: 1px solid #d7d1db; border-radius: 10px; background: #fff; }
+    .audit-panel h1 { margin: 0 0 8px; font-size: 20px; }
+    .audit-panel p { margin: 0 0 16px; color: #6f6972; }
+    .audit-panel button { min-height: 42px; padding: 0 14px; border: 0; border-radius: 7px; color: #fff; background: #6247a5; font-weight: 700; }
+    .audit-panel output { display: block; margin-top: 16px; font-family: Consolas, monospace; font-size: 12px; white-space: pre-wrap; }
+  </style>
+  <script>
+    globalThis.chrome = {
+      runtime: {
+        getURL(path) { return `../../../extension/${path}`; }
+      }
+    };
+  </script>
+</head>
+<body>
+  <main class="audit-layout">
+    <section class="audit-frame" aria-label="当前生产 popup renderer">
+      <div id="popup-root" class="qr-popup-root"></div>
+    </section>
+    <aside class="audit-panel">
+      <h1>状态刷新复现</h1>
+      <p>先向下滚动，再触发一次与 900ms 轮询等价的 snapshot 更新；滚动位置应保持。</p>
+      <button id="scroll-test" type="button">设置到中段滚动位置</button>
+      <button id="snapshot-tick" type="button">模拟下一次播放状态刷新</button>
+      <output id="audit-state"></output>
+    </aside>
+  </main>
+  <script src="../../../extension/popup-view.js?v=0.9.4"></script>
+  <script>
+    const root = document.getElementById('popup-root');
+    const stateOutput = document.getElementById('audit-state');
+    let index = 1;
+    const base = {
+      title: '如何让浏览器朗读真正融入阅读？',
+      sourceLabel: 'V2EX · 当前主题',
+      settings: {
+        readingMode: 'content',
+        activeProviderId: 'browser-system',
+        playbackRate: 1,
+        showFloatingPlayer: true,
+        clickToRead: false,
+        preset: 'op-exclusive'
+      },
+      authors: [
+        { id: 'op', name: '楼主', voice: '邵思萌' },
+        { id: 'a1', name: 'Mina', voice: '清朗' },
+        { id: 'a2', name: '远山', voice: '温和' },
+        { id: 'a3', name: 'Terry', voice: '清朗' }
+      ]
+    };
+
+    function model() {
+      return Object.assign({}, base, {
+        snapshot: {
+          pageKey: 'audit-page',
+          status: 'playing',
+          index,
+          segmentCount: 24,
+          current: {
+            authorName: index % 2 ? '远山' : 'Mina',
+            text: index % 2
+              ? '复杂的作者配音不该挤在一个瞬时小窗里。'
+              : '播放状态更新不应该打断用户正在进行的设置操作。'
+          }
+        }
+      });
+    }
+
+    function describe() {
+      const scroller = root.querySelector('.qr-popup');
+      stateOutput.value = `scrollTop: ${Math.round(scroller?.scrollTop || 0)}\n滚动容器稳定: ${Boolean(scroller)}\n段落索引: ${index}`;
+    }
+
+    function render() {
+      globalThis.QwenPopupView.mountPopup(root, model());
+      describe();
+    }
+
+    root.addEventListener('scroll', describe, true);
+    document.getElementById('scroll-test').addEventListener('click', () => {
+      const scroller = root.querySelector('.qr-popup');
+      if (scroller) scroller.scrollTop = 180;
+      describe();
+    });
+    document.getElementById('snapshot-tick').addEventListener('click', () => {
+      index += 1;
+      render();
+    });
+    render();
+  </script>
+</body>
+</html>

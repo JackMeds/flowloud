@@ -81,7 +81,7 @@ namespace QwenTrayGateway
         {
             Dictionary<string, object> result = new Dictionary<string, object>();
             result["gateway"] = "ok";
-            result["gatewayVersion"] = "0.9.0-beta.1";
+            result["gatewayVersion"] = "0.10.0-alpha.1";
             result["protocolVersion"] = 3;
             result["backend"] = backend.State;
             result["backendPid"] = backend.ProcessId;
@@ -89,6 +89,18 @@ namespace QwenTrayGateway
             result["autoUnload"] = config.AutoUnload;
             result["idleMinutes"] = config.IdleMinutes;
             result["lastActivityUtc"] = lastActivityUtc.ToString("o");
+            result["model"] = new Dictionary<string, object>
+            {
+                { "id", config.ModelId },
+                { "alias", config.ModelAlias },
+                { "quantization", config.Quantization }
+            };
+            result["voice"] = new Dictionary<string, object>
+            {
+                { "name", config.VoiceName },
+                { "alias", config.VoiceAlias },
+                { "referenceConfigured", !string.IsNullOrWhiteSpace(config.VoiceReferenceWav) }
+            };
             Dictionary<string, object> capabilities = new Dictionary<string, object>();
             capabilities["transportStreaming"] = true;
             capabilities["backendIncrementalGeneration"] = false;

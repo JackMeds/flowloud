@@ -22,10 +22,15 @@
 
   function normalizeBaseUrl(value) {
     const parsed = new URL(value || DEFAULT_BASE_URL);
-    if (parsed.origin !== DEFAULT_BASE_URL) {
-      throw new TypeError('本地 TTS 地址必须是 http://127.0.0.1:7811。');
+    const loopback = parsed.hostname === '127.0.0.1'
+      || parsed.hostname === 'localhost'
+      || parsed.hostname === '[::1]';
+    if (!loopback || !['http:', 'https:'].includes(parsed.protocol)) {
+      throw new TypeError('本地 TTS 只允许 localhost、127.0.0.1 或 ::1。');
     }
-    return parsed.origin;
+    if (parsed.username || parsed.password) throw new TypeError('本地 TTS 地址不能包含用户名或密码。');
+    if (parsed.search || parsed.hash) throw new TypeError('本地 TTS 地址不能包含查询参数或片段。');
+    return parsed.toString().replace(/\/$/, '');
   }
 
   function backendGeneration(status) {
@@ -365,6 +370,7 @@
     STREAM_PATH,
     SPEECH_CANCEL_PATH,
     backendGeneration,
+    normalizeBaseUrl,
     isStreamUnsupportedStatus,
     sanitizeRequestIdentity,
   };

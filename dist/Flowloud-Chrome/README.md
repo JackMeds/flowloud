@@ -1,6 +1,6 @@
 # Flowloud / 流声扩展
 
-这是 Flowloud 的 Edge / Chrome Manifest V3 扩展源码。它负责识别网页正文，并通过系统语音、浏览器模型、本地 Qwen 或 OpenAI 兼容 Provider 朗读；同时提供 Popup、播放期间的悬浮播放器、页面导览、正文高亮、音色库和设置中心。
+这是 Flowloud 的 Edge / Chrome Manifest V3 扩展源码。它负责识别网页正文，并通过系统语音、浏览器模型、本地 Qwen 或 OpenAI 兼容 Provider 朗读；同时提供 Popup、播放期间的网页悬浮球、页面导览、正文高亮、音色库和设置中心。
 
 完整的项目定位、本地网关说明和协议见仓库根目录的 `README.md`。
 
@@ -8,9 +8,10 @@
 
 - 识别论坛帖子、文章、小说章节和普通网页正文。
 - 支持 Discourse、Flarum、NodeBB，兼容 XenForo 当前页和通用正文回退。
-- Popup 提供开始/暂停、上一句/下一句、网页点读、配音策略和本页作者音色调整。
-- 网页悬浮播放器在用户主动朗读后出现，展示文本识别、模型加载、合成、播放、暂停和错误状态。
-- 悬浮播放器支持完整/最小化显示、拖动吸附、位置记忆和回到朗读位置；Popup 中的“网页悬浮窗”开关负责显示或隐藏。
+- Popup 提供开始/暂停、上一句/下一句、朗读速度、语音来源和全局网页交互快捷调整。
+- 本页作者音色调整会打开独立的页面编辑器，避免把长作者列表塞进瞬时 Popup。
+- 网页悬浮球在用户主动朗读后出现：40px 可见圆形位于 44×44px 透明命中区内，贴边时默认只露出一半；悬停或键盘聚焦后完整滑出，播放与定位位于上方，展开按钮位于下方，8px 透明连接区保证鼠标可稳定移入快捷按钮；点击后展开紧凑的上一句、暂停/继续、下一句和回到正文控件。
+- 悬浮球支持拖动吸附和位置记忆；全局“显示网页悬浮球”开关负责显示或隐藏。
 - 完整状态的长台词会与正文当前词同步滑动，不使用脱离朗读进度的循环跑马灯。
 - 正文保留当前句、作者、音色、进度、逐词高亮和滚动跟随提示。
 - 网页点读默认关闭，并跳过链接、按钮、输入框、媒体和代码等交互内容。
@@ -22,16 +23,16 @@
 
 ## Provider 与模型
 
-当前内置 Provider V3：
+当前内置 Provider V4：
 
 ```text
 browser-system       默认，使用 chrome.tts，无需配置
 browser-model        固定 revision 的 VITS / Kokoro，本地推理
-local-qwen           127.0.0.1:7811，需要配对令牌
+local-service        仅本机回环地址；Qwen / GPT-SoVITS / CosyVoice / OpenAI 本地适配器
 openai-compatible    用户配置的 HTTPS /v1/audio/speech
 ```
 
-Provider V3 按能力声明 `health`、`voices`、`synthesize`、`play`、`pause`、`resume`、`cancel` 与 `modelManagement`，Provider 只实现适用能力。音色 ID 使用 `providerId:voiceId` 命名空间。
+Provider V4 按能力声明音色、合成、传输分块、真正增量生成、取消、状态、克隆、模型管理和边界事件，Provider 只实现适用能力。所有调用返回稳定身份和结构化错误；音色 ID 使用 `providerId:voiceId` 命名空间。
 
 ## 快速加载
 
@@ -57,7 +58,7 @@ Provider V3 按能力声明 `health`、`voices`、`synthesize`、`play`、`pause
 2. 如需本地 Qwen，再启动网关、复制托盘配对令牌并在“朗读引擎”中粘贴。
 3. 点击 Edge 工具栏中的扩展图标。
 4. 等待正文识别完成，然后点击“开始朗读”。
-5. Popup 关闭后朗读仍会继续；开启“网页悬浮窗”时，可在网页右下角继续控制播放。
+5. Popup 关闭后朗读仍会继续；开启“显示网页悬浮球”时，可在网页边缘继续控制播放。
 
 快捷键 `Alt+O` 用于播放或暂停当前页面。
 
@@ -89,10 +90,12 @@ npm test
 
 浏览器测试页面位于 `tests/browser/`。Popup 的并排状态预览位于 `popup-lab.html`，它复用生产渲染代码，不是静态图片原型。
 
+WXT + React Aria 的迁移前端与 Storybook 快速预览位于仓库根目录 `extension-wxt/`。它与当前稳定扩展并行，避免在迁移完成前再次破坏播放、暂停和正文定位链路。
+
 ## 主要目录
 
 - `background.js`：Popup/标签页消息路由、offscreen 生命周期和来源标签页清理。
-- `content/reader.js`：正文识别、播放队列、网页悬浮播放器和高亮。
+- `content/reader.js`：正文识别、播放队列、网页悬浮球和高亮。
 - `popup.*`、`popup-view.js`：工具栏 Popup 与本页配音界面。
 - `voice-studio.*`、`settings-center.js`：设置中心、录音、音频导入和音色库。
 - `offscreen.js`：音频合成和播放。

@@ -5,8 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Flowloud / 流声设置</title>
   <link rel="stylesheet" href="design-system.css">
-  <link rel="stylesheet" href="voice-studio.css?v=0.4.5-final">
-  <link rel="stylesheet" href="settings-paper.css">
+  <link rel="stylesheet" href="voice-studio.css?v=0.9.4">
 </head>
 <body>
   <header class="app-bar">
@@ -56,7 +55,7 @@
         <label class="settings-field settings-field-stack"><span><strong>当前引擎</strong><small>切换后会恢复该引擎上次使用的音色。</small></span>
           <select name="activeProviderId">
             <option value="browser-system">浏览器系统语音（默认）</option><option value="browser-model">浏览器下载模型</option>
-            <option value="local-qwen">本地 Qwen</option><option value="openai-compatible">OpenAI 兼容在线 TTS</option>
+            <option value="local-service">本地服务</option><option value="openai-compatible">OpenAI 兼容在线 TTS</option><option value="doubao-tts">豆包原生 TTS（请在设置中心配置）</option>
           </select>
         </label>
         <label class="settings-field settings-field-stack"><span><strong>统一速度</strong><small>支持 0.75×–2.0×；必要时自动使用完整音频安全变速。</small></span>
@@ -67,20 +66,25 @@
 
       <section class="settings-card" data-provider-panel="browser-model">
         <header class="settings-card-header"><div><p class="settings-eyebrow">BROWSER MODEL</p><h2>浏览器模型</h2></div></header>
-        <p>推荐中文 VITS 与英文 Kokoro。运行库随扩展本地打包，不允许远程 JavaScript、<code>trust_remote_code</code> 或自定义加载代码。</p>
-        <label class="settings-field settings-field-stack"><span><strong>模型</strong></span><select name="browserModelId"><option value="cmn-vits">中文 VITS · BricksDisplay/vits-cmn</option><option value="kokoro-en">英文 Kokoro · onnx-community/Kokoro-82M-v1.0-ONNX</option><option value="custom">实验性：高级自定义仓库</option></select></label>
-        <label class="settings-field settings-field-stack"><span><strong>Hugging Face Repo ID</strong></span><input name="browserRepoId" autocomplete="off"></label>
-        <label class="settings-field settings-field-stack"><span><strong>Revision</strong></span><input name="browserRevision" value="main" autocomplete="off"></label>
+        <p>浏览器端只支持固定 revision 的 Kokoro v1.1 中英模型与预设音色。权重按需缓存，不允许远程 JavaScript、<code>trust_remote_code</code> 或自定义加载代码。</p>
+        <label class="settings-field settings-field-stack"><span><strong>模型</strong></span><select name="browserModelId"><option value="kokoro-zh">Kokoro v1.1 中英</option></select></label>
+        <label class="settings-field settings-field-stack"><span><strong>Hugging Face Repo ID</strong></span><input name="browserRepoId" value="onnx-community/Kokoro-82M-v1.1-zh-ONNX" readonly></label>
+        <label class="settings-field settings-field-stack"><span><strong>Revision</strong></span><input name="browserRevision" value="6cc0f0d2ebe369a68b0df87c2b65c1af8c0ac3e3" readonly></label>
         <label class="settings-field settings-field-stack"><span><strong>执行设备</strong></span><select name="browserDevice"><option value="webgpu">WebGPU 优先，WASM 回退</option><option value="wasm">仅 WASM</option></select></label>
         <div class="action-row"><button id="model-download" class="dark-button" type="button">确认并下载</button><button id="model-cancel" class="text-button" type="button" hidden>取消下载</button><button id="model-delete" class="text-button" type="button">删除缓存</button></div>
         <progress id="model-progress" max="100" value="0" hidden></progress><p id="model-status" role="status" aria-live="polite">尚未下载模型。</p>
       </section>
 
-      <section class="settings-card" data-provider-panel="local-qwen">
-        <header class="settings-card-header"><div><p class="settings-eyebrow">LOCAL QWEN</p><h2>Windows 本地 Qwen</h2></div></header>
-        <p>固定连接 <code>127.0.0.1:7811</code>。首次使用时浏览器会请求本地主机权限。</p>
-        <label class="settings-field settings-field-stack"><span><strong>配对令牌</strong><small>从 Flowloud 本地网关复制；仅保存在受信任的扩展存储中。</small></span><input name="qwenClientToken" type="password" autocomplete="off"></label>
-        <label class="settings-field settings-field-stack"><span><strong>模型</strong></span><select name="qwenModel"><option value="qwen3-tts-0.6b-q4">0.6B Q4（推荐）</option><option value="qwen3-tts-1.7b-q8">1.7B Q8（高质量）</option></select></label>
+      <section class="settings-card" data-provider-panel="local-service">
+        <header class="settings-card-header"><div><p class="settings-eyebrow">LOCAL SERVICE</p><h2>本地语音服务</h2></div></header>
+        <p>仅允许连接本机回环地址。选择适配器后，只显示该服务明确声明的流式、取消和音色能力。</p>
+        <label class="settings-field settings-field-stack"><span><strong>适配器</strong></span><select name="localAdapter"><option value="flowloud-qwen">Flowloud Qwen</option><option value="gpt-sovits">GPT-SoVITS</option><option value="cosyvoice">CosyVoice</option><option value="openai-local">OpenAI 本地兼容</option></select></label>
+        <label class="settings-field settings-field-stack"><span><strong>Base URL</strong><small>支持 localhost、127.0.0.1、::1 的任意端口。</small></span><input name="localBaseUrl" type="url" placeholder="http://127.0.0.1:7811" autocomplete="url"></label>
+        <label class="settings-field settings-field-stack"><span><strong>访问令牌</strong><small>默认仅保留到浏览器会话结束。</small></span><input name="localClientToken" type="password" autocomplete="off"></label>
+        <label class="settings-field"><span><strong>记住令牌</strong><small>只保存在本机扩展存储中；不会进入导出与日志。</small></span><input name="rememberLocalToken" type="checkbox"></label>
+        <label class="settings-field settings-field-stack"><span><strong>模型</strong></span><input name="localModel" value="qwen3-tts-0.6b-q4" autocomplete="off"></label>
+        <div class="action-row"><button id="local-test" class="dark-button" type="button">授权并检查能力</button></div>
+        <p id="local-test-status" role="status" aria-live="polite"></p>
       </section>
 
       <section class="settings-card" data-provider-panel="openai-compatible">
@@ -91,7 +95,9 @@
         <label class="settings-field settings-field-stack"><span><strong>Model</strong></span><input name="onlineModel" autocomplete="off"></label>
         <label class="settings-field settings-field-stack"><span><strong>Voice</strong></span><input name="onlineVoice" value="alloy" autocomplete="off"></label>
         <label class="settings-field"><span><strong>记住密钥</strong><small>密钥会保存在本机扩展存储中；不要在共享设备启用。</small></span><input name="rememberApiKey" type="checkbox"></label>
-        <div class="action-row"><button id="online-test" class="dark-button" type="button">授权并测试连接</button></div>
+        <label class="settings-field settings-field-stack"><span><strong>试听短句</strong><small>点击试听会把这段文字发送给服务，并可能产生少量费用。</small></span><input name="onlinePreviewText" value="你好，这是 Flowloud 语音试听。" maxlength="120" autocomplete="off"></label>
+        <div class="action-row"><button id="online-test" class="dark-button" type="button">授权并试听</button></div>
+        <audio id="online-test-audio" controls hidden></audio>
         <p id="online-test-status" role="status" aria-live="polite"></p>
       </section>
     </form>
@@ -102,7 +108,7 @@
       <div>
         <p class="kicker">READING EXPERIENCE</p>
         <h1>阅读与显示</h1>
-        <p>这里保留正文聚焦、逐词动画和默认音色；网页点读与配音策略可直接在 Popup 中快速调整。</p>
+        <p>这里集中管理正文聚焦、逐词动画和网页交互；Popup 只提供即时的快速调整入口。</p>
       </div>
       <button id="reset-reader-settings" class="text-button" type="button">恢复默认</button>
     </header>
@@ -141,6 +147,29 @@
           <label><span>光晕 <output data-output="wordHighlightGlow">48%</output></span><input type="range" name="wordHighlightGlow" min="0" max="100" step="1"></label>
           <label><span>扫光速度 <output data-output="wordHighlightSpeed">1.0×</output></span><input type="range" name="wordHighlightSpeed" min="0.6" max="1.8" step="0.1"></label>
         </div>
+      </section>
+
+      <section class="settings-card" aria-labelledby="interaction-title">
+        <header class="settings-card-header">
+          <div><p class="settings-eyebrow">WEB INTERACTION</p><h2 id="interaction-title">网页交互</h2></div>
+          <span class="settings-save-status">全局生效</span>
+        </header>
+        <label class="settings-field settings-row">
+          <span><strong>显示网页悬浮球</strong><small>在网页边缘保留小型播放球，可拖动吸附。</small></span>
+          <span class="settings-switch"><input type="checkbox" name="showFloatingPlayer"><span aria-hidden="true"></span></span>
+        </label>
+        <label class="settings-field settings-row">
+          <span><strong>点击正文朗读</strong><small>点击正文句子后从该处开始朗读。</small></span>
+          <span class="settings-switch"><input type="checkbox" name="clickToRead"><span aria-hidden="true"></span></span>
+        </label>
+        <label class="settings-field settings-row">
+          <span><strong>作者配音策略</strong><small>决定楼主与回复作者如何分配音色。</small></span>
+          <select name="preset">
+            <option value="op-exclusive">楼主专属</option>
+            <option value="stable-author">作者固定</option>
+            <option value="round-robin">按楼层轮换</option>
+          </select>
+        </label>
       </section>
 
       <section class="settings-card settings-card-wide" aria-labelledby="voices-title">
@@ -273,7 +302,7 @@
   <script src="shared/audio-import.js?v=0.4.5-final"></script>
   <script src="shared/transcription.js?v=0.4.5-final"></script>
   <script src="shared/voice-library.js?v=0.4.5-final"></script>
-  <script src="settings-center.js?v=0.5.2"></script>
+  <script src="settings-center.js?v=0.9.4"></script>
   <script src="provider-settings.js?v=0.9.0"></script>
   <script src="voice-studio.js?v=0.4.5-final"></script>
 </body>

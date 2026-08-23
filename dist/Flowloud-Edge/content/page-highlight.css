@@ -2,15 +2,15 @@
   color: inherit;
   /* Contract fallback for browsers that do not expose the style class yet;
      every selectable focus style below overrides this with a neutral tone. */
-  background-color: rgba(116, 88, 232, .075);
+  background-color: rgba(37, 99, 235, .075);
   text-shadow: none;
 }
 
 html.qwen-reader-focus-style-soft-glow ::highlight(qwen-reader-current) {
-  background-color: rgba(185, 197, 213, .085);
+  background-color: rgba(219, 234, 254, .30);
   text-shadow:
-    0 0 .32em rgba(231, 237, 245, .48),
-    0 0 .72em rgba(145, 160, 179, .12);
+    0 0 .32em rgba(239, 246, 255, .55),
+    0 0 .72em rgba(37, 99, 235, .10);
 }
 
 html.qwen-reader-focus-style-edge-glow ::highlight(qwen-reader-current) {
@@ -21,23 +21,23 @@ html.qwen-reader-focus-style-edge-glow ::highlight(qwen-reader-current) {
 }
 
 html.qwen-reader-focus-style-paper-wash ::highlight(qwen-reader-current) {
-  background-color: rgba(159, 170, 185, .105);
+  background-color: rgba(219, 234, 254, .46);
   text-shadow: none;
 }
 
 html.qwen-reader-focus-style-underline-guide ::highlight(qwen-reader-current) {
   background-color: transparent;
-  text-decoration: underline rgba(126, 145, 168, .42) .075em;
+  text-decoration: underline rgba(37, 99, 235, .52) .075em;
   text-underline-offset: .18em;
 }
 
 ::highlight(qwen-reader-current-word) {
-  color: color-mix(in srgb, currentColor 72%, #5d4d78 28%);
+  color: #1d4ed8;
   text-shadow: none;
 }
 
 html.qwen-reader-word-style-classic-glow ::highlight(qwen-reader-current-word) {
-  color: var(--qwen-reader-word-accent, #6f58bd);
+  color: var(--qwen-reader-word-accent, #2563eb);
   text-shadow:
     0 0 5px color-mix(in srgb, var(--qwen-reader-word-accent, #6f58bd) 42%, transparent),
     0 0 11px color-mix(in srgb, var(--qwen-reader-word-accent, #6f58bd) 18%, transparent);
@@ -71,11 +71,11 @@ html.qwen-reader-focus-style-edge-glow .qwen-reader-speaking {
 }
 
 html.qwen-reader-focus-style-paper-wash .qwen-reader-speaking {
-  background: rgba(159, 170, 185, .10) !important;
+  background: rgba(219, 234, 254, .42) !important;
 }
 
 html.qwen-reader-focus-style-underline-guide .qwen-reader-speaking {
-  text-decoration: underline rgba(126, 145, 168, .42) .075em !important;
+  text-decoration: underline rgba(37, 99, 235, .52) .075em !important;
   text-underline-offset: .18em;
 }
 

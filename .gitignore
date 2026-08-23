@@ -3,6 +3,11 @@ build/
 *.log
 .superpowers/
 .worktrees/
+.pnpm-store/
+**/node_modules/
+**/.output/
+**/.wxt/
+**/storybook-static/
 
 # Browser automation profiles, crash dumps, caches, and temporary E2E runs.
 .tmp-*/

@@ -38,6 +38,7 @@
       streamIdentity: null,
       controlMessages: [],
       queueStreamControls: false,
+      controlResponseMode: "normal",
       runtimeMessageListener: null,
       scrollCalls: [],
       storageListener: null,
@@ -152,6 +153,9 @@
           }
           if (message.type === "tts:pause" || message.type === "tts:resume") {
             window.__qrHarness.controlMessages.push(message);
+            if (window.__qrHarness.controlResponseMode === "lost") {
+              return Promise.resolve({ok:true, paused:false, resumed:false, queued:false, cancelledQueued:false, count:0});
+            }
             if (window.__qrHarness.queueStreamControls) {
               return Promise.resolve(message.type === "tts:pause"
                 ? {ok:true, paused:false, resumed:false, queued:true, cancelledQueued:false, count:1}
@@ -205,15 +209,19 @@
   <script src="../../content/reader.js?v=0.4.2"></script>
   <script>
     addEventListener("load", async () => {
+      const requestedZoom = Number(new URLSearchParams(location.search).get("zoom") || 1);
+      if ([0.8, 1, 1.5, 2].includes(requestedZoom)) {
+        document.documentElement.style.zoom = String(requestedZoom);
+        document.documentElement.dataset.testZoom = String(requestedZoom);
+      }
       await new Promise(resolve => setTimeout(resolve, 250));
       const result = document.querySelector("#test-result");
       const auditState = new URLSearchParams(location.search).get("audit");
       try {
         {
-        // Popup-first contract. The old sidebar/orb regression suite remains
-        // below temporarily as historical coverage, but is deliberately not
-        // executed: B+C uses the real action Popup and an in-page transport
-        // only while audio is active.
+        // Popup-first contract. The web control is a half-hidden 40px visual
+        // orb inside a 44px active hit area;
+        // the real action Popup remains the primary settings surface.
         const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
         const host = document.querySelector("#qwen-reader-host");
         if (!host) throw new Error("Shadow DOM host missing");
@@ -221,25 +229,25 @@
         if (host.shadowRoot !== null) throw new Error("production Shadow DOM must be closed");
         const root = window.__QWEN_READER_TEST_ROOT__;
         if (!root) throw new Error("test-only Shadow DOM hook missing");
-        if (root.querySelector('[data-action="toggle-panel"], [data-role="floating-orb"], .qr-panel')) {
-          throw new Error("retired sidebar or floating orb was rendered");
-        }
         const miniPlayer = root.querySelector('[data-role="mini-player"]');
         if (!miniPlayer) throw new Error("active-only mini player missing");
-        if (miniPlayer.classList.contains("is-visible") || miniPlayer.getAttribute("aria-hidden") !== "true") {
-          throw new Error("mini player should be hidden before reading starts");
+        if (!miniPlayer.classList.contains("qr-mini-orb") || miniPlayer.dataset.miniUiVersion !== "edge-peek-v5") {
+          throw new Error("floating control is not the compact orb contract");
+        }
+        if (!miniPlayer.classList.contains("is-visible") || miniPlayer.getAttribute("aria-hidden") !== "false" || !miniPlayer.classList.contains("is-minimized")) {
+          throw new Error("mini player should be available as a collapsed orb after the page scan");
         }
         if (window.__qrHarness.extractCalls !== 1) throw new Error("initial page scan should run exactly once");
         if (window.__qrHarness.synthCalls !== 0) throw new Error("initial page scan must not synthesize audio");
         const miniButtons = Array.from(miniPlayer.querySelectorAll(".qr-mini-button"));
-        if (miniButtons.length !== 6) throw new Error("mini player transport is incomplete");
+        if (miniButtons.length !== 7) throw new Error("mini player transport is incomplete");
+        if (miniPlayer.querySelectorAll(".qr-mini-quick-button").length !== 2) throw new Error("edge quick actions should only expose playback and locate controls");
+        if (miniPlayer.querySelector('.qr-mini-quick-actions.is-below')) throw new Error("redundant lower expand action is still present");
         if (miniButtons.some((button) => Math.min(parseFloat(getComputedStyle(button).width), parseFloat(getComputedStyle(button).height)) < 30)) {
           throw new Error("mini player has a target smaller than 30px");
         }
-        const miniShadow = getComputedStyle(miniPlayer).boxShadow;
-        if (!miniShadow || miniShadow === "none" || /0\.2[5-9]|0\.[3-9]/.test(miniShadow)) {
-          throw new Error("mini player shadow is heavier than the compact transport budget");
-        }
+        const miniStyle = getComputedStyle(miniPlayer);
+        if (miniStyle.borderRadius !== "50%") throw new Error("floating orb retained rectangular transport chrome");
         if (typeof window.__qrHarness.runtimeMessageListener !== "function") throw new Error("reader message bridge missing");
         const requestReader = (message) => new Promise((resolve, reject) => {
           let settled = false;
@@ -261,12 +269,24 @@
         const pageKey = initialSnapshot.snapshot.pageKey;
         const initialContext = await requestReader({ type: "reader:page-context:get" });
         if (!initialContext?.ok || initialContext.authorSummary?.length < 2) throw new Error("author-role context was not retained for Popup editing");
+        const scrollCountBeforeExpand = window.__qrHarness.scrollCalls.length;
+        miniPlayer.querySelector('[data-action="expand-mini-player"]').click();
+        await wait(30);
+        if (miniPlayer.classList.contains("is-minimized")) throw new Error("clicking the orb body did not expand immediately");
+        if (window.__qrHarness.synthCalls !== 0) throw new Error("expanding the orb accidentally started playback");
+        if (window.__qrHarness.scrollCalls.length !== scrollCountBeforeExpand) throw new Error("expanding the orb accidentally scrolled the page");
+        miniPlayer.querySelector('[data-role="mini-full-controls"] [data-action="toggle-mini-size"]').click();
+        await wait(30);
+        if (!miniPlayer.classList.contains("is-minimized")) throw new Error("expanded player could not return to its orb state");
         window.__qrHarness.streamMode = true;
         const playResponse = await requestReader({ type: "reader:command", pageKey, command: "play-toggle" });
         if (!playResponse?.ok) throw new Error("Popup command could not start reading");
         await wait(70);
         if (!miniPlayer.classList.contains("is-visible") || miniPlayer.getAttribute("aria-hidden") !== "false") {
           throw new Error("mini player did not appear for active reading");
+        }
+        if (!['left', 'right'].includes(miniPlayer.dataset.edge)) {
+          throw new Error("floating orb did not expose its snapped edge");
         }
         if (!miniPlayer.querySelector('[data-role="mini-status"][role="status"]')) {
           throw new Error("mini player lifecycle status is not exposed to assistive technology");
@@ -279,28 +299,43 @@
         if (!window.__qrHarness.savedMiniPlayerPosition || window.__qrHarness.savedMiniPlayerPosition.y >= 1) {
           throw new Error("mini player drag position was not clamped and persisted");
         }
-        const minimizePlayer = miniPlayer.querySelector('[data-action="toggle-mini-size"]');
-        if (!minimizePlayer) throw new Error("mini player minimize control missing");
-        minimizePlayer.click();
-        await wait(20);
-        if (!miniPlayer.classList.contains("is-minimized")) throw new Error("mini player did not enter minimized mode");
-        if (parseFloat(getComputedStyle(miniPlayer).width) > 128) {
-          throw new Error("minimized player is wider than the compact three-control budget");
-        }
-        if (getComputedStyle(miniPlayer.querySelector('.qr-mini-context')).display !== "none") {
-          throw new Error("minimized player still exposes author or sentence context");
-        }
-        if (miniPlayer.querySelector('.qr-mini-window-controls [data-action="stop"]')) throw new Error("floating player should not expose a close control");
-        if (!miniPlayer.querySelector('.qr-mini-compact-controls [data-action="resume-follow"]')) {
-          throw new Error("minimized player lost the return-to-reading control");
-        }
-        if (auditState !== "minimized") {
-          miniPlayer.querySelector('.qr-mini-window-controls [data-action="toggle-mini-size"]').click();
-          await wait(20);
-          if (miniPlayer.classList.contains("is-minimized")) throw new Error("mini player did not expand again");
-        }
-        if (window.__qrHarness.synthCalls < 1 || !window.__qrHarness.streamIdentity) throw new Error("active reader did not request streaming audio");
-        const marker = root.querySelector('[data-role="reading-marker"]');
+         const minimizedRect = miniPlayer.getBoundingClientRect();
+         // CSS `zoom` is used only by this deterministic fixture to emulate
+         // page scaling, so DOMRects are scaled too. The production contract
+         // remains 44 CSS px; normalize the expected rect for this fixture.
+         const expectedOrbSize = 44 * requestedZoom;
+         if (!miniPlayer.classList.contains("is-minimized") || Math.abs(minimizedRect.width - expectedOrbSize) > 1 || Math.abs(minimizedRect.height - expectedOrbSize) > 1) {
+           throw new Error("floating orb is not the required 44px hit area");
+         }
+         const visibleOrbWidth = Math.min(window.innerWidth, minimizedRect.right) - Math.max(0, minimizedRect.left);
+         if (visibleOrbWidth < 18 * requestedZoom || visibleOrbWidth > 24 * requestedZoom || minimizedRect.top < 0 || minimizedRect.bottom > window.innerHeight) {
+           throw new Error("floating orb is not half hidden at the viewport edge");
+         }
+         if (getComputedStyle(miniPlayer.querySelector('[data-role="mini-full-controls"]')).display !== "none") {
+           throw new Error("collapsed orb still exposes playback controls");
+         }
+         if (miniPlayer.querySelector('.qr-mini-window-controls [data-action="stop"]')) throw new Error("floating orb should not expose a close control");
+         if (window.__qrHarness.synthCalls < 1 || !window.__qrHarness.streamIdentity) throw new Error("active reader did not request streaming audio");
+         if (auditState === "minimized") {
+           result.value = "AUDIT READY · Edge-snapped floating orb";
+           result.style.background = "#dcfce7";
+           document.documentElement.dataset.testStatus = "pass";
+           document.documentElement.dataset.auditReady = "playing";
+           return;
+         }
+         miniPlayer.querySelector('.qr-mini-context').click();
+         await wait(20);
+         if (miniPlayer.classList.contains("is-minimized") || !miniPlayer.querySelector('.qr-mini-copy')) throw new Error("floating orb did not expand into its transport card");
+         const expandedControls = Array.from(miniPlayer.querySelectorAll('[data-role="mini-full-controls"] .qr-mini-button'));
+         // Desktop pointer controls stay compact; the harness already rejects
+         // any target below 30 px, while the collapsed edge orb keeps 44 px.
+         const minimumScaledControl = (30 * requestedZoom) - 1;
+         if (expandedControls.length !== 5 || expandedControls.some((button) => getComputedStyle(button).display === "none" || button.getBoundingClientRect().width < minimumScaledControl)) {
+           throw new Error("expanded transport card does not expose five usable compact controls");
+         }
+         const sideIcon = miniPlayer.querySelector('[data-role="mini-full-controls"] .qr-mini-button:not(.is-primary) .qr-mini-icon');
+         if (!sideIcon || getComputedStyle(sideIcon).opacity === "0") throw new Error("expanded previous/next icons are invisible");
+         const marker = root.querySelector('[data-role="reading-marker"]');
         if (!marker?.classList.contains("is-visible") || !/oprin|邵思萌|楼主/.test(marker.textContent)) {
           throw new Error("in-page author and voice marker disappeared");
         }
@@ -319,24 +354,18 @@
         }
         const wordLayer = root.querySelector('[data-role="word-motion-layer"]');
         if (!wordLayer?.querySelector(".qr-word-motion-cursor")) throw new Error("streaming playback did not retain the word-motion layer");
-        if (auditState === "playing") {
-          result.value = "AUDIT READY · Popup-first active mini player, marker and word motion";
-          result.style.background = "#dcfce7";
-          document.documentElement.dataset.testStatus = "pass";
-          document.documentElement.dataset.auditReady = "playing";
-          return;
-        } else if (auditState === "minimized") {
-          result.value = "AUDIT READY · Three-control compact mini player";
-          result.style.background = "#dcfce7";
-          document.documentElement.dataset.testStatus = "pass";
-          document.documentElement.dataset.auditReady = "playing";
-          return;
-        }
-        const stopResponse = await requestReader({ type: "reader:command", pageKey, command: "stop" });
+         if (auditState === "playing") {
+           result.value = "AUDIT READY · Popup-first floating orb, marker and word motion";
+           result.style.background = "#dcfce7";
+           document.documentElement.dataset.testStatus = "pass";
+           document.documentElement.dataset.auditReady = "playing";
+           return;
+         }
+         const stopResponse = await requestReader({ type: "reader:command", pageKey, command: "stop" });
         if (!stopResponse?.ok) throw new Error("Popup command could not stop reading");
         await wait(30);
-        if (miniPlayer.classList.contains("is-visible") || miniPlayer.getAttribute("aria-hidden") !== "true") {
-          throw new Error("mini player remained after reading stopped");
+        if (!miniPlayer.classList.contains("is-visible") || miniPlayer.getAttribute("aria-hidden") !== "false" || !miniPlayer.classList.contains("is-minimized")) {
+          throw new Error("stopping reading should retain an available collapsed orb");
         }
         if (wordLayer.querySelector(".qr-word-motion-cursor")) throw new Error("stop did not clear the word-motion cursor");
         result.value = "PASS";
@@ -513,15 +542,24 @@
         await new Promise(resolve => setTimeout(resolve, 50));
         const streamIdentity = window.__qrHarness.streamIdentity;
         if (!streamIdentity?.playbackId || !streamIdentity?.requestId || !streamIdentity?.sessionId) throw new Error("stream identity was not captured");
-        window.__qrHarness.runtimeMessageListener(Object.assign({
-          type: "tts:stream:event",
-          event: "started",
-          playedSeconds: 0,
-          durationSeconds: 10,
-          sequence: 1
-        }, streamIdentity));
-        await new Promise(resolve => setTimeout(resolve, 30));
-        const wordMotionLayer = root.querySelector('[data-role="word-motion-layer"]');
+         window.__qrHarness.runtimeMessageListener(Object.assign({
+           type: "tts:stream:event",
+           event: "started",
+           playedSeconds: 0,
+           durationSeconds: 10,
+           sequence: 1
+         }, streamIdentity));
+         await new Promise(resolve => setTimeout(resolve, 30));
+         window.__qrHarness.controlResponseMode = "lost";
+         await requestReader({ type: "reader:command", pageKey, command: "pause" });
+         await new Promise(resolve => setTimeout(resolve, 80));
+         if (root.querySelector('.qr-toast.is-visible')) throw new Error("a transient pause-control race surfaced an impossible pause toast");
+         window.__qrHarness.controlResponseMode = "normal";
+         await new Promise(resolve => setTimeout(resolve, 180));
+         if (!root.querySelector('.qr-mini-player.is-paused')) throw new Error("pause intent was not retried after the offscreen control race");
+         await requestReader({ type: "reader:command", pageKey, command: "resume" });
+         await new Promise(resolve => setTimeout(resolve, 40));
+         const wordMotionLayer = root.querySelector('[data-role="word-motion-layer"]');
         const firstMotionWord = wordMotionLayer?.querySelector('.qr-word-motion-cursor');
         if (!firstMotionWord) throw new Error("stream progress did not create the current-word motion overlay");
         const firstMotionIndex = firstMotionWord.dataset.wordIndex;
@@ -727,6 +765,8 @@
         const clickToRead = root.querySelector('[data-setting="clickToRead"]');
         if (!clickToRead) throw new Error("page click-to-read control missing");
         if (!clickToRead.checked) throw new Error("explicit click-to-read opt-in was not preserved");
+        window.__qrHarness.streamMode = true;
+        window.__qrHarness.streamIdentity = null;
         const synthBeforePageClick = window.__qrHarness.synthCalls;
         const replacementParagraph = firstParagraph.cloneNode(true);
         firstParagraph.replaceWith(replacementParagraph);
@@ -750,12 +790,55 @@
         }));
         await new Promise(resolve => setTimeout(resolve, 50));
         unrelatedSelection.removeAllRanges();
-        const currentAfterPageClick = root.querySelector('.qr-queue-item.is-current');
-        if (!currentAfterPageClick || currentAfterPageClick.dataset.index !== "3") throw new Error("page click did not seek the exact sentence");
-        if (window.__qrHarness.synthCalls <= synthBeforePageClick) throw new Error("page click did not start reading");
-        await requestReader({ type: "reader:command", pageKey, command: "stop" });
-        await new Promise(resolve => setTimeout(resolve, 20));
-        const brContent = document.querySelector('[data-test-br-content]');
+         const currentAfterPageClick = root.querySelector('.qr-queue-item.is-current');
+         if (!currentAfterPageClick || currentAfterPageClick.dataset.index !== "3") throw new Error("page click did not seek the exact sentence");
+         if (window.__qrHarness.synthCalls <= synthBeforePageClick) throw new Error("page click did not start reading");
+         const pointReadIdentity = window.__qrHarness.streamIdentity;
+         if (!pointReadIdentity?.playbackId) throw new Error("page click did not establish a continuous playback identity");
+         window.__qrHarness.runtimeMessageListener(Object.assign({
+           type: "tts:stream:event",
+           event: "ended"
+         }, pointReadIdentity));
+         await new Promise(resolve => setTimeout(resolve, 80));
+         const continuedAfterPageClick = root.querySelector('.qr-queue-item.is-current');
+         if (!continuedAfterPageClick || continuedAfterPageClick.dataset.index !== "4") throw new Error("page click stopped after one sentence instead of continuing");
+         await requestReader({ type: "reader:command", pageKey, command: "stop" });
+         await new Promise(resolve => setTimeout(resolve, 20));
+         window.__qrHarness.streamMode = false;
+         window.__qrHarness.streamIdentity = null;
+         const firstSentenceRange = document.createRange();
+         firstSentenceRange.setStart(textNode, 0);
+         firstSentenceRange.setEnd(textNode, textNode.data.indexOf("。") + 1);
+         const firstSentenceRect = firstSentenceRange.getBoundingClientRect();
+         // Chromium may return a caret in the following text node at a
+         // punctuation/inline boundary. Geometry must win so this still
+         // reads sentence 0 when the browser's caret answer says sentence 1.
+         const originalCaretPositionFromPoint = document.caretPositionFromPoint;
+         const originalCaretRangeFromPoint = document.caretRangeFromPoint;
+         const secondSentenceOffset = textNode.data.indexOf("第二句话") + 1;
+         document.caretPositionFromPoint = () => ({ offsetNode: textNode, offset: secondSentenceOffset });
+         document.caretRangeFromPoint = () => {
+           const wrongCaret = document.createRange();
+           wrongCaret.setStart(textNode, secondSentenceOffset);
+           wrongCaret.collapse(true);
+           return wrongCaret;
+         };
+         firstParagraph.dispatchEvent(new MouseEvent("click", {
+           bubbles: true,
+           composed: true,
+           clientX: firstSentenceRect.left + Math.max(1, firstSentenceRect.width / 2),
+           clientY: firstSentenceRect.top + Math.max(1, firstSentenceRect.height / 2)
+         }));
+         await new Promise(resolve => setTimeout(resolve, 50));
+         if (originalCaretPositionFromPoint) document.caretPositionFromPoint = originalCaretPositionFromPoint;
+         else delete document.caretPositionFromPoint;
+         if (originalCaretRangeFromPoint) document.caretRangeFromPoint = originalCaretRangeFromPoint;
+         else delete document.caretRangeFromPoint;
+         const currentAfterFirstPageClick = root.querySelector('.qr-queue-item.is-current');
+         if (!currentAfterFirstPageClick || currentAfterFirstPageClick.dataset.index !== "0") throw new Error("page click on the first sentence advanced to the next sentence");
+         await requestReader({ type: "reader:command", pageKey, command: "stop" });
+         await new Promise(resolve => setTimeout(resolve, 20));
+         const brContent = document.querySelector('[data-test-br-content]');
         const secondBrText = brContent.childNodes[2];
         const secondBrRange = document.createRange();
         secondBrRange.selectNodeContents(secondBrText);

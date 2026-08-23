@@ -24,6 +24,8 @@ test('reader builds and updates a separate word highlight without moving follow 
   assert.match(source, /qwen-reader-current-word/);
   assert.match(source, /WordTimeline\.applyProgress/);
   assert.match(source, /event === "progress"/);
+  assert.match(source, /event === "boundary"/);
+  assert.match(source, /charIndex:\s*Math\.max\(0,\s*Number\(message\.charIndex\)/);
 
   const wordUpdater = source.match(/function\s+highlightWord\(index\)\s*\{([\s\S]*?)\n\s*\}/);
   assert.ok(wordUpdater);
@@ -131,7 +133,7 @@ test('fixed ink hides the native glyph while its light copy is visible and keeps
 });
 
 test('stop, stream errors, and audio errors share idempotent word-motion cleanup', () => {
-  assert.match(source, /function\s+stopPlayback\(\)[\s\S]*?clearHighlight\(\)/);
+  assert.match(source, /function\s+stopPlayback\(options\)[\s\S]*?clearHighlight\(\)/);
   assert.match(source, /event\s*===\s*"error"[\s\S]*?clearHighlight\(\)/);
   assert.match(source, /audio\.addEventListener\("error"[\s\S]*?clearHighlight\(\)/);
   assert.match(source, /function\s+clearWordMotion\(\)[\s\S]*?layer\.replaceChildren\(\)/);
@@ -157,12 +159,14 @@ test('reader retries a lazy first-sentence DOM mapping instead of caching a broa
   assert.match(source, /if\s*\(!range\)\s*scheduleHighlightRetry\(index\)/);
 });
 
-test('lazy repeated sentences keep a monotonic per-element cursor and never fall back to an earlier copy', () => {
+test('lazy repeated sentences prefer their stable source offsets and never reuse an occupied copy', () => {
   const rangeResolver = source.match(/function\s+getSegmentRange\(index\)\s*\{([\s\S]*?)\n\s*function\s+createDocumentRange/);
   assert.ok(rangeResolver);
-  assert.match(rangeResolver[1], /SentenceRange\.findSegment\(textIndex,[\s\S]*?cursor\)/);
+  assert.match(rangeResolver[1], /const\s+stableSourceStart\s*=\s*Number\(candidate\s*&&\s*candidate\.sourceStart\)/);
+  assert.match(rangeResolver[1], /SentenceRange\.findSegment\(textIndex,[\s\S]*?preferredCursor\)/);
+  assert.match(rangeResolver[1], /currentMatchIsReused/);
+  assert.match(source, /bestDistance\s*=\s*Number\.POSITIVE_INFINITY/);
   assert.match(rangeResolver[1], /if\s*\(!match\)\s*\{[\s\S]*?sentenceMatches\.delete\(candidateIndex\);[\s\S]*?return null/);
-  assert.doesNotMatch(rangeResolver[1], /findSegment\(textIndex,[\s\S]*?,\s*0\)/);
 });
 
 test('a shared multi-sentence element is never used as a whole-element highlight fallback', () => {

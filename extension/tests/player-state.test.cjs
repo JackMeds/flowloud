@@ -217,6 +217,69 @@ test("request cache reuses the prefetched next segment and cancels abandoned ses
   assert.deepEqual(cancelled, ["prefetch-2"]);
 });
 
+test("progressive forum queues retain the visible sentence while earlier floors arrive", () => {
+  const visible = [
+    { id: "floor-500:a", sourceIdentity: "post-500|0", floor: 500, sourceStart: 0, text: "当前楼层第一句" },
+    { id: "floor-500:b", sourceIdentity: "post-500|1", floor: 500, sourceStart: 8, text: "当前楼层第二句" },
+  ];
+  const earlier = [
+    { id: "floor-1", sourceIdentity: "post-1|0", floor: 1, sourceStart: 0, text: "第一楼" },
+  ];
+
+  const merged = Player.mergeProgressiveSegments(visible, earlier);
+
+  assert.deepEqual(merged.map((segment) => segment.floor), [1, 500, 500]);
+  assert.equal(Player.findSegmentByIdentity(merged, "post-500|0"), 1);
+  assert.equal(Player.findSegmentByIdentity(merged, "post-500|1"), 2);
+});
+
+test("progressive queue merging replaces duplicate live-DOM segments with canonical API data", () => {
+  const live = [{ id: "live", sourceIdentity: "same", floor: 165, text: "正文", authorName: "DOM" }];
+  const canonical = [{ id: "api", sourceIdentity: "same", floor: 165, text: "正文", authorName: "API" }];
+
+  const merged = Player.mergeProgressiveSegments(live, canonical);
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].authorName, "API");
+});
+
+test("progressive queue does not replay a clicked first sentence when its canonical copy arrives", () => {
+  const live = [
+    { id: "live:first", sourceIdentity: "topic|post-165|0|0|6", floor: 165, sourceStart: 0, text: "第一句话。", authorName: "DOM" },
+    { id: "live:second", sourceIdentity: "topic|post-165|0|6|12", floor: 165, sourceStart: 6, text: "第二句话。", authorName: "DOM" },
+  ];
+  const canonical = [
+    { id: "api:first", sourceIdentity: "topic|post-165|0|0|6", floor: 165, sourceStart: 0, text: "第一句话。", authorName: "API" },
+    { id: "api:second", sourceIdentity: "topic|post-165|0|6|12", floor: 165, sourceStart: 6, text: "第二句话。", authorName: "API" },
+  ];
+
+  const merged = Player.mergeProgressiveSegments(live, canonical);
+  const firstIndex = Player.findSegmentByIdentity(merged, live[0].sourceIdentity);
+
+  assert.deepEqual(merged.map((segment) => segment.text), ["第一句话。", "第二句话。"]) ;
+  assert.equal(merged[firstIndex].authorName, "API");
+  assert.equal(merged[firstIndex + 1].text, "第二句话。");
+});
+
+test("only incomplete forum documents keep the auto-play intent at a temporary queue tail", () => {
+  assert.equal(Player.shouldWaitForProgressiveQueue({ kind: "forum", complete: false }), true);
+  assert.equal(Player.shouldWaitForProgressiveQueue({ kind: "forum", complete: true }), false);
+  assert.equal(Player.shouldWaitForProgressiveQueue({ kind: "article", complete: false }), false);
+  assert.equal(Player.shouldWaitForProgressiveQueue(null), false);
+});
+
+test("request cache can forget local prefetch state without recursively cancelling a revoked global session", async () => {
+  const cancelled = [];
+  const cache = Player.createRequestCache(async (sessionId) => cancelled.push(sessionId));
+  cache.prefetch(3, "revoked-prefetch", async () => "late-audio");
+
+  cache.clearAll();
+  await cache.cancelAll();
+
+  assert.deepEqual(cancelled, []);
+  assert.equal(cache.take(3), null);
+});
+
 test("a prefetched entry taken by a superseded seek can still be cancelled", async () => {
   const cancelled = [];
   const cache = Player.createRequestCache(async (sessionId) => {

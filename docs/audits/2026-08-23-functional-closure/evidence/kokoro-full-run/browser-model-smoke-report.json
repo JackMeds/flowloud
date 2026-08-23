@@ -1,0 +1,82 @@
+{
+  "generatedAt": "2026-08-23T00:00:47.624Z",
+  "browser": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+  "modelId": "kokoro-en",
+  "repoId": "onnx-community/Kokoro-82M-v1.0-ONNX",
+  "revision": "1939ad2a8e416c0acfeecc08a694d14ef25f2231",
+  "mode": "full",
+  "dtype": "q8",
+  "cancellation": null,
+  "download": {
+    "response": {
+      "ok": true,
+      "requestId": "model-full-smoke-1787443248325",
+      "result": {
+        "downloaded": true,
+        "ready": true,
+        "state": "ready",
+        "cacheId": "flowloud-model-onnx-community/Kokoro-82M-v1.0-ONNX@1939ad2a8e416c0acfeecc08a694d14ef25f2231",
+        "cacheKey": "flowloud-model-onnx-community/Kokoro-82M-v1.0-ONNX@1939ad2a8e416c0acfeecc08a694d14ef25f2231",
+        "modelId": "kokoro-en",
+        "repoId": "onnx-community/Kokoro-82M-v1.0-ONNX",
+        "revision": "1939ad2a8e416c0acfeecc08a694d14ef25f2231",
+        "license": "Apache-2.0",
+        "estimatedBytes": 1664299827.2,
+        "device": "wasm",
+        "verifiedAt": "2026-08-23T00:01:07.363Z",
+        "downloadedAt": "2026-08-23T00:01:07.364Z",
+        "runtimeVersion": "transformers-js-bundled"
+      }
+    },
+    "progressEvents": 1610
+  },
+  "offlineVerify": {
+    "ok": true,
+    "requestId": "model-offline-verify-1787443269400",
+    "result": {
+      "ready": true,
+      "cached": true,
+      "state": "ready",
+      "cacheId": "flowloud-model-onnx-community/Kokoro-82M-v1.0-ONNX@1939ad2a8e416c0acfeecc08a694d14ef25f2231",
+      "verifiedAt": "2026-08-23T00:01:12.723Z",
+      "device": "wasm"
+    }
+  },
+  "offlineSynthesis": {
+    "ok": true,
+    "mimeType": "audio/wav",
+    "audioBytes": 139245,
+    "error": null
+  },
+  "deletion": {
+    "deleted": {
+      "ok": true,
+      "requestId": "model-delete-1787443277731",
+      "result": {
+        "deleted": true,
+        "cacheId": "flowloud-model-onnx-community/Kokoro-82M-v1.0-ONNX@1939ad2a8e416c0acfeecc08a694d14ef25f2231",
+        "state": "missing"
+      }
+    },
+    "info": {
+      "ok": true,
+      "requestId": "model-info-1787443277749",
+      "result": {
+        "cacheId": "flowloud-model-onnx-community/Kokoro-82M-v1.0-ONNX@1939ad2a8e416c0acfeecc08a694d14ef25f2231",
+        "cacheKey": "flowloud-model-onnx-community/Kokoro-82M-v1.0-ONNX@1939ad2a8e416c0acfeecc08a694d14ef25f2231",
+        "modelId": "kokoro-en",
+        "repoId": "onnx-community/Kokoro-82M-v1.0-ONNX",
+        "revision": "1939ad2a8e416c0acfeecc08a694d14ef25f2231",
+        "license": "Apache-2.0",
+        "estimatedBytes": 1664299827.2,
+        "cached": false,
+        "state": "missing",
+        "ready": false,
+        "verifiedAt": "",
+        "runtimeVersion": "transformers-js-bundled",
+        "device": "wasm"
+      }
+    }
+  },
+  "diagnostics": []
+}

@@ -1,6 +1,6 @@
 # Flowloud / 流声
 
-Flowloud / 流声是一款面向 Microsoft Edge 与 Google Chrome 的本地优先网页朗读工具。它会识别论坛帖子、文章、小说章节和普通网页正文，并可使用系统语音、浏览器模型、Windows 本地 Qwen 或用户配置的在线 TTS。
+Flowloud / 流声是一款面向 Microsoft Edge 与 Google Chrome 的本地优先网页朗读、OCR 与翻译工具。它会识别论坛帖子、文章、小说章节、普通网页正文、图片和 PDF，并可使用系统语音、浏览器模型、本地服务或用户配置的云 API。
 
 项目由两部分组成：
 
@@ -15,7 +15,7 @@ Flowloud / 流声是一款面向 Microsoft Edge 与 Google Chrome 的本地优�
 - 使用 Mozilla Readability 与通用正文提取读取新闻、博客、小说和长文章。
 - 为楼主、旁白和回复作者分配不同音色，支持楼主专属、作者固定和按楼层轮换三种策略。
 - 通过扩展按钮的小弹窗完成开始、暂停、上一句、下一句、本页作者配音和常用阅读设置。
-- 朗读开始后可在网页右下角显示悬浮播放器；它会展示加载文本、加载模型、合成、播放、暂停和错误状态，支持拖动吸附、位置记忆、最小化和回到当前朗读位置。是否显示由扩展 Popup 中的“网页悬浮窗”开关控制。
+- 朗读开始后可在网页边缘显示 40px 半隐藏悬浮球；悬停后播放与定位按钮从上方出现，展开按钮位于下方，点击悬浮球会展开紧凑的上一句、暂停/继续、下一句和回到正文播放器。它支持拖动吸附和位置记忆，是否显示由全局“显示网页悬浮球”开关控制。
 - 长台词会沿用正文逐词时间轴，在当前词离开安全区域时平滑滑动；暂停与减少动态效果设置会同步生效。
 - 在正文中显示当前句、作者、音色、句子进度和逐词高亮；用户手动滚动后不会强行抢回页面位置。
 - 网页点读默认关闭；开启后也会避开链接、按钮、输入框等交互元素，避免破坏网页本来的操作。
@@ -24,6 +24,8 @@ Flowloud / 流声是一款面向 Microsoft Edge 与 Google Chrome 的本地优�
 - 关闭来源标签页时停止该页面的播放和合成任务。
 - 使用 MV3 offscreen 文档承载播放任务，避免扩展弹窗关闭后朗读被中断。
 - 通过页面导览按区域、标题、段落、列表、表格、链接、按钮、表单和图片导航与朗读，不代替用户执行网页操作。
+- 从 Popup 打开文档与翻译工作台，处理当前网页、可见区域截图、粘贴文本、图片和用户选择的 PDF 页面。
+- 数字 PDF 在浏览器本地提取文字；扫描页按所选 OCR Profile 顺序识别；原文/译文按稳定块 ID 双栏编辑、复制、重试和朗读。
 
 当前重点是**正文与帖子朗读及轻量语义导览**。页面导览不点击按钮、不提交或修改表单，也不能替代 NVDA、Windows 讲述人等系统读屏工具。
 
@@ -41,16 +43,23 @@ Flowloud 适合这些场景：
 
 ## 支持什么模型和接入方式
 
-### 四种内置来源
+### 五种 TTS 来源
 
 - `browser-system`：默认，使用 `chrome.tts`，无需下载或配置。
-- `browser-model`：用户确认后从 Hugging Face 下载固定 revision 的中文 VITS 或英文 Kokoro，在浏览器本地推理。
-- `local-qwen`：连接 `http://127.0.0.1:7811`，需要托盘网关配对令牌；模型权重不纳入 Git。
+- `browser-model`：用户确认后从 Hugging Face 下载固定 revision 的 Kokoro v1.1 中英权重和预设音色，在浏览器本地推理。
+- `local-service`：只连接本机回环地址；首批原生适配 Flowloud Qwen、GPT-SoVITS、CosyVoice，并支持 OpenAI 本地兼容协议。
 - `openai-compatible`：用户配置 HTTPS Base URL、model、voice 和 API Key，调用 `/v1/audio/speech`。
+- `doubao-tts`：使用豆包语音原生单向流式协议，不伪装成 OpenAI 接口。
 
-Provider V3 按能力声明 `health`、`voices`、`synthesize`、`play`、`pause`、`resume`、`cancel` 和 `modelManagement`。全局只激活一个 Provider，音色使用 `providerId:voiceId` 命名空间并分别记忆。
+Provider V4 按能力声明音色、合成、传输分块、真正增量生成、取消、状态、克隆、模型管理和边界事件。所有结果携带 `providerId`、`requestId` 与结构化错误；全局播放协调器同时只允许一个可听会话，音色使用 `providerId:voiceId` 命名空间并分别记忆。
 
 音色录制和音频导入属于“为 TTS 后端准备参考音色”的流程，不代表扩展已经兼容所有语音克隆模型。
+
+### OCR 与翻译 API
+
+Document/Language Provider V1 支持 OpenAI Chat Completions、OpenAI Responses、Ollama `/api/chat` 和 Flowloud 本地文档协议。设置中心提供 OpenAI、火山方舟、阿里百炼、智谱、DeepSeek、OpenRouter、Ollama 与 Flowloud 预设；OCR 和翻译可选择不同 Profile。API Key 默认只存在当前浏览器会话，远程服务必须使用 HTTPS。
+
+Qwen 0.6B、1.7B 和更大模型通过 Ollama、vLLM/兼容服务或 Flowloud 本地网关运行，不放进浏览器扩展。网关的模型文件、模型 ID、量化和参考音频均可配置。
 
 ## 快速使用
 
@@ -84,7 +93,7 @@ Provider V3 按能力声明 `health`、`voices`、`synthesize`、`play`、`pause
 2. 点击浏览器工具栏中的 Flowloud / 流声图标。
 3. 等待弹窗显示已识别的段落数量。
 4. 点击“开始朗读”。
-5. 弹窗关闭后朗读会继续；如已开启“网页悬浮窗”，网页右下角会继续显示播放状态和控制按钮。
+5. 弹窗关闭后朗读会继续；如已开启“显示网页悬浮球”，网页边缘会继续显示小球播放入口。
 
 也可以使用 `Alt+O` 播放或暂停当前页面。
 
@@ -99,8 +108,9 @@ Provider V3 按能力声明 `health`、`voices`、`synthesize`、`play`、`pause
 
 ## 界面说明
 
-- **工具栏 Popup**：开始/暂停、上一句/下一句、网页点读、作者配音策略、本页作者音色和设置入口。
-- **网页悬浮播放器**：由 Popup 中的“网页悬浮窗”开关决定是否显示；支持完整和最小化两种状态，可拖动到页面两侧并记住位置。
+- **工具栏 Popup**：开始/暂停、上一句/下一句、朗读速度、语音来源和全局网页交互快捷开关；Popup 只承载即时控制。
+- **本页配音编辑器**：从 Popup 打开独立页面，调整当前网页的作者音色，不把长作者列表塞进瞬时小窗。
+- **网页悬浮球**：由全局“显示网页悬浮球”开关决定是否显示；支持拖动到页面两侧、贴边收缩并记住位置。
 - **正文提示**：当前句标记、作者与音色提示、逐词动画和“回到朗读位置”。
 - **设置中心**：阅读聚焦、主题、逐词样式、全局配音和音色管理。
 
@@ -108,7 +118,7 @@ Provider V3 按能力声明 `health`、`voices`、`synthesize`、`play`、`pause
 
 - 所有扩展控制使用键盘可聚焦的原生按钮、选择框和输入框。
 - 播放、暂停、加载和错误状态提供可被辅助技术识别的状态文本。
-- Popup 的轮询更新不会持续重置当前键盘焦点。
+- Popup 的轮询更新不会重建滚动容器，也不会持续重置当前键盘焦点。
 - 支持 `prefers-reduced-motion` 与 Windows 强制颜色模式。
 - 网页点读默认关闭，且不会拦截链接、按钮、表单、媒体和代码块的原始点击行为。
 - 正文高亮和滚动跟随不会主动抢占网页键盘焦点。
@@ -118,7 +128,8 @@ Provider V3 按能力声明 `health`、`voices`、`synthesize`、`play`、`pause
 - 主要验证环境：Windows、Microsoft Edge、Manifest V3。
 - Chromium 系浏览器理论上可使用相同扩展 API，但当前交付和说明以 Edge 为准。
 - 支持普通 `http://` 和 `https://` 页面；浏览器内部页面、扩展商店和受限制页面无法注入内容脚本。
-- 当前只内置本地 Qwen Provider，不包含模型权重。
+- 浏览器只支持固定 revision 的 Kokoro v1.1 中英模型；它使用预设音色，不提供声音克隆。
+- 图片和扫描 PDF 需要用户配置支持视觉的本地服务或云 API；扩展不内置 OCR 权重。
 - XenForo 目前只保证当前已经加载的楼层。
 - 后端的“流式”可能是先完成整段 WAV，再通过 HTTP 分块传输，并不等于模型逐帧生成。
 - 音频上传转写使用浏览器可用的语音识别能力；支持情况取决于 Edge、系统权限和语言环境。
@@ -143,6 +154,26 @@ npm test
 cd ..
 .\package-extension.ps1
 ```
+
+### 前端快速预览（无需反复打包或手动重载页面）
+
+新前端位于 `extension-wxt/`，使用 WXT、React Aria Components 和 Storybook。Node.js 需要 22 或更高版本。
+
+```powershell
+cd extension-wxt
+pnpm install
+pnpm storybook
+```
+
+Storybook 默认打开 `http://127.0.0.1:6006`，可以独立预览 Popup、40px 半隐藏悬浮球、设置中心、本页配音、页面导览和音色工作室，并在保存文件后热更新。
+
+需要验证扩展 Popup 与浏览器 API 桥接时运行：
+
+```powershell
+pnpm dev
+```
+
+然后只需在浏览器扩展管理页加载一次 `extension-wxt/.output/chrome-mv3-dev`；WXT 会持续构建并热更新前端。详细迁移边界与发布闸门见 `docs/frontend-migration.md`。
 
 ## 流式 TTS 协议
 
@@ -174,6 +205,7 @@ Content-Type: application/json
 
 - `src/`：Windows 托盘网关、HTTP/TCP 网关和模型进程生命周期管理。
 - `extension/`：Edge 扩展源码、共享阅读逻辑、Provider、音色和测试。
+- `extension-wxt/`：WXT + React Aria 新前端、Storybook 状态矩阵和热更新开发环境。
 - `dist/Flowloud-Edge/`：可直接在正常 Edge 中加载的扩展目录。
 - `tests/`：网关和端口冲突测试。
 - `docs/`：设计文档和可复现测试页面。

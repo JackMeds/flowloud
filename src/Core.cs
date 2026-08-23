@@ -16,6 +16,8 @@ namespace QwenTrayGateway
         public string ModelPath { get; set; }
         public string CodecPath { get; set; }
         public string ModelAlias { get; set; }
+        public string ModelId { get; set; }
+        public string Quantization { get; set; }
         public string Language { get; set; }
         public int IdleMinutes { get; set; }
         public bool AutoUnload { get; set; }
@@ -40,10 +42,12 @@ namespace QwenTrayGateway
             config.GatewayHost = "127.0.0.1";
             config.GatewayPort = 7811;
             config.BackendPort = 7812;
-            config.BackendExecutable = Path.Combine(runtimeDirectory, "bin", "tts-server.exe");
-            config.ModelPath = Path.Combine(runtimeDirectory, "models", "qwen-talker-1.7b-base-Q8_0.gguf");
-            config.CodecPath = Path.Combine(runtimeDirectory, "models", "qwen-tokenizer-12hz-Q8_0.gguf");
-            config.ModelAlias = "qwen3-tts-1.7b-base";
+            config.BackendExecutable = ResolvePath(runtimeDirectory, "FLOWLOUD_TTS_EXECUTABLE", Path.Combine("bin", "tts-server.exe"));
+            config.ModelPath = ResolveModelFile(runtimeDirectory, "FLOWLOUD_TTS_MODEL", "qwen-talker-*.gguf", Path.Combine("models", "model.gguf"));
+            config.CodecPath = ResolveModelFile(runtimeDirectory, "FLOWLOUD_TTS_CODEC", "qwen-tokenizer-*.gguf", Path.Combine("models", "codec.gguf"));
+            config.ModelId = Environment.GetEnvironmentVariable("FLOWLOUD_TTS_MODEL_ID") ?? Path.GetFileNameWithoutExtension(config.ModelPath);
+            config.Quantization = Environment.GetEnvironmentVariable("FLOWLOUD_TTS_QUANTIZATION") ?? GuessQuantization(config.ModelPath);
+            config.ModelAlias = config.ModelId;
             config.Language = "Chinese";
             config.IdleMinutes = 10;
             config.AutoUnload = true;
@@ -52,9 +56,9 @@ namespace QwenTrayGateway
             config.RequestTimeoutSeconds = 120;
             config.MaxStreamBytes = 64 * 1024 * 1024;
             config.StreamChunkBytes = 32 * 1024;
-            config.VoiceReferenceWav = Path.Combine(runtimeDirectory, "voices", "邵思萌", "reference.wav");
-            config.VoiceName = "邵思萌";
-            config.VoiceAlias = "qwen-clone";
+            config.VoiceReferenceWav = ResolveReferenceAudio(runtimeDirectory);
+            config.VoiceName = Environment.GetEnvironmentVariable("FLOWLOUD_TTS_VOICE_NAME") ?? VoiceNameFromPath(config.VoiceReferenceWav);
+            config.VoiceAlias = Environment.GetEnvironmentVariable("FLOWLOUD_TTS_VOICE_ALIAS") ?? config.VoiceName;
             config.ManagementToken = CreateToken();
             config.ClientToken = CreateToken();
             config.LogDirectory = Path.Combine(runtimeDirectory, "logs");
@@ -151,6 +155,67 @@ namespace QwenTrayGateway
             if (config.MaxStreamBytes <= 0) { config.MaxStreamBytes = 64 * 1024 * 1024; }
             if (config.StreamChunkBytes <= 0) { config.StreamChunkBytes = 32 * 1024; }
             if (string.IsNullOrWhiteSpace(config.ClientToken)) { config.ClientToken = CreateToken(); }
+            if (string.IsNullOrWhiteSpace(config.ModelId)) { config.ModelId = config.ModelAlias; }
+            if (string.IsNullOrWhiteSpace(config.ModelAlias)) { config.ModelAlias = config.ModelId; }
+            if (string.IsNullOrWhiteSpace(config.Quantization)) { config.Quantization = GuessQuantization(config.ModelPath); }
+        }
+
+        private static string ResolvePath(string runtimeDirectory, string environmentName, string fallbackRelativePath)
+        {
+            string configured = Environment.GetEnvironmentVariable(environmentName);
+            if (string.IsNullOrWhiteSpace(configured)) { return Path.Combine(runtimeDirectory, fallbackRelativePath); }
+            return Path.IsPathRooted(configured) ? configured : Path.Combine(runtimeDirectory, configured);
+        }
+
+        private static string ResolveModelFile(string runtimeDirectory, string environmentName, string pattern, string fallbackRelativePath)
+        {
+            string configured = Environment.GetEnvironmentVariable(environmentName);
+            if (!string.IsNullOrWhiteSpace(configured))
+            {
+                return Path.IsPathRooted(configured) ? configured : Path.Combine(runtimeDirectory, configured);
+            }
+            string modelDirectory = Path.Combine(runtimeDirectory, "models");
+            if (Directory.Exists(modelDirectory))
+            {
+                string[] matches = Directory.GetFiles(modelDirectory, pattern, SearchOption.TopDirectoryOnly);
+                Array.Sort(matches, StringComparer.OrdinalIgnoreCase);
+                if (matches.Length > 0) { return matches[0]; }
+            }
+            return Path.Combine(runtimeDirectory, fallbackRelativePath);
+        }
+
+        private static string ResolveReferenceAudio(string runtimeDirectory)
+        {
+            string configured = Environment.GetEnvironmentVariable("FLOWLOUD_TTS_REFERENCE_AUDIO");
+            if (!string.IsNullOrWhiteSpace(configured))
+            {
+                return Path.IsPathRooted(configured) ? configured : Path.Combine(runtimeDirectory, configured);
+            }
+            string voiceDirectory = Path.Combine(runtimeDirectory, "voices");
+            if (Directory.Exists(voiceDirectory))
+            {
+                string[] matches = Directory.GetFiles(voiceDirectory, "*.wav", SearchOption.AllDirectories);
+                Array.Sort(matches, StringComparer.OrdinalIgnoreCase);
+                if (matches.Length > 0) { return matches[0]; }
+            }
+            return Path.Combine(runtimeDirectory, "voices", "reference.wav");
+        }
+
+        private static string VoiceNameFromPath(string referenceAudio)
+        {
+            string directory = Path.GetDirectoryName(referenceAudio);
+            string name = string.IsNullOrWhiteSpace(directory) ? string.Empty : Path.GetFileName(directory);
+            return string.IsNullOrWhiteSpace(name) || string.Equals(name, "voices", StringComparison.OrdinalIgnoreCase) ? "default" : name;
+        }
+
+        private static string GuessQuantization(string modelPath)
+        {
+            string name = Path.GetFileNameWithoutExtension(modelPath) ?? string.Empty;
+            string[] parts = name.Split('-');
+            if (parts.Length == 0) { return "auto"; }
+            string candidate = parts[parts.Length - 1];
+            return candidate.StartsWith("Q", StringComparison.OrdinalIgnoreCase) || candidate.StartsWith("F", StringComparison.OrdinalIgnoreCase) || candidate.StartsWith("BF", StringComparison.OrdinalIgnoreCase)
+                ? candidate : "auto";
         }
 
         private static string CreateToken()

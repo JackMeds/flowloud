@@ -198,14 +198,14 @@ test('Discourse adapter fetches missing post ids in a subdirectory and marks lat
     { floor: 3, text: '同意', isOp: false },
     { floor: 4, text: '楼主再次补充', isOp: true }
   ]);
-  assert.equal(requested[0].url, 'https://forum.example/community/t/42.json');
+  assert.equal(requested[0].url, 'https://forum.example/community/t/42/3.json');
   assert.match(requested[1].url, /^https:\/\/forum\.example\/community\/t\/42\/posts\.json\?/u);
   assert.match(requested[1].url, /post_ids%5B%5D=102/u);
   assert.match(requested[1].url, /post_ids%5B%5D=104/u);
   assert.equal(requested[1].init.credentials, 'same-origin');
 });
 
-test('Discourse numeric topic URLs do not mistake the post-number suffix for the topic id', async () => {
+test('Discourse numeric topic URLs prioritize the requested post without mistaking it for the topic id', async () => {
   const { extractDocument } = loadModules();
   const requested = [];
   const initial = readFixture('discourse-topic-initial.json');
@@ -219,7 +219,7 @@ test('Discourse numeric topic URLs do not mistake the post-number suffix for the
     }
   });
 
-  assert.equal(requested[0], 'https://forum.example/community/t/42.json');
+  assert.equal(requested[0], 'https://forum.example/community/t/42/3.json');
 });
 
 test('pageIdentity keeps Discourse and Flarum floor navigation inside the same discussion', () => {
@@ -284,7 +284,7 @@ test('NodeBB adapter follows pagination under a subdirectory and deduplicates po
   assert.equal(requested[1], 'https://forum.example/community/api/topic/44/story?page=2');
 });
 
-test('NodeBB entered on page two still starts from the canonical topic API and fetches every page once', async () => {
+test('NodeBB entered on page two fetches the visible page first and still fetches every page once', async () => {
   const { extractDocument } = loadModules();
   const first = readFixture('nodebb-topic-page-1.json');
   const second = readFixture('nodebb-topic-page-2.json');
@@ -299,8 +299,8 @@ test('NodeBB entered on page two still starts from the canonical topic API and f
   });
 
   assert.deepEqual(requested, [
-    'https://forum.example/community/api/topic/44/story',
-    'https://forum.example/community/api/topic/44/story?page=2'
+    'https://forum.example/community/api/topic/44/story?page=2',
+    'https://forum.example/community/api/topic/44/story?page=1'
   ]);
   assert.deepEqual(result.blocks.map((item) => item.floor), [1, 2, 3]);
   assert.equal(result.complete, true);
@@ -320,6 +320,50 @@ test('Discourse anonymous posts remain distinct while the first readable post is
   assert.equal(segments[0].isOp, true);
   assert.equal(segments[1].isOp, false);
   assert.notEqual(segments[0].authorId, segments[1].authorId);
+});
+
+test('Flarum entered at a high floor exposes live DOM first and starts API pagination at that floor', async () => {
+  const { extractDocument } = loadModules();
+  const document = makeFlarumDocument([
+    { id: '165', floor: 165, author: '当前作者', href: '/u/current', text: '当前楼层可以立刻点读。' }
+  ]);
+  document.location = makeLocation('https://bbs.viva-la-vita.org/d/10627/165');
+  const events = [];
+  const requested = [];
+  const payload = {
+    data: [
+      {
+        type: 'posts', id: '165',
+        attributes: { number: 165, contentHtml: '<p>当前楼层可以立刻点读。</p>' },
+        relationships: { user: { data: { type: 'users', id: 'u165' } } }
+      },
+      {
+        type: 'posts', id: '166',
+        attributes: { number: 166, contentHtml: '<p>下一楼会继续朗读。</p>' },
+        relationships: { user: { data: { type: 'users', id: 'u166' } } }
+      }
+    ],
+    included: [
+      { type: 'users', id: 'u165', attributes: { username: '当前作者' } },
+      { type: 'users', id: 'u166', attributes: { username: '下一位作者' } }
+    ]
+  };
+
+  const result = await extractDocument(document, {
+    onProgress: async (_partial, meta) => events.push(`progress:${meta.phase}`),
+    fetchFn: async (url) => {
+      events.push('fetch');
+      requested.push(String(url));
+      return jsonResponse(payload, String(url));
+    }
+  });
+
+  assert.equal(events[0], 'progress:visible');
+  assert.match(requested[0], /page%5Boffset%5D=164/u);
+  assert.deepEqual(result.blocks.map((block) => block.floor), [165, 166]);
+  assert.equal(result.complete, false);
+  assert.ok(result.warnings.includes('flarum-prioritized-from-floor:165'));
+  assert.ok(result.blocks.every((block) => block.isOp === false));
 });
 
 test('NodeBB reports the first API page before background pagination completes', async () => {

@@ -1262,3 +1262,61 @@ textarea:focus-visible,
     grid-template-columns: 1fr;
   }
 }
+
+/* Unified Flowloud settings surface ---------------------------------------
+ * Keep the settings page in one stylesheet. These values are the canonical
+ * surface rules; the legacy component rules above remain only where the
+ * recording/editor implementation still needs them.
+ */
+body { background: var(--flow-paper); }
+.app-bar { position: fixed; inset: 0 auto 0 0; z-index: 10; width: 238px; border: 0; border-right: 1px solid var(--flow-line); background: #f6f3ed; }
+.app-bar-inner { width: 100%; min-height: 100%; align-items: stretch; flex-direction: column; justify-content: flex-start; gap: 30px; padding: 28px 22px; }
+.brand-logo { filter: none; }
+.app-bar-actions { display: contents; }
+.settings-nav { display: grid; gap: 3px; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.settings-section-select-label { display: none; }
+.settings-nav-button { width: 100%; min-height: 42px; padding: 0 12px; border: 0; border-left: 2px solid transparent; border-radius: 0; color: var(--flow-muted); background: transparent; text-align: left; }
+.settings-nav-button:hover { color: var(--flow-ink); background: #eee9e1; }
+.settings-nav-button.is-active { border-left-color: var(--flow-accent); color: var(--flow-accent); background: transparent; box-shadow: none; font-weight: 700; }
+.app-bar .status { margin-top: auto; white-space: normal; text-align: left; }
+.studio-shell, .settings-shell { width: min(calc(100% - 286px), 980px); margin: 0 auto 0 calc(238px + max(28px, (100vw - 1218px) / 2)); padding: 46px 0 64px; }
+.studio-intro { padding-bottom: 24px; border-bottom: 1px solid var(--flow-line); }
+.studio-intro h1, .settings-intro h1 { color: var(--flow-ink); font-size: clamp(27px, 4vw, 36px); font-weight: 680; }
+.kicker, .settings-eyebrow { color: var(--flow-accent); }
+.settings-card, .studio-workspace { border: 0; border-bottom: 1px solid var(--flow-line); border-radius: 0; background: transparent; box-shadow: none; }
+.settings-card { padding: 24px 0; }
+.settings-grid { gap: 0; }
+.studio-workspace { border-top: 1px solid var(--flow-line); }
+.studio-library { background: #f7f4ee; }
+.primary-button, .dark-button { border-color: var(--flow-accent); border-radius: var(--flow-radius-sm); color: #fff; background: var(--flow-accent); }
+.primary-button:hover:not(:disabled), .dark-button:hover:not(:disabled) { border-color: var(--qr-purple-deep); color: #fff; background: var(--qr-purple-deep); }
+.secondary-button, input, select, textarea { border-radius: var(--flow-radius-sm); }
+.secondary-button { border: 1px solid var(--flow-line); color: var(--flow-ink); background: var(--flow-paper-raised); box-shadow: none; }
+.secondary-button:hover:not(:disabled) { border-color: #bcb5ad; background: #f1ede6; }
+.source-tab.is-active::after { background: var(--flow-accent); }
+.storage-card { display: grid; gap: 16px; }
+.storage-card h2 { margin-bottom: 5px; font-size: 16px; }
+.storage-card p { margin: 0; color: var(--flow-muted); }
+.storage-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.storage-list li { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 48px; padding: 8px 0; border-top: 1px solid var(--flow-line); }
+.storage-list code { overflow-wrap: anywhere; color: var(--flow-muted); }
+.storage-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.danger-button { min-height: 40px; padding: 0 14px; border: 1px solid #cbaeb4; border-radius: var(--flow-radius-sm); color: var(--flow-danger); background: transparent; }
+.settings-field select { border-color: var(--flow-line); color: var(--flow-ink); background: var(--flow-paper-raised); }
+.settings-row { min-height: 62px; border-top-color: var(--flow-line); }
+.settings-switch span { background: #d7d1ca; }
+.settings-switch input:checked + span { background: var(--flow-accent); }
+.theme-option > span, .reply-voice-option > span { border-color: var(--flow-line); background: var(--flow-paper-raised); }
+.theme-option input:checked + span, .reply-voice-option input:checked + span { border-color: color-mix(in srgb, var(--flow-accent) 64%, var(--flow-line)); background: var(--flow-accent-soft); box-shadow: none; }
+
+@media (max-width: 760px) {
+  .app-bar { position: sticky; width: auto; border-right: 0; border-bottom: 1px solid var(--flow-line); }
+  .app-bar-inner { min-height: 0; padding: 14px 16px; gap: 12px; }
+  .settings-nav-button { display: none; }
+  .settings-section-select-label { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; color: var(--flow-muted); font-size: 12px; }
+  .settings-section-select-label select { min-height: 42px; border: 1px solid var(--flow-line); background: var(--flow-paper-raised); }
+  .app-bar .status { display: none; }
+  .studio-shell, .settings-shell { width: min(100% - 28px, 980px); margin: 0 auto; padding-top: 28px; }
+  .studio-workspace { grid-template-columns: 1fr; }
+  .studio-library { border-top: 1px solid var(--flow-line); border-left: 0; }
+}

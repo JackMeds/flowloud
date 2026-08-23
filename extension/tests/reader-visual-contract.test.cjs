@@ -22,23 +22,31 @@ test('reader host stays hidden until its shadow stylesheet is ready', () => {
   assert.match(readerSource, /stylesheet\.addEventListener\(["']error["'][\s\S]*host\.remove\(\)/);
 });
 
-test('popup-first reader has no rendered sidebar or permanent floating launcher', () => {
-  assert.equal(manifest.action.default_popup, 'popup.html');
-  assert.match(readerSource, /class="qr-mini-player"/);
+test('popup-first reader exposes a compact edge-snapping floating orb', () => {
+  assert.equal(manifest.action.default_popup, 'popup-react.html');
+  assert.match(readerSource, /class="qr-mini-player qr-mini-orb"/);
   assert.match(readerSource, /data-role="mini-player"/);
   assert.doesNotMatch(readerSource, /<aside class="qr-panel"/);
-  assert.doesNotMatch(readerSource, /data-role="floating-orb"/);
+  assert.match(readerSource, /class="qr-mini-player qr-mini-orb"/);
+  assert.match(readerSource, /data-mini-ui-version="edge-peek-v5"/);
+  assert.match(readerSource, /class="qr-mini-launcher"[^>]*data-action="expand-mini-player"/);
+  assert.equal((readerSource.match(/class="qr-mini-quick-button/g) || []).length, 2);
+  assert.match(readerSource, /data-role="mini-avatar"[^>]*src=/);
   assert.doesNotMatch(readerSource, /ui:toggle/);
-  assert.match(readerSource, /\["extracting", "loading", "playing", "paused", "ready", "error"\]\.includes\(state\.status\)/);
+  assert.match(readerSource, /const readablePage = state\.status === "extracting" \|\| state\.segments\.length > 0/);
+  assert.match(readerSource, /settings\.showFloatingPlayer !== false && readablePage/);
 });
 
-test('active mini player has touch-safe controls and a restrained shadow', () => {
+test('active floating orb has a small circular hit target and no panel chrome', () => {
   const player = cssRule('.qr-mini-player');
   const control = cssRule('.qr-mini-button');
   const primary = cssRule('.qr-mini-button.is-primary');
   assert.match(player, /position:\s*fixed/);
   assert.match(player, /visibility:\s*hidden/);
-  assert.match(player, /box-shadow:\s*0 8px 22px rgba\(36, 29, 57, \.14\)/);
+  assert.match(readerCss, /Edge-peek v5[\s\S]*?\.qr-mini-player\.qr-mini-orb\.is-minimized\s*\{[\s\S]*?width:\s*44px[\s\S]*?height:\s*44px/);
+  assert.match(readerCss, /\.qr-mini-player\.qr-mini-orb\.is-minimized \.qr-mini-launcher\s*\{[\s\S]*?width:\s*40px[\s\S]*?height:\s*40px/);
+  assert.match(readerCss, /is-minimized\.is-edge-snapped\[data-edge="right"\][\s\S]*?translateX\(calc\(50% \+ 12px\)\)/);
+  assert.match(readerCss, /is-minimized\.is-edge-snapped\[data-edge="left"\][\s\S]*?translateX\(calc\(-50% - 12px\)\)/);
   assert.match(readerCss, /\.qr-mini-player\.is-visible[\s\S]*?pointer-events:\s*auto/);
   assert.match(control, /width:\s*36px/);
   assert.match(control, /height:\s*36px/);
@@ -60,18 +68,42 @@ test('floating player exposes lifecycle status, minimization, and basic accessib
   assert.match(readerSource, /朗读失败/);
   assert.match(readerSource, /miniPlayerMinimized = !miniPlayerMinimized/);
   assert.match(readerSource, /settings\.showFloatingPlayer !== false/);
-  assert.match(readerSource, /data-mini-ui-version="diagonal-size-v2"/);
-  assert.match(readerSource, /data-role="mini-size-icon"/);
-  assert.match(readerSource, /miniPlayerMinimized \? miniSizeIconPaths\.expand : miniSizeIconPaths\.shrink/);
+  assert.match(readerSource, /data-mini-ui-version="edge-peek-v5"/);
+  assert.doesNotMatch(readerSource, /data-role="mini-size-icon"/);
+  assert.equal((readerSource.match(/<button[^>]*data-action="toggle-mini-size"/g) || []).length, 1);
+  assert.match(readerSource, /class="qr-mini-button is-collapse"[^>]*aria-label="收起网页悬浮播放器"/);
+  assert.match(readerSource, /player\.classList\.contains\("is-minimized"\)/);
+  assert.match(readerCss, /\.qr-mini-player\.qr-mini-orb:not\(\.is-minimized\)/);
   assert.doesNotMatch(readerSource, /qr-mini-follow-glyph|>↗</);
   assert.match(readerSource, /player\.inert = !active/);
   assert.match(readerSource, /visualViewport\.addEventListener\("resize", positionFloatingPlayer/);
-  assert.match(readerCss, /\.qr-mini-player\.is-minimized[\s\S]*?\.qr-mini-compact-controls/);
-  assert.match(readerCss, /\.qr-mini-player\.is-minimized\s*\{[\s\S]*?width:\s*auto/);
-  assert.match(readerCss, /\.qr-mini-player\.is-minimized \.qr-mini-context[\s\S]*?display:\s*none/);
+  assert.match(readerCss, /Edge-peek v5[\s\S]*?\.qr-mini-player\.qr-mini-orb\.is-minimized \.qr-mini-launcher[\s\S]*?cursor:\s*grab/);
+  assert.match(readerCss, /\.qr-mini-player\.qr-mini-orb:not\(\.is-minimized\)[\s\S]*?min-height:\s*112px/);
+  assert.match(readerCss, /\[data-state="playing"\] \.qr-mini-signal-wave path[\s\S]*?qr-mini-signal-wave/);
+  assert.match(readerCss, /\[data-state="paused"\] \.qr-mini-launcher[\s\S]*?#d97706/);
+  assert.match(readerSource, /qr-mini-quick-actions is-above[\s\S]*?play-toggle[\s\S]*?resume-follow/);
+  assert.doesNotMatch(readerSource, /qr-mini-quick-actions is-below/);
+  assert.match(readerSource, /maximize:\s*chrome\.runtime\.getURL\("assets\/icons\/maximize-2\.svg"\)/);
+  assert.match(readerSource, /minimize:\s*chrome\.runtime\.getURL\("assets\/icons\/minimize-2\.svg"\)/);
+  assert.doesNotMatch(readerSource, /miniCollapseIconPath|M5 15l7-7 7 7/);
+  assert.ok(manifest.web_accessible_resources[0].resources.includes('assets/icons/maximize-2.svg'));
+  assert.ok(manifest.web_accessible_resources[0].resources.includes('assets/icons/minimize-2.svg'));
+  assert.match(readerCss, /\.qr-mini-quick-actions\.is-above[\s\S]*?bottom:\s*44px[\s\S]*?padding-bottom:\s*8px/);
+  assert.doesNotMatch(readerCss, /\.qr-mini-player\.qr-mini-orb\.is-minimized \.qr-mini-quick-actions\.is-below/);
+  assert.match(readerCss, /\.qr-mini-player\.qr-mini-orb\.is-minimized:hover \.qr-mini-quick-actions[\s\S]*?visibility:\s*visible[\s\S]*?pointer-events:\s*auto/);
+  assert.match(readerCss, /\.qr-mini-player\.qr-mini-orb:not\(\.is-minimized\)[\s\S]*?border:\s*1px solid #dbe4f0[\s\S]*?border-radius:\s*9px/);
+  assert.doesNotMatch(readerCss, /border-radius:\s*9px 3px 3px 9px/);
+  assert.doesNotMatch(readerCss, /border-left:\s*3px solid #2563eb/);
+  assert.match(readerSource, /player\.classList\.contains\("is-minimized"\)[\s\S]*?miniPlayerMinimized = false;[\s\S]*?renderNow\(\);[\s\S]*?return;/);
   assert.doesNotMatch(readerCss, /\.qr-mini-reopen|\.qr-mini-window-button\.is-close/);
   assert.match(readerCss, /\.qr-mini-button\[hidden\][\s\S]*?display:\s*none/);
-  assert.match(readerSource, /button\.hidden = !followNeeded/);
+  assert.match(readerCss, /\.qr-mini-player\.qr-mini-orb\.is-edge-snapped\[data-edge="left"\]/);
+  assert.match(readerCss, /\.qr-mini-player\.qr-mini-orb\.is-edge-snapped\[data-edge="right"\]/);
+  assert.match(readerSource, /button\.hidden = false/);
+  assert.match(readerSource, /data-role="mini-progress-bar"/);
+  assert.match(readerSource, /data-action="retry-system-once"[^>]*>一次性改用系统语音</);
+  assert.match(readerSource, /playIndex\(state\.index, \{ providerId: "browser-system" \}\)/);
+  assert.match(readerCss, /\.qr-mini-provider-fallback/);
   assert.match(readerCss, /@media \(forced-colors: active\)/);
 });
 
@@ -101,7 +133,7 @@ test('mini player supports bounded persistent dragging without stealing clicks',
   const dragStart = readerSource.match(/function beginMiniPlayerDrag\(event\)\s*\{([\s\S]*?)\n\s*\}/);
   assert.ok(dragStart, 'missing mini player drag start handler');
   assert.doesNotMatch(dragStart[1], /setPointerCapture/, 'pointer capture must not steal ordinary button clicks');
-  assert.doesNotMatch(readerSource, /setPointerCapture|releasePointerCapture|Number\.POSITIVE_INFINITY/);
+  assert.doesNotMatch(readerSource, /setPointerCapture|releasePointerCapture/);
   assert.match(readerSource, /window\.addEventListener\("pointermove", moveMiniPlayerDrag/);
   assert.match(readerSource, /window\.addEventListener\("pointerup", endMiniPlayerDrag/);
   assert.match(readerSource, /window\.addEventListener\("pointercancel", cancelMiniPlayerDrag/);
@@ -109,6 +141,8 @@ test('mini player supports bounded persistent dragging without stealing clicks',
   assert.match(readerCss, /\.qr-mini-player[\s\S]*?touch-action:\s*none/);
   assert.match(readerCss, /\.qr-mini-player\.is-dragging/);
   assert.match(readerCss, /\.qr-mini-player\.is-snapping/);
+  assert.match(readerSource, /player\.dataset\.edge = edge/);
+  assert.match(readerSource, /player\.classList\.toggle\("is-edge-snapped", edge !== "none"\)/);
 });
 
 test('mini caption pans from the shared active-word timeline', () => {
@@ -154,7 +188,7 @@ test('active sentence remains a restrained translucent native highlight', () => 
   assert.match(readerSource, /new globalThis\.Highlight\(range\)/);
   const rule = pageHighlightCss.match(/::highlight\(qwen-reader-current\)\s*\{([\s\S]*?)\}/);
   assert.ok(rule, 'Missing page highlight rule');
-  assert.match(rule[1], /background-color:\s*rgba\(116,\s*88,\s*232,\s*\.075\)/);
+  assert.match(rule[1], /background-color:\s*rgba\(37,\s*99,\s*235,\s*\.075\)/);
   assert.doesNotMatch(rule[1], /animation\s*:/);
   assert.equal(manifest.content_scripts, undefined);
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8'), /insertCSS\(\{ target: \{ tabId \}, files: \['content\/page-highlight\.css'\]/);
@@ -164,6 +198,7 @@ test('click-to-read and manual follow behavior remain independent of the popup',
   assert.match(readerSource, /settings\.clickToRead/);
   assert.match(readerSource, /function handlePageClick/);
   assert.match(readerSource, /SentenceRange\.pickSegmentIndexAtPoint/);
+  assert.match(readerSource, /function findUnusedSegmentMatch/);
   assert.match(readerSource, /await seek\(matchingIndex\)/);
   assert.match(readerSource, /Follow\.isScrollIntent/);
   assert.match(readerSource, /followController\.resume\(\)/);

@@ -1,0 +1,44 @@
+{
+  "name": "flowloud-extension-wxt",
+  "private": true,
+  "version": "0.10.0-alpha.1",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:edge": "wxt -b edge",
+    "build": "wxt build",
+    "build:runtime": "node ../scripts/build-transformers-runtime.mjs",
+    "build:edge": "wxt build -b edge",
+    "build:release-ui": "wxt build && node ../scripts/sync-wxt-ui.cjs",
+    "zip": "wxt zip",
+    "typecheck": "tsc --noEmit",
+    "storybook": "storybook dev -p 6006 --no-open",
+    "build-storybook": "storybook build",
+    "postinstall": "wxt prepare"
+  },
+  "dependencies": {
+    "@uzen/kokoro-js": "1.2.4",
+    "lucide-react": "^1.33.0",
+    "pdfjs-dist": "6.2.108",
+    "react": "^19.2.8",
+    "react-aria-components": "^1.20.0",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@storybook/addon-a11y": "^10.5.9",
+    "@storybook/react-vite": "^10.5.10",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@wxt-dev/module-react": "^1.2.2",
+    "esbuild": "^0.28.2",
+    "storybook": "^10.5.10",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2",
+    "wxt": "^0.21.4"
+  },
+  "pnpm": {
+    "ignoredBuiltDependencies": [
+      "onnxruntime-node"
+    ]
+  }
+}

@@ -236,14 +236,15 @@ test('refuses a non-loopback base URL before any network request', () => {
   );
 });
 
-test('refuses a loopback TTS URL on a port other than 7811', () => {
-  assert.throws(
-    () => createApiClient({
-      baseUrl: 'http://127.0.0.1:7812',
-      fetchImpl: async () => new Response(),
-    }),
-    /7811/,
-  );
+test('accepts arbitrary loopback ports while keeping non-loopback hosts forbidden', () => {
+  assert.doesNotThrow(() => createApiClient({
+    baseUrl: 'http://127.0.0.1:7812',
+    fetchImpl: async () => new Response(),
+  }));
+  assert.doesNotThrow(() => createApiClient({
+    baseUrl: 'http://localhost:9880',
+    fetchImpl: async () => new Response(),
+  }));
 });
 
 test('ensureLocalVoices re-registers same-name profiles only when the backend PID changes', async () => {
@@ -329,7 +330,7 @@ test('background returns a Chinese error envelope for a rejected request', async
 
   const result = await router({ type: 'tts:status' });
 
-  assert.deepEqual(result, { ok: false, error: { code: 'network_error', message: '无法连接' } });
+  assert.deepEqual(result, { ok: false, error: { stage: 'provider', code: 'network_error', message: '无法连接', retryable: true } });
 });
 
 test('background opens the voice studio through its message contract', async () => {

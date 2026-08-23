@@ -25,7 +25,7 @@
   const SETTINGS_KEY = Defaults.SETTINGS_KEY || "qwenReaderSettings";
   const MINI_PLAYER_POSITION_KEY = "qwenReaderMiniPlayerPositionV1";
   const DEFAULT_SETTINGS = Defaults.DEFAULT_SETTINGS || {
-    preset: Defaults.voiceMode || "op-exclusive",
+    preset: Defaults.voiceMode || "everyone-one",
     opVoice: Defaults.opVoice || "邵思萌",
     replyVoices:
       Defaults.replyVoices && Defaults.replyVoices.length
@@ -34,9 +34,9 @@
     clickToRead: false,
     showFloatingPlayer: true,
     readingFocus: "sentence",
-    readingFocusStyle: Defaults.readingFocusStyle || "soft-glow",
+    readingFocusStyle: Defaults.readingFocusStyle || "paper-wash",
     wordHighlightStyle: Defaults.wordHighlightStyle || "edge-dissolve",
-    wordHighlightColor: Defaults.wordHighlightColor || "#6f58bd",
+    wordHighlightColor: Defaults.wordHighlightColor || "#2563eb",
     wordHighlightGlow: Defaults.wordHighlightGlow ?? 48,
     wordHighlightSpeed: Defaults.wordHighlightSpeed ?? 1,
     interactionVersion: 3,
@@ -78,22 +78,28 @@
     next: chrome.runtime.getURL("assets/icons/skip-forward.svg"),
     close: chrome.runtime.getURL("assets/icons/x.svg"),
     stop: chrome.runtime.getURL("assets/icons/stop.svg"),
-  });
-  const miniSizeIconPaths = Object.freeze({
-    shrink: "M3 3l6 6M9 5v4H5M21 21l-6-6M15 19v-4h4",
-    expand: "M9 9L3 3M3 7V3h4M15 15l6 6M17 21h4v-4",
+    maximize: chrome.runtime.getURL("assets/icons/maximize-2.svg"),
+    minimize: chrome.runtime.getURL("assets/icons/minimize-2.svg"),
+    mark: chrome.runtime.getURL("assets/flowloud-mark.svg?v=blue4"),
   });
   const shell = document.createElement("div");
   shell.innerHTML = `
-    <section class="qr-mini-player" data-role="mini-player" data-mini-ui-version="diagonal-size-v2" role="region" aria-labelledby="qr-mini-title" aria-describedby="qr-mini-status" aria-hidden="true">
-      <span class="qr-sr-only" id="qr-mini-title">Flowloud / 流声悬浮播放器</span>
-      <div class="qr-mini-window-controls" aria-label="悬浮播放器窗口操作">
-        <button class="qr-mini-window-button is-minimize" type="button" data-action="toggle-mini-size" aria-label="最小化悬浮播放器" aria-pressed="false" title="最小化">
-          <svg class="qr-mini-window-glyph" viewBox="0 0 24 24" aria-hidden="true"><path data-role="mini-size-icon" d="${miniSizeIconPaths.shrink}" /></svg>
-        </button>
+    <section class="qr-mini-player qr-mini-orb" data-role="mini-player" data-mini-ui-version="edge-peek-v5" role="region" aria-labelledby="qr-mini-title" aria-describedby="qr-mini-status" aria-hidden="true">
+      <span class="qr-sr-only" id="qr-mini-title">Flowloud / 流声网页悬浮球</span>
+      <button class="qr-mini-launcher" type="button" data-action="expand-mini-player" aria-label="展开网页悬浮播放器">
+        <span class="qr-mini-signal" aria-hidden="true">
+          <svg class="qr-mini-signal-wave" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10v3"></path><path d="M6 6v11"></path><path d="M10 3v18"></path><path d="M14 8v7"></path><path d="M18 5v13"></path><path d="M22 10v3"></path></svg>
+          <svg class="qr-mini-signal-loader" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+          <img class="qr-mini-signal-pause" src="${iconUrls.pause}" alt="">
+          <svg class="qr-mini-signal-error" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" x2="12" y1="8" y2="12"></line><line x1="12" x2="12.01" y1="16" y2="16"></line></svg>
+        </span>
+      </button>
+      <div class="qr-mini-quick-actions is-above" role="group" aria-label="上方悬浮快捷控制">
+        <button class="qr-mini-quick-button is-primary" type="button" data-action="play-toggle" aria-label="暂停朗读" title="播放 / 暂停"><img class="qr-mini-icon" data-role="mini-quick-play-icon" src="${iconUrls.pause}" alt=""></button>
+        <button class="qr-mini-quick-button" type="button" data-action="resume-follow" aria-label="回到当前朗读位置" title="回到朗读位置"><svg class="qr-mini-follow-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
       </div>
       <div class="qr-mini-context">
-        <span class="qr-mini-avatar" data-role="mini-avatar" aria-hidden="true">Q</span>
+        <img class="qr-mini-avatar" data-role="mini-avatar" src="${iconUrls.mark}" alt="" aria-hidden="true">
         <span class="qr-mini-copy">
           <span class="qr-mini-speaker" data-role="mini-speaker">正在准备朗读</span>
           <span class="qr-mini-meta" data-role="mini-meta">当前网页</span>
@@ -101,11 +107,17 @@
           <span class="qr-mini-text" data-role="mini-text" aria-label="当前朗读台词"><span class="qr-mini-caption-track" data-role="mini-caption-track"></span></span>
         </span>
       </div>
+      <div class="qr-mini-progress-row" aria-label="当前朗读进度">
+        <span class="qr-mini-progress"><span data-role="mini-progress-bar"></span></span>
+        <span class="qr-mini-progress-copy" data-role="mini-progress-copy">0%</span>
+      </div>
+      <button class="qr-mini-provider-fallback" type="button" data-action="retry-system-once" hidden>一次性改用系统语音</button>
       <div class="qr-mini-controls" data-role="mini-full-controls" aria-label="朗读控制">
         <button class="qr-mini-button" type="button" data-action="previous" aria-label="上一句"><img class="qr-mini-icon" src="${iconUrls.previous}" alt=""></button>
         <button class="qr-mini-button is-primary" type="button" data-action="play-toggle" aria-label="暂停朗读"><img class="qr-mini-icon" data-role="mini-play-icon" src="${iconUrls.pause}" alt=""></button>
         <button class="qr-mini-button" type="button" data-action="next" aria-label="下一句"><img class="qr-mini-icon" src="${iconUrls.next}" alt=""></button>
         <button class="qr-mini-button is-follow" type="button" data-action="resume-follow" aria-label="回到当前朗读位置" title="回到朗读位置"><svg class="qr-mini-follow-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
+        <button class="qr-mini-button is-collapse" type="button" data-action="toggle-mini-size" aria-label="收起网页悬浮播放器" title="收起"><img class="qr-mini-icon" src="${iconUrls.minimize}" alt=""></button>
       </div>
       <div class="qr-mini-controls qr-mini-compact-controls" data-role="mini-compact-controls" aria-label="最小化朗读控制">
         <button class="qr-mini-button is-primary" type="button" data-action="play-toggle" aria-label="暂停朗读"><img class="qr-mini-icon" data-role="mini-compact-play-icon" src="${iconUrls.pause}" alt=""></button>
@@ -145,6 +157,8 @@
   let playbackControlPending = "";
   let playbackControlRetryTimer = null;
   let playbackControlRetryAttempt = 0;
+  let playbackControlDeadline = 0;
+  const PLAYBACK_CONTROL_TIMEOUT_MS = 3000;
   let playbackStartPending = false;
   let serviceStatus = { kind: "connecting", label: "正在连接 Provider" };
   let serviceStatusTimer = null;
@@ -163,6 +177,11 @@
   let mutationTimer = null;
   let dynamicScanPending = false;
   let dynamicResumeIndex = null;
+  let pendingProgressiveContinuation = null;
+  let progressiveContinuationTimer = null;
+  const PROGRESSIVE_CONTINUATION_GRACE_MS = 3200;
+  const PROGRESSIVE_CONTINUATION_CHECK_MS = 240;
+  const PROGRESSIVE_CONTINUATION_MAX_RESCANS = 2;
   const requestCache = Player.createRequestCache(cancelSessionById);
   let highlightedElement = null;
   let highlightedRange = null;
@@ -197,7 +216,10 @@
   let stateRevision = 0;
   let playbackRate = 1;
   let miniPlayerEngaged = false;
-  let miniPlayerMinimized = false;
+  // The page affordance starts as a small launcher orb.  Expanding is an
+  // explicit user action and stays open while the current playback session
+  // advances between sentences.
+  let miniPlayerMinimized = true;
   let miniPlayerPosition = null;
   let miniPlayerDrag = null;
   let miniPlayerSuppressClickUntil = 0;
@@ -265,6 +287,25 @@
   function getReaderSnapshot() {
     const current = state.current;
     const authors = getAuthorSummary();
+    const speechMap = current && current.speechSourceMap;
+    const speechText = String(speechMap && speechMap.sourceText != null
+      ? speechMap.sourceText
+      : current && (current.speechText || current.text) || "");
+    const snapshotSpeechText = truncateText(speechText, 260);
+    const words = speechMap && Array.isArray(speechMap.words)
+      ? speechMap.words.slice(0, 180).map((word) => ({
+        text: String(word && word.text || ""),
+        sourceStart: Number(word && word.sourceStart),
+        sourceEnd: Number(word && word.sourceEnd),
+      })).filter((word) => Number.isFinite(word.sourceStart)
+        && Number.isFinite(word.sourceEnd)
+        && word.sourceStart >= 0
+        && word.sourceEnd > word.sourceStart
+        && word.sourceEnd <= snapshotSpeechText.length)
+      : [];
+    const activeWordIndex = wordTimeline && wordTimeline.segmentIndex === state.index
+      ? Number(wordTimeline.activeWordIndex)
+      : -1;
     return {
       pageKey: state.pageKey || getCurrentPageKey(),
       revision: stateRevision,
@@ -282,7 +323,11 @@
         authorName: getDisplayAuthor(current),
         role: getRoleLabel(current),
         voice: String(current.voice || ""),
-        text: truncateText(current.text, 120),
+        text: truncateText(current.text, 260),
+        speechText: snapshotSpeechText,
+        words,
+        wordIndex: Number.isInteger(activeWordIndex) ? activeWordIndex : -1,
+        wordCount: words.length,
       } : null,
       error: state.error || null,
     };
@@ -353,6 +398,16 @@
       case "previous":
       case "prev": await move(-1); break;
       case "next": await move(1); break;
+      case "retry-system-once":
+        await playIndex(state.index, { providerId: "browser-system" });
+        break;
+      case "locate-current":
+      case "resume-follow":
+        followController.resume();
+        lastScrolledLocatorKey = "";
+        highlightCurrent({ forceFollow: true });
+        renderNow();
+        break;
       case "seek": {
         const index = Number(message && message.index != null ? message.index : payload.index);
         if (!Number.isInteger(index)) return { ok: false, error: { code: "invalid_reader_index", message: "朗读位置无效。" }, snapshot: getReaderSnapshot() };
@@ -365,7 +420,7 @@
       case "stop":
       case "close":
         miniPlayerEngaged = false;
-        miniPlayerMinimized = false;
+        miniPlayerMinimized = true;
         await stopPlayback();
         break;
       case "set-speed":
@@ -387,7 +442,21 @@
   async function handleReaderMessage(message) {
     switch (message && message.type) {
       case "reader:snapshot:get": return { ok: true, snapshot: getReaderSnapshot() };
+      case "reader:document:get": {
+        if (!state.document || !Array.isArray(state.document.blocks) || !state.document.blocks.length) {
+          await scanCurrentPage("document-workbench");
+        }
+        return { ok: true, document: state.document || null, snapshot: getReaderSnapshot() };
+      }
       case "reader:command": return runReaderCommand(message);
+      case "reader:playback:revoked": {
+        const requestedPageKey = String(message.pageKey || "");
+        if (requestedPageKey && requestedPageKey !== String(state.pageKey || getCurrentPageKey())) {
+          return { ok: true, ignored: true, snapshot: getReaderSnapshot() };
+        }
+        await stopPlayback({ localOnly: true });
+        return { ok: true, revoked: true, snapshot: getReaderSnapshot() };
+      }
       case "reader:page-context:get": return getPageContext();
       case "reader:page-context:apply": return applyPageContext(message);
       default: return { ok: false, error: { code: "unknown_reader_message", message: "不支持的网页朗读请求。" } };
@@ -412,8 +481,26 @@
         event.stopPropagation();
         return;
       }
-      const button = event.target.closest("button");
-      if (!button) return;
+      const eventTarget = event.target;
+      const button = eventTarget && typeof eventTarget.closest === "function"
+        ? eventTarget.closest("button")
+        : null;
+      const player = eventTarget && typeof eventTarget.closest === "function"
+        ? eventTarget.closest('[data-role="mini-player"]')
+        : null;
+      if (player
+        && player.classList.contains("is-visible")
+        && player.classList.contains("is-minimized")
+        && (!button || button.dataset.action === "expand-mini-player")) {
+        event.preventDefault();
+        event.stopPropagation();
+        miniPlayerMinimized = false;
+        renderNow();
+        return;
+      }
+      if (!button) {
+        return;
+      }
       const action = button.dataset.action;
       if (action === "play-toggle") {
         miniPlayerEngaged = true;
@@ -437,7 +524,7 @@
         await move(-1);
       } else if (action === "stop") {
         miniPlayerEngaged = false;
-        miniPlayerMinimized = false;
+        miniPlayerMinimized = true;
         await stopPlayback();
       } else if (action === "toggle-mini-size") {
         miniPlayerMinimized = !miniPlayerMinimized;
@@ -447,6 +534,8 @@
         lastScrolledLocatorKey = "";
         highlightCurrent({ forceFollow: true });
         renderNow();
+      } else if (action === "retry-system-once") {
+        await playIndex(state.index, { providerId: "browser-system" });
       } else if (button.dataset.index != null) {
         await seek(Number(button.dataset.index));
       }
@@ -599,6 +688,22 @@
     window.addEventListener("pointerup", endMiniPlayerDrag, true);
     window.addEventListener("pointercancel", cancelMiniPlayerDrag, true);
     window.addEventListener("blur", abortMiniPlayerDrag);
+    window.addEventListener("pagehide", () => {
+      const sessionId = activeSession;
+      if (!sessionId) return;
+      try {
+        const result = chrome.runtime.sendMessage({
+          type: "tts:cancel",
+          clientId,
+          playbackId: sessionId,
+          requestId: sessionId,
+          sessionId,
+          pageKey: state.pageKey || getCurrentPageKey(),
+          reason: "source-pagehide",
+        });
+        if (result && typeof result.catch === "function") result.catch(() => {});
+      } catch (_) {}
+    });
     document.addEventListener("pointermove", handlePagePointerMove, { capture: true, passive: true });
     document.addEventListener("pointerleave", clearHoveredSegment, true);
     document.addEventListener("click", handlePageClick, true);
@@ -629,8 +734,9 @@
         return undefined;
       }
       if (!message || ![
-        "reader:snapshot:get", "reader:command",
+        "reader:snapshot:get", "reader:document:get", "reader:command",
         "reader:page-context:get", "reader:page-context:apply",
+        "reader:playback:revoked",
       ].includes(message.type)) return undefined;
       Promise.resolve(handleReaderMessage(message)).then(
         (response) => sendResponse && sendResponse(response),
@@ -748,7 +854,7 @@
   function voiceAssignmentSignature(value) {
     const source = value || {};
     return JSON.stringify({
-      preset: String(source.preset || "op-exclusive"),
+      preset: String(source.preset || "everyone-one"),
       opVoice: String(source.opVoice || ""),
       replyVoices: unique(Array.isArray(source.replyVoices) ? source.replyVoices : []).sort(),
     });
@@ -784,7 +890,7 @@
 
   function normalizeHighlightColor(value) {
     const color = String(value || "").trim();
-    return /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : "#6f58bd";
+    return /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : "#2563eb";
   }
 
   function clampNumber(value, minimum, maximum, fallback) {
@@ -851,6 +957,7 @@
     followController.resume();
     lastScrolledLocatorKey = "";
     hoveredSegmentIndex = matchingIndex;
+    miniPlayerMinimized = true;
     await seek(matchingIndex);
   }
 
@@ -1013,10 +1120,6 @@
       indices = collectIndices();
     }
     if (!indices.length) return -1;
-    if (options && options.strictPoint) {
-      const caretIndex = findSegmentIndexAtCaret(indices, clientX, clientY);
-      if (caretIndex >= 0) return caretIndex;
-    }
     const entries = indices.map((index) => ({
       index,
       rects: getSegmentRects(index),
@@ -1026,6 +1129,16 @@
         maxDistance: options && options.strictPoint ? 0 : 8,
       });
       if (Number.isInteger(picked) && picked >= 0) return picked;
+    }
+    // Prefer the rendered sentence geometry over caretPositionFromPoint.
+    // Chromium can report the caret at the next text node when a click lands
+    // on punctuation, a zero-width inline node, or a forum's line boundary.
+    // Returning that caret first made an exact click on sentence N start N+1.
+    // Caret lookup remains a fallback for virtualized/off-screen ranges whose
+    // client rects are temporarily unavailable.
+    if (options && options.strictPoint) {
+      const caretIndex = findSegmentIndexAtCaret(indices, clientX, clientY);
+      if (caretIndex >= 0) return caretIndex;
     }
     return indices.length === 1 ? indices[0] : -1;
   }
@@ -1216,17 +1329,33 @@
     clearTimeout(playbackControlRetryTimer);
     playbackControlRetryTimer = null;
     playbackControlRetryAttempt = 0;
+    playbackControlDeadline = 0;
   }
 
-  function schedulePlaybackControlRetry() {
+  function failPlaybackControl(desiredPaused, response) {
+    const fallback = desiredPaused ? "后台音频没有确认暂停。" : "后台音频没有确认继续。";
+    const detail = String(response && response.error && response.error.message || fallback);
+    clearPlaybackControlRetry();
+    playbackControlPending = "";
+    desiredPlaybackPaused = state.status === "paused";
+    setServiceStatus(desiredPaused ? "暂停失败" : "继续失败", "control-error");
+    showToast(`${desiredPaused ? "暂停失败" : "继续失败"}：${detail}`);
+    render();
+  }
+
+  function schedulePlaybackControlRetry(response) {
     if (playbackControlRetryTimer || !activeSession) return;
     if (!['loading', 'playing', 'paused'].includes(state.status)) return;
-    if (playbackControlRetryAttempt >= 40) return;
+    const remaining = playbackControlDeadline - Date.now();
+    if (remaining <= 0 || playbackControlRetryAttempt >= 24) {
+      failPlaybackControl(desiredPlaybackPaused, response);
+      return;
+    }
     const attempt = ++playbackControlRetryAttempt;
     playbackControlRetryTimer = setTimeout(() => {
       playbackControlRetryTimer = null;
       void reconcilePlaybackControl();
-    }, Math.min(400, 50 + attempt * 15));
+    }, Math.min(remaining, 280, 50 + attempt * 15));
   }
 
   async function reconcilePlaybackControl() {
@@ -1238,9 +1367,10 @@
     }
     const controlSession = activeSession;
     const desiredPaused = desiredPlaybackPaused;
+    if (!playbackControlDeadline) playbackControlDeadline = Date.now() + PLAYBACK_CONTROL_TIMEOUT_MS;
     const type = desiredPaused ? "tts:pause" : "tts:resume";
     playbackControlPending = desiredPaused ? "pause" : "resume";
-    setServiceStatus(desiredPaused ? "正在暂停" : "正在继续", desiredPaused ? "pausing" : "resuming");
+    setServiceStatus(desiredPaused ? "正在立即停止声音" : "正在继续", desiredPaused ? "pausing" : "resuming");
     render();
     const response = await sendPlaybackControl(type, controlSession);
     if (activeSession !== controlSession || desiredPlaybackPaused !== desiredPaused) {
@@ -1252,7 +1382,7 @@
     if (desiredPaused && response && response.ok && response.paused) {
       clearPlaybackControlRetry();
       state = Player.reduce(state, { type: "PAUSE" });
-      setServiceStatus("已暂停", "paused");
+      setServiceStatus("已暂停 · 位置已保存", "paused");
       render();
       return;
     }
@@ -1271,15 +1401,35 @@
       render();
       return;
     }
+    if (response && response.ok === false && response.error && response.error.retryable === false) {
+      failPlaybackControl(desiredPaused, response);
+      return;
+    }
     if (state.status === "loading") {
       setServiceStatus(desiredPaused ? "暂停已排队" : "正在加载模型", desiredPaused ? "pause-queued" : "synthesizing");
       render();
-      schedulePlaybackControlRetry();
+      schedulePlaybackControlRetry(response);
       return;
     }
-    desiredPlaybackPaused = state.status === "paused";
-    showToast(desiredPaused ? "当前流式音频暂时无法暂停。" : "当前流式音频暂时无法继续。");
-    render();
+    // A live MV3 offscreen document can briefly report count=0 while its
+    // stream job is being handed from the transport to the PCM scheduler.
+    // Keep the user's intent and retry against the same immutable session;
+    // surfacing “无法暂停” here made a recoverable race look like a product
+    // limitation.
+    if (response && response.ok && Number(response.count) === 0 && activeSession === controlSession) {
+      setServiceStatus(desiredPaused ? "正在立即停止声音" : "正在继续", desiredPaused ? "pausing" : "resuming");
+      render();
+      schedulePlaybackControlRetry(response);
+      return;
+    }
+    if ((!response || response.ok !== true) && activeSession === controlSession
+      && ["playing", "paused", "loading"].includes(state.status)) {
+      setServiceStatus(desiredPaused ? "正在立即停止声音" : "正在继续", desiredPaused ? "pausing" : "resuming");
+      render();
+      schedulePlaybackControlRetry(response);
+      return;
+    }
+    failPlaybackControl(desiredPaused, response);
   }
 
   async function togglePlayback() {
@@ -1287,7 +1437,7 @@
       desiredPlaybackPaused = !desiredPlaybackPaused;
       clearPlaybackControlRetry();
       if (desiredPlaybackPaused) {
-        setServiceStatus(activeSession ? "正在暂停" : "暂停已排队", activeSession ? "pausing" : "pause-queued");
+        setServiceStatus(activeSession ? "正在立即停止声音" : "暂停已排队", activeSession ? "pausing" : "pause-queued");
       } else {
         setServiceStatus("正在加载模型", "synthesizing");
       }
@@ -1300,7 +1450,7 @@
         currentAudio.pause();
         desiredPlaybackPaused = true;
         state = Player.reduce(state, { type: "PAUSE" });
-        setServiceStatus("已暂停", "paused");
+        setServiceStatus("已暂停 · 位置已保存", "paused");
         render();
         return;
       } else if (activeSession) {
@@ -1340,7 +1490,11 @@
   }
 
   async function sendPlaybackControl(type, sessionId) {
-    if (!sessionId) return { ok: false, count: 0 };
+    if (!sessionId) return {
+      ok: false,
+      count: 0,
+      error: { code: "missing_playback_session", message: "当前朗读会话不存在。", retryable: false },
+    };
     try {
       return await chrome.runtime.sendMessage({
         type,
@@ -1349,8 +1503,16 @@
         requestId: sessionId,
         sessionId,
       });
-    } catch (_) {
-      return { ok: false, count: 0 };
+    } catch (error) {
+      return {
+        ok: false,
+        count: 0,
+        error: {
+          code: "playback_control_unavailable",
+          message: error && error.message ? error.message : "后台音频运行环境没有响应。",
+          retryable: true,
+        },
+      };
     }
   }
 
@@ -1394,22 +1556,34 @@
       const expanded = buildPlaybackSegments(partialDocument);
       const assigned = assignSegments(expanded);
       if (!assigned.length) return;
+      const currentIdentity = state.current && typeof Player.segmentIdentity === "function"
+        ? Player.segmentIdentity(state.current)
+        : String(state.current && (state.current.sourceIdentity || state.current.id) || "");
+      const shouldMerge = (progressiveReady || preserveDynamicQueue) && state.segments.length > 0;
+      const nextSegments = shouldMerge && typeof Player.mergeProgressiveSegments === "function"
+        ? Player.mergeProgressiveSegments(state.segments, assigned)
+        : assigned;
+      const preservedIndex = currentIdentity && typeof Player.findSegmentByIdentity === "function"
+        ? Player.findSegmentByIdentity(nextSegments, currentIdentity)
+        : -1;
+      if (shouldMerge && preservedIndex !== state.index) void requestCache.cancelAll();
       state = Player.reduce(state, progressiveReady ? {
         type: "QUEUE_UPDATE",
         scanId,
         document: partialDocument,
-        segments: assigned,
-        index: state.index,
+        segments: nextSegments,
+        index: preservedIndex >= 0 ? preservedIndex : state.index,
       } : {
         type: "LOAD_SUCCESS",
         scanId,
         document: partialDocument,
-        segments: assigned,
-        index: resumeIndex,
+        segments: nextSegments,
+        index: preservedIndex >= 0 ? preservedIndex : resumeIndex,
       });
       progressiveReady = true;
       invalidateSourceIndex();
       render();
+      tryResumeProgressiveContinuation();
     };
     state = Player.reduce(state, {
       type: "LOAD_START",
@@ -1454,15 +1628,26 @@
       normalized.pageKey = pageKey;
       const expanded = buildPlaybackSegments(normalized);
       const assigned = assignSegments(expanded);
+      const currentIdentity = state.current && typeof Player.segmentIdentity === "function"
+        ? Player.segmentIdentity(state.current)
+        : String(state.current && (state.current.sourceIdentity || state.current.id) || "");
+      const nextSegments = progressiveReady && typeof Player.mergeProgressiveSegments === "function"
+        ? Player.mergeProgressiveSegments(state.segments, assigned)
+        : assigned;
+      const preservedIndex = currentIdentity && typeof Player.findSegmentByIdentity === "function"
+        ? Player.findSegmentByIdentity(nextSegments, currentIdentity)
+        : -1;
+      if (progressiveReady && preservedIndex !== state.index) void requestCache.cancelAll();
       state = Player.reduce(state, {
         type: progressiveReady ? "QUEUE_UPDATE" : "LOAD_SUCCESS",
         scanId,
         document: normalized,
-        segments: assigned,
-        index: progressiveReady ? state.index : resumeIndex,
+        segments: nextSegments,
+        index: progressiveReady && preservedIndex >= 0 ? preservedIndex : resumeIndex,
       });
       invalidateSourceIndex();
       render();
+      tryResumeProgressiveContinuation();
     } catch (error) {
       if (
         controller.signal.aborted ||
@@ -1480,7 +1665,91 @@
     } finally {
       if (activeScanController === controller) activeScanController = null;
       flushPendingDynamicScan();
+      if (!tryResumeProgressiveContinuation() && pendingProgressiveContinuation) {
+        scheduleProgressiveContinuationCheck(PROGRESSIVE_CONTINUATION_CHECK_MS);
+      }
     }
+  }
+
+  function segmentPlaybackIdentity(segment) {
+    if (typeof Player.segmentIdentity === "function") return Player.segmentIdentity(segment);
+    return String(segment && (segment.sourceIdentity || segment.id) || "");
+  }
+
+  function clearProgressiveContinuation() {
+    pendingProgressiveContinuation = null;
+    clearTimeout(progressiveContinuationTimer);
+    progressiveContinuationTimer = null;
+  }
+
+  function progressiveQueueMayGrow() {
+    if (typeof Player.shouldWaitForProgressiveQueue === "function") {
+      return Player.shouldWaitForProgressiveQueue(state.document);
+    }
+    return Boolean(state.document && state.document.kind === "forum" && state.document.complete === false);
+  }
+
+  function finishProgressiveContinuationWait() {
+    clearProgressiveContinuation();
+    setServiceStatus("已就绪", "ready");
+    render();
+  }
+
+  function scheduleProgressiveContinuationCheck(delayMs) {
+    clearTimeout(progressiveContinuationTimer);
+    if (!pendingProgressiveContinuation) {
+      progressiveContinuationTimer = null;
+      return;
+    }
+    progressiveContinuationTimer = setTimeout(() => {
+      progressiveContinuationTimer = null;
+      const pending = pendingProgressiveContinuation;
+      if (!pending || tryResumeProgressiveContinuation()) return;
+
+      const expired = Date.now() >= pending.deadline;
+      if (expired && !activeScanController && !dynamicScanPending) {
+        finishProgressiveContinuationWait();
+        return;
+      }
+
+      if (
+        !activeScanController &&
+        !dynamicScanPending &&
+        pending.rescans < PROGRESSIVE_CONTINUATION_MAX_RESCANS
+      ) {
+        pending.rescans += 1;
+        dynamicResumeIndex = state.segments.length;
+        dynamicScanPending = true;
+        flushPendingDynamicScan();
+      }
+      scheduleProgressiveContinuationCheck(PROGRESSIVE_CONTINUATION_CHECK_MS);
+    }, Math.max(0, Number(delayMs) || 0));
+  }
+
+  function tryResumeProgressiveContinuation() {
+    const pending = pendingProgressiveContinuation;
+    if (!pending || activeSession || playbackStartPending) return false;
+    if (pending.pageKey !== state.pageKey) {
+      clearProgressiveContinuation();
+      return false;
+    }
+    let finishedIndex = typeof Player.findSegmentByIdentity === "function"
+      ? Player.findSegmentByIdentity(state.segments, pending.identity)
+      : state.segments.findIndex((segment) => segmentPlaybackIdentity(segment) === pending.identity);
+    let nextIndex = finishedIndex >= 0
+      ? findNextSpeakableIndex(state.segments, finishedIndex + 1)
+      : -1;
+    if (nextIndex < 0 && Number.isFinite(pending.floor)) {
+      nextIndex = state.segments.findIndex((segment) => (
+        Number.isFinite(Number(segment && segment.floor)) &&
+        Number(segment.floor) > pending.floor &&
+        /[\p{L}\p{N}]/u.test(String(segment.text || ""))
+      ));
+    }
+    if (nextIndex < 0) return false;
+    clearProgressiveContinuation();
+    void playIndex(nextIndex);
+    return true;
   }
 
   function buildPlaybackSegments(normalized) {
@@ -1494,13 +1763,27 @@
       );
     }
     const expanded = [];
-    normalized.blocks.forEach((segment) => {
+    normalized.blocks.forEach((segment, blockIndex) => {
+      let sourceCursor = 0;
       Text.splitText(segment.text, Defaults.maxChunkChars || 260).forEach(
         (chunk, chunkIndex) => {
+          const sourceText = String(segment.text || "");
+          const locatedStart = sourceText.indexOf(chunk, sourceCursor);
+          const sourceStart = locatedStart >= 0 ? locatedStart : sourceCursor;
+          const sourceEnd = Math.min(sourceText.length, sourceStart + chunk.length);
+          sourceCursor = Math.max(sourceCursor, sourceEnd);
+          const locator = segment.sourceLocator;
+          const locatorIdentity = locator
+            ? [locator.adapter, locator.containerSelector, locator.unitIndex, locator.fingerprint].join(":")
+            : String(segment.sourceKey || segment.sourceSelector || segment.id || `block-${blockIndex}`);
           expanded.push(
             Object.assign({}, segment, {
               id: `${segment.id || "segment"}:${chunkIndex}`,
               text: chunk,
+              sourceText,
+              sourceStart,
+              sourceEnd,
+              sourceIdentity: [normalized.pageKey || getCurrentPageKey(), locatorIdentity, sourceStart, sourceEnd].join("|"),
             }),
           );
         },
@@ -1571,15 +1854,29 @@
     if (wordTimeline) WordTimeline.finish(wordTimeline, { done: true });
     clearWordHighlight();
     wordTimeline = null;
+    const finishedSegment = state.current;
     const nextIndex = findNextSpeakableIndex(state.segments, state.index + 1);
     if (nextIndex >= 0) {
       void playIndex(nextIndex);
       return;
     }
-    if (dynamicScanPending) dynamicResumeIndex = state.segments.length;
+    if (activeScanController || dynamicScanPending || progressiveQueueMayGrow()) {
+      pendingProgressiveContinuation = {
+        pageKey: state.pageKey,
+        identity: segmentPlaybackIdentity(finishedSegment),
+        floor: Number(finishedSegment && finishedSegment.floor),
+        deadline: Date.now() + PROGRESSIVE_CONTINUATION_GRACE_MS,
+        rescans: 0,
+      };
+      if (dynamicScanPending) dynamicResumeIndex = state.segments.length;
+      scheduleProgressiveContinuationCheck(PROGRESSIVE_CONTINUATION_CHECK_MS);
+    }
     activeSession = "";
     state = Player.reduce(state, { type: "STOP" });
-    setServiceStatus("已就绪", "ready");
+    setServiceStatus(
+      pendingProgressiveContinuation ? "正在读取后续内容" : "已就绪",
+      pendingProgressiveContinuation ? "scanning" : "ready",
+    );
     hoveredSegmentIndex = -1;
     render();
     clearHighlight();
@@ -1623,7 +1920,7 @@
       playbackControlPending = "";
       clearPlaybackControlRetry();
       state = Player.reduce(state, { type: "PAUSE" });
-      setServiceStatus("已暂停", "paused");
+      setServiceStatus("已暂停 · 位置已保存", "paused");
       render();
       return;
     }
@@ -1635,6 +1932,18 @@
       state = Player.reduce(state, { type: "RESUME" });
       setServiceStatus("正在朗读", "playing");
       render();
+      return;
+    }
+    if (event === "boundary") {
+      activeStreamRequest = String(message.requestId || activeSession);
+      if (String(message.boundaryType || "") === "word" || message.preciseBoundary === true) {
+        applyWordProgress({
+          charIndex: Math.max(0, Number(message.charIndex) || 0),
+          charLength: Math.max(0, Number(message.charLength) || 0),
+          sequence: Number(message.sequence),
+          paused: message.paused === true,
+        });
+      }
       return;
     }
     if (event === "progress") {
@@ -1666,8 +1975,13 @@
     }
   }
 
-  async function playIndex(index) {
+  async function playIndex(index, options) {
+    const playOptions = options || {};
+    const providerOverride = String(playOptions.providerId || "");
+    clearProgressiveContinuation();
+    const wasInactive = !miniPlayerEngaged || !["extracting", "loading", "playing", "paused", "ready", "error"].includes(state.status);
     miniPlayerEngaged = true;
+    if (wasInactive) miniPlayerMinimized = true;
     index = findNextSpeakableIndex(state.segments, index);
     if (index < 0 || !state.segments[index]) {
       state = Player.reduce(state, { type: "STOP" });
@@ -1692,7 +2006,7 @@
     highlightCurrent({ deferBroadFallback: true });
     await cancelActiveSession();
     if (!playbackGate.isCurrent(playbackId) || state.pageKey !== pageKey) return;
-    prefetched = requestCache.take(requestCacheKey(pageKey, index));
+    prefetched = providerOverride ? null : requestCache.take(requestCacheKey(pageKey, index));
     await requestCache.cancelAll();
     if (!playbackGate.isCurrent(playbackId) || state.pageKey !== pageKey) {
       await requestCache.discard(prefetched);
@@ -1721,9 +2035,30 @@
     if (desiredPlaybackPaused) void reconcilePlaybackControl();
 
     try {
+      const claim = await chrome.runtime.sendMessage({
+        type: "playback:claim",
+        clientId,
+        playbackId: sessionId,
+        requestId: sessionId,
+        sessionId,
+        pageKey,
+        segmentId: segment.id,
+        segmentIndex: index,
+        providerId: providerOverride || undefined,
+        startPaused: desiredPlaybackPaused,
+      });
+      if (!claim || claim.ok === false) {
+        const claimError = new Error(claim && claim.error && claim.error.message || "无法建立全局播放会话。");
+        claimError.code = claim && claim.error && claim.error.code || "playback_claim_failed";
+        throw claimError;
+      }
       const audioResult = await Player.resolveAudioRequest(
         prefetched,
-        () => synthesizeSegment(segment, sessionId, { stream: true, startPaused: desiredPlaybackPaused }),
+        () => synthesizeSegment(segment, sessionId, {
+          stream: true,
+          startPaused: desiredPlaybackPaused,
+          providerId: providerOverride,
+        }),
       );
       if (
         !playbackGate.isCurrent(playbackId) ||
@@ -1748,13 +2083,13 @@
         render();
         if (streamWasPaused !== desiredPlaybackPaused) void reconcilePlaybackControl();
         const nextIndex = findNextSpeakableIndex(state.segments, index + 1);
-        if (nextIndex >= 0) {
+        if (nextIndex >= 0 && !providerOverride && audioResult.directPlayback !== true) {
           const nextSegment = Object.assign({}, state.segments[nextIndex]);
           const nextSession = `${sessionId}-prefetch-${nextIndex}`;
           const pendingPrefetch = requestCache.prefetch(
             requestCacheKey(pageKey, nextIndex),
             nextSession,
-            () => synthesizeSegment(nextSegment, nextSession, { stream: false }),
+            () => synthesizeSegment(nextSegment, nextSession, { stream: false, prefetch: true }),
           );
           pendingPrefetch.catch(() => {});
         }
@@ -1819,13 +2154,13 @@
         setServiceStatus("正在朗读", "playing");
       }
       render();
-      if (nextIndex >= 0) {
+      if (nextIndex >= 0 && !providerOverride) {
         const nextSegment = Object.assign({}, state.segments[nextIndex]);
         const nextSession = `${sessionId}-prefetch-${nextIndex}`;
         const pendingPrefetch = requestCache.prefetch(
           requestCacheKey(pageKey, nextIndex),
           nextSession,
-          () => synthesizeSegment(nextSegment, nextSession, { stream: false }),
+          () => synthesizeSegment(nextSegment, nextSession, { stream: false, prefetch: true }),
         );
         pendingPrefetch.catch(() => {});
       }
@@ -1872,6 +2207,7 @@
     }
     const response = await chrome.runtime.sendMessage({
       type: "tts:synthesize",
+      providerId: synthOptions.providerId || undefined,
       clientId,
       playbackId: sessionId,
       requestId: sessionId,
@@ -1879,12 +2215,11 @@
       segmentIndex,
       segmentId: segment.id,
       stream: synthOptions.stream === true,
+      prefetch: synthOptions.prefetch === true,
       startPaused: synthOptions.startPaused === true,
       request: {
         input: speechText,
-        voice: segment.voice,
-        model: Defaults.model || "qwen3-tts-1.7b-base",
-        response_format: Defaults.responseFormat || "wav",
+        voice: synthOptions.providerId && synthOptions.providerId !== settings.activeProviderId ? "" : segment.voice,
         requestId: sessionId,
         playbackId: sessionId,
         sessionId,
@@ -1922,13 +2257,15 @@
     await playIndex(index);
   }
 
-  function stopPlayback() {
+  function stopPlayback(options) {
+    const stopOptions = options || {};
     const session = activeSession;
     activeSession = "";
     activeStreamRequest = "";
     desiredPlaybackPaused = false;
     playbackControlPending = "";
     playbackStartPending = false;
+    clearProgressiveContinuation();
     clearPlaybackControlRetry();
     cancelHighlightRetry();
     playbackGate.invalidate();
@@ -1950,8 +2287,10 @@
     clearHighlight();
     render();
     flushPendingDynamicScan();
-    const cancellations = [requestCache.cancelAll()];
-    if (session) cancellations.push(cancelSessionById(session));
+    const cancellations = [stopOptions.localOnly === true
+      ? Promise.resolve(requestCache.clearAll())
+      : requestCache.cancelAll()];
+    if (session && stopOptions.localOnly !== true) cancellations.push(cancelSessionById(session));
     return Promise.all(cancellations).catch(() => {});
   }
 
@@ -2050,9 +2389,10 @@
     if (pageKey === lastObservedPageKey) return;
     lastObservedPageKey = pageKey;
     miniPlayerEngaged = false;
-    miniPlayerMinimized = false;
+    miniPlayerMinimized = true;
     dynamicScanPending = false;
     dynamicResumeIndex = null;
+    clearProgressiveContinuation();
     followController.reset();
     lastScrolledLocatorKey = "";
     hoveredSegmentIndex = -1;
@@ -2105,6 +2445,14 @@
         indices.push(index);
         sourceIndicesByKey.set(key, indices);
       });
+      sourceIndicesByKey.forEach((indices) => indices.sort((leftIndex, rightIndex) => {
+        const leftStart = Number(state.segments[leftIndex] && state.segments[leftIndex].sourceStart);
+        const rightStart = Number(state.segments[rightIndex] && state.segments[rightIndex].sourceStart);
+        if (Number.isFinite(leftStart) && Number.isFinite(rightStart) && leftStart !== rightStart) {
+          return leftStart - rightStart;
+        }
+        return leftIndex - rightIndex;
+      }));
     }
 
     if (requestedIndex == null) {
@@ -2180,13 +2528,31 @@
         continue;
       }
       const candidate = state.segments[candidateIndex];
-      const match = SentenceRange.findSegment(textIndex, candidate && candidate.text, cursor);
+      const stableSourceStart = Number(candidate && candidate.sourceStart);
+      const preferredCursor = Number.isFinite(stableSourceStart) && stableSourceStart >= 0
+        ? stableSourceStart
+        : cursor;
+      let match = SentenceRange.findSegment(textIndex, candidate && candidate.text, preferredCursor);
+      const currentMatchIsReused = match && indices.some((otherIndex) => {
+        if (otherIndex === candidateIndex) return false;
+        const existing = sentenceMatches.get(otherIndex);
+        return Boolean(existing)
+          && Number(existing.normalizedStart) === Number(match.normalizedStart)
+          && Number(existing.normalizedEnd) === Number(match.normalizedEnd);
+      });
+      // API-backed forum queues can be in floor order while the live page is
+      // virtualized or rendered in a different order.  A strict monotonic
+      // cursor then resolves the clicked sentence to its neighbour.  Retry
+      // from the start and reserve an unused occurrence before giving up.
+      if (!match || currentMatchIsReused) {
+        match = findUnusedSegmentMatch(textIndex, candidate, indices);
+      }
       if (!match) {
-        // An unresolved earlier chunk makes every later repeated sentence
-        // ambiguous. Never restart at zero: wait for the lazy DOM refresh so
-        // the per-element cursor remains monotonic.
         sentenceMatches.delete(candidateIndex);
-        return null;
+        if (candidateIndex === index) return null;
+        // A virtualized/partially rendered earlier sentence must not block a
+        // later sentence whose DOM range is present and clickable.
+        continue;
       }
       sentenceMatches.set(candidateIndex, match);
       const range = match ? createDocumentRange(match) : null;
@@ -2213,6 +2579,39 @@
     } catch (_) {
       return null;
     }
+  }
+
+  function findUnusedSegmentMatch(textIndex, candidate, indices) {
+    const needle = candidate && candidate.text;
+    if (!needle) return null;
+    let cursor = 0;
+    let bestMatch = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    const sourceStart = Number(candidate && candidate.sourceStart);
+    const hasStableSourceStart = Number.isFinite(sourceStart) && sourceStart >= 0;
+    for (let attempt = 0; attempt < 256; attempt += 1) {
+      const match = SentenceRange.findSegment(textIndex, needle, cursor);
+      if (!match) return bestMatch;
+      const reused = indices.some((candidateIndex) => {
+        const existing = sentenceMatches.get(candidateIndex);
+        return Boolean(existing)
+          && Number(existing.normalizedStart) === Number(match.normalizedStart)
+          && Number(existing.normalizedEnd) === Number(match.normalizedEnd);
+      });
+      if (!reused) {
+        if (!hasStableSourceStart) return match;
+        const distance = Math.abs(Number(match.normalizedStart) - sourceStart);
+        if (distance < bestDistance) {
+          bestMatch = match;
+          bestDistance = distance;
+        }
+        if (distance === 0) return match;
+      }
+      const nextOffset = Number(match.nextOffset);
+      if (!Number.isFinite(nextOffset) || nextOffset <= cursor) return bestMatch;
+      cursor = nextOffset;
+    }
+    return bestMatch;
   }
 
   function getWordRanges(index) {
@@ -3262,7 +3661,7 @@
       return { key: "synthesizing", label: serviceStatus.label || "正在合成当前句", busy: true };
     }
     if (state.status === "playing") return { key: "playing", label: "正在朗读", busy: false };
-    if (state.status === "paused") return { key: "paused", label: "朗读已暂停", busy: false };
+    if (state.status === "paused") return { key: "paused", label: serviceStatus.label || "已暂停 · 位置已保存", busy: false };
     if (state.status === "ready") return { key: "ready", label: "朗读已就绪", busy: false };
     return { key: "idle", label: serviceStatus.label || "准备就绪", busy: false };
   }
@@ -3413,17 +3812,27 @@
     const height = Math.min(player.offsetHeight || 0, bounds.height);
     const horizontalRange = Math.max(0, bounds.width - width);
     const verticalRange = Math.max(0, bounds.height - height);
-    setMiniPlayerCoordinates(
-      player,
-      bounds.left + horizontalRange * position.x,
-      bounds.top + verticalRange * position.y,
-    );
+    const edge = position.x <= 0.001
+      ? "left"
+      : position.x >= 0.999
+        ? "right"
+        : "none";
+    player.dataset.edge = edge;
+    player.classList.toggle("is-edge-snapped", edge !== "none");
+    const targetLeft = bounds.left + horizontalRange * position.x;
+    const targetTop = bounds.top + verticalRange * position.y;
+    player.dataset.verticalEdge = targetTop + height / 2 < bounds.top + bounds.height / 2 ? "top" : "bottom";
+    setMiniPlayerCoordinates(player, targetLeft, targetTop);
   }
 
   function beginMiniPlayerDrag(event) {
     const player = event.currentTarget;
     if (!player || !player.classList.contains("is-visible")) return;
     if (event.pointerType === "mouse" && event.button !== 0) return;
+    const targetButton = event.target && typeof event.target.closest === "function"
+      ? event.target.closest("button")
+      : null;
+    if (targetButton && targetButton.dataset.action !== "expand-mini-player") return;
     const rect = player.getBoundingClientRect();
     miniPlayerDrag = {
       pointerId: event.pointerId,
@@ -3452,6 +3861,8 @@
     if (!drag.dragging) {
       drag.dragging = true;
       player.classList.add("is-dragging");
+      player.classList.remove("is-edge-snapped");
+      player.dataset.edge = "none";
     }
     miniPlayerSuppressClickUntil = performance.now() + 750;
     if (event.cancelable) event.preventDefault();
@@ -3513,7 +3924,8 @@
     const player = shadow.querySelector('[data-role="mini-player"]');
     if (!player) return;
     const current = state.current;
-    const active = settings.showFloatingPlayer !== false && miniPlayerEngaged && ["extracting", "loading", "playing", "paused", "ready", "error"].includes(state.status);
+    const readablePage = state.status === "extracting" || state.segments.length > 0;
+    const active = settings.showFloatingPlayer !== false && readablePage && ["extracting", "loading", "playing", "paused", "ready", "error"].includes(state.status);
     const isPlaying = state.status === "playing" || (state.status === "loading" && !desiredPlaybackPaused);
     const status = miniPlayerStatus();
     const busy = status.busy || Boolean(playbackControlPending);
@@ -3521,15 +3933,20 @@
     const speaker = shadow.querySelector('[data-role="mini-speaker"]');
     const meta = shadow.querySelector('[data-role="mini-meta"]');
     const statusText = shadow.querySelector('[data-role="mini-status"]');
+    const progressBar = shadow.querySelector('[data-role="mini-progress-bar"]');
+    const progressCopy = shadow.querySelector('[data-role="mini-progress-copy"]');
     const playIcon = shadow.querySelector('[data-role="mini-play-icon"]');
     const compactPlayIcon = shadow.querySelector('[data-role="mini-compact-play-icon"]');
-    const miniSizeIcon = shadow.querySelector('[data-role="mini-size-icon"]');
+    const quickPlayIcon = shadow.querySelector('[data-role="mini-quick-play-icon"]');
+    const launcher = shadow.querySelector('[data-action="expand-mini-player"]');
     const playButtons = player.querySelectorAll('[data-action="play-toggle"]');
     const previous = player.querySelector('[data-action="previous"]');
     const next = player.querySelector('[data-action="next"]');
     const followButtons = player.querySelectorAll('[data-action="resume-follow"]');
+    const providerFallback = player.querySelector('[data-action="retry-system-once"]');
     const total = state.segments.length;
     player.classList.toggle("is-visible", active);
+    player.classList.add("is-orb");
     player.classList.toggle("is-loading", status.busy);
     player.classList.toggle("is-paused", state.status === "paused" || desiredPlaybackPaused);
     player.classList.toggle("is-minimized", miniPlayerMinimized);
@@ -3537,13 +3954,14 @@
     player.setAttribute("aria-hidden", String(!active));
     player.setAttribute("aria-busy", String(status.busy));
     player.inert = !active;
-    if (avatar) avatar.textContent = initials(current && current.authorName || "Q");
+    if (avatar) avatar.alt = current ? `${getDisplayAuthor(current)} 的 Flowloud 悬浮球` : "Flowloud 网页悬浮球";
     if (speaker) speaker.textContent = current ? getDisplayAuthor(current) : "正在准备朗读";
     if (meta) {
-      const role = current ? getRoleLabel(current) : "当前网页";
-      const voice = current && current.voice ? ` · ${current.voice}` : "";
-      meta.textContent = `${role}${voice}`;
+      meta.textContent = total ? `第 ${Math.min(state.index + 1, total)} 段 / 共 ${total} 段` : "正在识别正文";
     }
+    const progress = total ? Math.min(100, ((state.index + 1) / total) * 100) : 0;
+    if (progressBar) progressBar.style.width = `${progress}%`;
+    if (progressCopy) progressCopy.textContent = `${Math.round(progress)}%`;
     if (statusText && statusText.textContent !== status.label) statusText.textContent = status.label;
     renderMiniCaption(current, false);
     if (wordTimeline && wordTimeline.segmentIndex === state.index) {
@@ -3551,25 +3969,29 @@
     }
     if (playIcon) playIcon.src = isPlaying ? iconUrls.pause : iconUrls.play;
     if (compactPlayIcon) compactPlayIcon.src = isPlaying ? iconUrls.pause : iconUrls.play;
-    if (miniSizeIcon) miniSizeIcon.setAttribute("d", miniPlayerMinimized ? miniSizeIconPaths.expand : miniSizeIconPaths.shrink);
+    if (quickPlayIcon) quickPlayIcon.src = isPlaying ? iconUrls.pause : iconUrls.play;
+    if (launcher) launcher.setAttribute("aria-label", `${status.label}，展开网页悬浮播放器`);
     playButtons.forEach((playButton) => {
       playButton.disabled = (!total && state.status !== "loading") || (busy && !activeSession && !playbackStartPending && state.status !== "extracting");
       playButton.setAttribute("aria-label", isPlaying ? "暂停朗读" : state.status === "ready" ? "重新开始朗读" : "继续朗读");
     });
     if (previous) previous.disabled = !total || busy;
     if (next) next.disabled = !total || busy;
+    if (providerFallback) {
+      providerFallback.hidden = state.status !== "error" || settings.activeProviderId === "browser-system";
+    }
     const followReady = Boolean(current) && state.status !== "extracting";
     const followNeeded = followController.mode === "manual";
     followButtons.forEach((button) => {
       button.disabled = !followReady || !followNeeded;
-      button.hidden = !followNeeded;
+      button.hidden = false;
       button.classList.toggle("is-needed", followNeeded);
       button.setAttribute("aria-label", followNeeded ? "回到当前朗读位置" : "已跟随当前朗读位置");
       button.title = followNeeded ? "回到朗读位置" : "正在跟随朗读位置";
     });
     player.querySelectorAll('[data-action="toggle-mini-size"]').forEach((button) => {
       button.setAttribute("aria-pressed", String(miniPlayerMinimized));
-      button.setAttribute("aria-label", miniPlayerMinimized ? "展开悬浮播放器" : "最小化悬浮播放器");
+      button.setAttribute("aria-label", miniPlayerMinimized ? "展开网页悬浮球" : "最小化网页悬浮球");
       button.title = miniPlayerMinimized ? "展开" : "最小化";
     });
     positionFloatingPlayer();

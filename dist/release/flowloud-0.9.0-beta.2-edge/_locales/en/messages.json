@@ -1,6 +1,0 @@
-{
-  "extensionName": { "message": "Flowloud" },
-  "extensionDescription": { "message": "Read web content with system voices, browser models, local Qwen, or an online TTS service." },
-  "actionTitle": { "message": "Flowloud" },
-  "toggleReader": { "message": "Play or pause reading on this page" }
-}

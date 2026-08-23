@@ -127,6 +127,63 @@ test('toPlaybackSegments is the single chunking point and preserves speaker meta
   assert.deepEqual(chunks[1].sourceLocator, locator);
   assert.notEqual(chunks[0].sourceLocator, locator);
   assert.notEqual(chunks[0].sourceLocator, chunks[1].sourceLocator);
+  assert.deepEqual(chunks.map((chunk) => [chunk.sourceStart, chunk.sourceEnd]), [[0, 4], [4, 8]]);
+  assert.equal(chunks[0].sourceText, '第一句。第二句。');
+  assert.notEqual(chunks[0].sourceIdentity, chunks[1].sourceIdentity);
+});
+
+test('toPlaybackSegments gives repeated sentences stable source identities and offsets', () => {
+  const model = loadNormalizedDocument();
+  const locator = {
+    adapter: 'flarum',
+    containerSelector: 'article[data-id="repeat"] .Post-body',
+    unitIndex: 0,
+    fingerprint: 'repeat-post'
+  };
+  const document = model.createDocument({
+    url: 'https://forum.example/d/repeat',
+    adapterId: 'flarum',
+    blocks: [{
+      id: 'flarum:post:repeat',
+      text: '收到。收到。最后一句。',
+      sourceLocator: locator
+    }]
+  });
+
+  const segments = model.toPlaybackSegments(document, 260);
+
+  assert.deepEqual(segments.map((segment) => segment.text), ['收到。', '收到。', '最后一句。']);
+  assert.deepEqual(segments.map((segment) => segment.sourceStart), [0, 3, 6]);
+  assert.deepEqual(segments.map((segment) => segment.sourceEnd), [3, 6, 11]);
+  assert.equal(new Set(segments.map((segment) => segment.sourceIdentity)).size, 3);
+  assert.ok(segments.every((segment) => segment.sourceIdentity.startsWith('https://forum.example/d/repeat|')));
+});
+
+test('live DOM and canonical API locators share a stable post identity without collapsing real repeated sentences', () => {
+  const model = loadNormalizedDocument();
+  const makeDocument = (containerSelector) => model.createDocument({
+    url: 'https://forum.example/d/10627/165',
+    adapterId: 'flarum',
+    blocks: [{
+      id: 'flarum:post:48666',
+      postId: '48666',
+      floor: 165,
+      text: '第一句话。第二句话。',
+      sourceLocator: {
+        adapter: 'flarum',
+        containerSelector,
+        unitIndex: 0,
+        fingerprint: 'same-post-text'
+      }
+    }]
+  });
+
+  const live = model.toPlaybackSegments(makeDocument('.PostStream-item[data-id="48666"], .PostStream-item[data-index="164"] .Post-body'), 6);
+  const canonical = model.toPlaybackSegments(makeDocument('.PostStream-item[data-id="48666"] .Post-body'), 6);
+
+  assert.deepEqual(live.map((segment) => segment.text), ['第一句话。', '第二句话。']);
+  assert.deepEqual(live.map((segment) => segment.sourceIdentity), canonical.map((segment) => segment.sourceIdentity));
+  assert.notEqual(live[0].sourceIdentity, live[1].sourceIdentity);
 });
 
 test('toPlaybackSegments preserves source text while attaching emoji-safe speech mapping', () => {

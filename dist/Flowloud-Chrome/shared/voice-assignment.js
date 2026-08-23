@@ -65,16 +65,36 @@
     const replyVoices = Array.isArray(settings.replyVoices)
       ? settings.replyVoices.map((voice) => String(voice || '').trim()).filter((voice) => voice && voice !== opVoice)
       : [];
-    if (!replyVoices.length && settings.allowSingleVoice && opVoice) replyVoices.push(opVoice);
-    if (!replyVoices.length) {
-      throw new Error('回复音色池不能为空');
-    }
-
-    const mode = settings.mode || 'op-exclusive';
-    if (!['op-exclusive', 'stable-author', 'round-robin'].includes(mode)) {
+    const aliases = {
+      'stable-author': 'op-stable-random',
+      'round-robin': 'op-round-robin',
+    };
+    const requestedMode = String(settings.mode || 'everyone-one');
+    const mode = aliases[requestedMode] || requestedMode;
+    if (!['everyone-one', 'op-plus-one', 'op-stable-random', 'op-round-robin', 'op-exclusive'].includes(mode)) {
       throw new Error('未知的音色分配预设');
     }
     const authorVoices = normalizeAuthorVoices(settings.authorVoices);
+
+    if (mode === 'everyone-one') {
+      return (Array.isArray(segments) ? segments : []).map((segment, index) => {
+        const clone = { ...segment };
+        clone.voice = authorVoices[authorKey(clone, index)] || opVoice;
+        return clone;
+      });
+    }
+
+    // A provider may expose only one voice. Every multi-voice strategy then
+    // degrades explicitly to that voice instead of inventing a browser voice.
+    const replyPool = replyVoices.length ? replyVoices : (settings.allowSingleVoice && opVoice ? [opVoice] : []);
+    if (!replyPool.length && settings.allowSingleVoice) {
+      return (Array.isArray(segments) ? segments : []).map((segment, index) => {
+        const clone = { ...segment };
+        clone.voice = authorVoices[authorKey(clone, index)] || opVoice;
+        return clone;
+      });
+    }
+    if (!replyPool.length && !settings.allowSingleVoice) throw new Error('回复音色池不能为空');
 
     const stableVoices = new Map();
     let replyIndex = 0;
@@ -90,14 +110,16 @@
         return clone;
       }
 
-      if (mode === 'stable-author') {
+      if (mode === 'op-stable-random') {
         if (!stableVoices.has(key)) {
-          stableVoices.set(key, replyVoices[stableVoices.size % replyVoices.length]);
+          stableVoices.set(key, replyPool[stableVoices.size % replyPool.length]);
         }
         clone.voice = stableVoices.get(key);
+      } else if (mode === 'op-plus-one') {
+        clone.voice = replyPool[0];
       } else if (mode === 'op-exclusive') {
         if (key !== lastReplyAuthor || !activeReplyVoice) {
-          activeReplyVoice = replyVoices[replyIndex % replyVoices.length];
+          activeReplyVoice = replyPool[replyIndex % replyPool.length];
           replyIndex += 1;
           lastReplyAuthor = key;
         }
@@ -107,7 +129,7 @@
           clone.postId || clone.sourceKey || String(clone.id || index).replace(/:\d+$/u, '')
         );
         if (groupKey !== lastReplyGroup || !activeReplyVoice) {
-          activeReplyVoice = replyVoices[replyIndex % replyVoices.length];
+          activeReplyVoice = replyPool[replyIndex % replyPool.length];
           replyIndex += 1;
           lastReplyGroup = groupKey;
         }

@@ -6,19 +6,25 @@
     ? require('./shared/provider-v2.js') : null);
   const providerV3Module = root.FlowloudProviderV3 || (typeof require === 'function'
     ? require('./shared/provider-v3.js') : null);
-  const exported = factory(apiModule, providerModule, providerV3Module);
+  const providerV4Module = root.FlowloudProviderV4 || (typeof require === 'function'
+    ? require('./shared/provider-v4.js') : null);
+  const documentProviderModule = root.FlowloudDocumentProviderV1 || (typeof require === 'function'
+    ? require('./shared/document-provider-v1.js') : null);
+  const exported = factory(apiModule, providerModule, providerV3Module, providerV4Module, documentProviderModule);
   if (typeof module === 'object' && module.exports) module.exports = exported;
   root.QwenReaderOffscreen = exported;
 
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
     exported.install(chrome);
   }
-}(typeof globalThis !== 'undefined' ? globalThis : this, function makeOffscreen(apiModule, providerModule, providerV3Module) {
+}(typeof globalThis !== 'undefined' ? globalThis : this, function makeOffscreen(apiModule, providerModule, providerV3Module, providerV4Module, documentProviderModule) {
   'use strict';
 
   const TARGET = 'qwen-reader-offscreen';
   const STREAM_EVENT_TARGET = 'qwen-reader-stream-event';
   const DEFAULT_TIMEOUT_MS = 60000;
+  const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000;
+  const MODEL_VERIFY_TIMEOUT_MS = 5 * 60 * 1000;
   const MAX_AUDIO_BYTES = 32 * 1024 * 1024;
   const STREAM_PREBUFFER_SECONDS = 0.35;
   const STREAM_MAX_BUFFER_SECONDS = 3;
@@ -65,7 +71,15 @@
     return {
       ok: false,
       requestId,
-      error: { code, message, retriable: isRetriable(code) },
+      error: {
+        stage: String(error && (error.stage || error.operation) || (timedOut ? 'synthesis' : 'provider')),
+        code,
+        message,
+        retryable: isRetriable(code),
+        retriable: isRetriable(code),
+        providerId: String(error && error.providerId || ''),
+        requestId: String(requestId || error && error.requestId || ''),
+      },
     };
   }
 
@@ -83,7 +97,10 @@
     const segmentIndex = hasSegmentIndex && Number.isInteger(Number(body.segmentIndex))
       ? Number(body.segmentIndex) : null;
     const segmentId = body.segmentId == null ? '' : String(body.segmentId);
-    return { clientId, playbackId, requestId, sessionId, sourceTabId, segmentIndex, segmentId };
+    const sourceDocumentId = String(body.sourceDocumentId || '');
+    const pageKey = String(body.pageKey || '');
+    const intentSequence = Number.isInteger(Number(body.intentSequence)) ? Number(body.intentSequence) : 0;
+    return { clientId, playbackId, requestId, sessionId, sourceTabId, sourceDocumentId, pageKey, intentSequence, segmentIndex, segmentId };
   }
 
   function asBytes(value) {
@@ -827,6 +844,7 @@
       ? config.AudioContextCtor
       : (typeof globalThis !== 'undefined' && (globalThis.AudioContext || globalThis.webkitAudioContext));
     const emit = typeof config.emit === 'function' ? config.emit : () => {};
+    const documentApi = config.documentProviderApi || documentProviderModule;
     const jobs = new Map();
     let sequence = 0;
 
@@ -906,7 +924,9 @@
       if (body.requestId && String(body.requestId) !== job.identity.requestId) return false;
       const hasSourceTabId = body.sourceTabId != null && body.sourceTabId !== '';
       if (hasSourceTabId && Number(body.sourceTabId) !== job.identity.sourceTabId) return false;
-      return Boolean(body.clientId || body.sessionId || body.playbackId || body.requestId || hasSourceTabId);
+      if (body.sourceDocumentId && String(body.sourceDocumentId) !== job.identity.sourceDocumentId) return false;
+      if (body.intentSequence != null && Number(body.intentSequence) !== job.identity.intentSequence) return false;
+      return Boolean(body.clientId || body.sessionId || body.playbackId || body.requestId || hasSourceTabId || body.sourceDocumentId || body.intentSequence != null);
     }
 
     function notifyRemoteCancel(job) {
@@ -952,6 +972,9 @@
         requestId: identity.requestId,
         sessionId: identity.sessionId,
         sourceTabId: identity.sourceTabId,
+        sourceDocumentId: identity.sourceDocumentId,
+        pageKey: identity.pageKey,
+        intentSequence: identity.intentSequence,
         segmentIndex: identity.segmentIndex,
         segmentId: identity.segmentId,
       }, extra || {});
@@ -995,6 +1018,9 @@
         clientId: identity.clientId,
         playbackId: identity.playbackId,
         sessionId: identity.sessionId,
+        sourceDocumentId: identity.sourceDocumentId,
+        pageKey: identity.pageKey,
+        intentSequence: identity.intentSequence,
         segmentIndex: identity.segmentIndex,
         segmentId: identity.segmentId,
       });
@@ -1007,6 +1033,9 @@
         clientId: identity.clientId,
         playbackId: identity.playbackId,
         sessionId: identity.sessionId,
+        sourceDocumentId: identity.sourceDocumentId,
+        pageKey: identity.pageKey,
+        intentSequence: identity.intentSequence,
       };
     }
 
@@ -1085,10 +1114,17 @@
       const controller = new AbortController();
       const job = { identity, controller, timedOut: false, provider: provider || null };
       jobs.set(key, job);
+      const operationTimeoutMs = message.type === 'provider:model:download'
+        ? Number(config.modelDownloadTimeoutMs || MODEL_DOWNLOAD_TIMEOUT_MS)
+        : message.type === 'provider:model:verify'
+          ? Number(config.modelVerifyTimeoutMs || MODEL_VERIFY_TIMEOUT_MS)
+          : String(message.type || '').startsWith('document:')
+            ? Math.min(10 * 60 * 1000, Math.max(timeoutMs, Number(message.profile?.timeoutMs) || 120000))
+            : timeoutMs;
       const timer = setTimeout(() => {
         job.timedOut = true;
         controller.abort();
-      }, timeoutMs);
+      }, operationTimeoutMs);
       try {
         const result = await operation(controller.signal, identity);
         return Object.assign({ ok: true, requestId: identity.requestId }, result || {});
@@ -1392,6 +1428,16 @@
 
     async function handle(message) {
       const body = message || {};
+      if (body.type === 'document:cancel') {
+        let count = 0;
+        for (const job of jobs.values()) {
+          if (!matches(job, body)) continue;
+          count += 1;
+          job.controller.abort();
+          notifyRemoteCancel(job);
+        }
+        return { ok: true, cancelled: count > 0, count };
+      }
       if (body.type === 'provider:model:cancel') {
         let count = 0;
         for (const job of jobs.values()) {
@@ -1470,6 +1516,25 @@
         return runJob(body, async (signal) => ({
           status: await provider.health({ signal }),
         }), provider);
+      }
+
+      if (body.type === 'document:probe' || body.type === 'document:extract' || body.type === 'document:translate') {
+        if (!documentApi || typeof documentApi.createDocumentProvider !== 'function') {
+          return errorEnvelope(Object.assign(new Error('文档 Provider 运行时不可用。'), { code: 'document_provider_unavailable' }), String(body.requestId || ''), false);
+        }
+        let provider;
+        try {
+          provider = documentApi.createDocumentProvider(body.profile, { secret: body.secret, fetchImpl: globalThis.fetch });
+        } catch (error) {
+          return errorEnvelope(error, String(body.requestId || ''), false);
+        }
+        const operation = body.type.slice('document:'.length);
+        return runJob(body, async (signal, identity) => {
+          if (operation === 'probe') return { result: await provider.probe({ signal, requestId: identity.requestId }) };
+          const request = Object.assign({}, body.request || {}, { requestId: identity.requestId });
+          const result = await provider[operation](request, { signal, requestId: identity.requestId });
+          return { result };
+        }, provider);
       }
 
       if (/^provider:model:/.test(String(body.type || ''))) {
@@ -1563,33 +1628,87 @@
 
   function install(chromeApi) {
     const api = apiModule.createApiClient();
-    const providerApi = providerV3Module || providerModule;
+    const providerApi = providerV4Module || providerV3Module || providerModule;
     const providers = [];
-    if (providerV3Module) {
+    if (providerV4Module) {
+      providers.push(providerV4Module.createBrowserSystemProvider());
+      providers.push(providerV4Module.createLocalServiceProvider({
+        adapterId: 'flowloud-qwen', api, enableRemoteCancel: true,
+        forwardExternalSignal: true, fallbackToSynthesize: false,
+      }));
+    } else if (providerV3Module) {
       providers.push(providerV3Module.createBrowserSystemProvider());
       providers.push(providerV3Module.adaptLocalQwen({ api, enableRemoteCancel: true, forwardExternalSignal: true, fallbackToSynthesize: false }));
     }
     const providerRegistry = providerApi.createProviderRegistry({ providers, activeProviderId: 'browser-system' });
-    let browserRuntimePromise = null;
-    async function browserPipeline(task, repoId, options) {
-      if (!browserRuntimePromise) browserRuntimePromise = import(chromeApi.runtime.getURL('vendor/transformers/transformers.web.min.js'));
-      const runtime = await browserRuntimePromise;
-      runtime.env.allowRemoteModels = true;
-      runtime.env.allowLocalModels = false;
-      runtime.env.remoteHost = 'https://huggingface.co/';
-      runtime.env.cacheKey = `flowloud-model-${repoId}@${options.revision}`;
-      if (runtime.env.backends?.onnx?.wasm) runtime.env.backends.onnx.wasm.wasmPaths = chromeApi.runtime.getURL('vendor/transformers/');
-      return runtime.pipeline(task, repoId, options);
+    let kokoroRuntimePromise = null;
+    const resolvedProviderCache = new Map();
+    function cachedProvider(providerId, signatureSource, create) {
+      const signature = JSON.stringify(signatureSource);
+      const existing = resolvedProviderCache.get(providerId);
+      if (existing && existing.signature === signature) return existing.provider;
+      const provider = create();
+      resolvedProviderCache.set(providerId, { signature, provider });
+      return provider;
     }
+    async function browserPipeline(task, repoId, options) {
+      if (repoId === 'onnx-community/Kokoro-82M-v1.1-zh-ONNX') {
+        const voiceCache = await caches.open('kokoro-voices');
+        const remoteVoiceUrl = `https://huggingface.co/${repoId}/resolve/${encodeURIComponent(options.revision)}/voices/zf_001.bin`;
+        if (!(await voiceCache.match(remoteVoiceUrl))) {
+          if (options.flowloudOffline === true) throw Object.assign(new Error('Kokoro 默认音色缓存缺失。'), { code: 'offline_cache_miss' });
+          const response = await fetch(remoteVoiceUrl);
+          if (!response.ok) throw Object.assign(new Error(`Kokoro 默认音色下载失败（HTTP ${response.status}）。`), { code: `http_${response.status}` });
+          await voiceCache.put(remoteVoiceUrl, response);
+        }
+        if (!kokoroRuntimePromise) kokoroRuntimePromise = import(chromeApi.runtime.getURL('vendor/kokoro/kokoro.web.min.js'));
+        const kokoroRuntime = await kokoroRuntimePromise;
+        return kokoroRuntime.flowloudCreateKokoro(repoId, Object.assign({}, options, {
+          cacheKey: `flowloud-model-${repoId}@${options.revision}`,
+          wasmPaths: chromeApi.runtime.getURL('vendor/transformers/'),
+          voicePath: `https://huggingface.co/${repoId}/resolve/${encodeURIComponent(options.revision)}/voices`,
+        }));
+      }
+      throw Object.assign(new Error('当前扩展只支持 Kokoro 中英浏览器模型。'), { code: 'unsupported_model' });
+    }
+    browserPipeline.deleteCache = async (repoId) => {
+      if (repoId !== 'onnx-community/Kokoro-82M-v1.1-zh-ONNX') return false;
+      return caches.delete('kokoro-voices');
+    };
     const broker = createBroker({
       api,
       providerApi,
       providerRegistry,
       providerId: 'browser-system',
+      documentProviderApi: documentProviderModule,
       resolveProvider(providerId, message) {
-        const options = Object.assign({}, message.providerSettings || {}, { apiKey: message.apiKey });
-        if (providerId === 'openai-compatible') return providerV3Module.createOpenAICompatibleProvider(options);
-        if (providerId === 'browser-model') return providerV3Module.createBrowserModelProvider(Object.assign({}, options, { pipelineFactory: browserPipeline }));
+        const options = Object.assign({}, message.providerSettings || {}, {
+          apiKey: message.apiKey, clientToken: message.clientToken,
+        });
+        const modern = providerV4Module || providerV3Module;
+        if (providerId === 'openai-compatible') return cachedProvider(providerId, {
+          baseUrl: options.baseUrl, model: options.model, voice: options.voice,
+          responseFormat: options.responseFormat, apiKey: options.apiKey,
+        }, () => modern.createOpenAICompatibleProvider(options));
+        if (providerId === 'doubao-tts' && typeof modern.createDoubaoTtsProvider === 'function') return cachedProvider(providerId, {
+          baseUrl: options.baseUrl, path: options.path, resourceId: options.resourceId,
+          appId: options.appId, voice: options.voice, responseFormat: options.responseFormat, apiKey: options.apiKey,
+        }, () => modern.createDoubaoTtsProvider(Object.assign({}, options, { fetchImpl: globalThis.fetch })));
+        if (providerId === 'browser-model') return cachedProvider(providerId, {
+          modelId: options.modelId, repoId: options.repoId, revision: options.revision,
+          dtype: options.dtype, device: options.device, allowWasmFallback: options.allowWasmFallback,
+        }, () => modern.createBrowserModelProvider(Object.assign({}, options, { pipelineFactory: browserPipeline })));
+        if (providerId === 'local-service' && providerV4Module) {
+          return cachedProvider(providerId, {
+            adapterId: options.adapterId, baseUrl: options.baseUrl, model: options.model,
+            responseFormat: options.responseFormat, clientToken: options.clientToken,
+          }, () => providerV4Module.createLocalServiceProvider(Object.assign({}, options, {
+            fetchImpl: globalThis.fetch,
+            enableRemoteCancel: true,
+            forwardExternalSignal: true,
+            fallbackToSynthesize: false,
+          })));
+        }
         if (providerId === 'local-qwen' && typeof api.setClientToken === 'function') {
           api.setClientToken(message.clientToken);
         }
@@ -1625,6 +1744,8 @@
     TARGET,
     STREAM_EVENT_TARGET,
     DEFAULT_TIMEOUT_MS,
+    MODEL_DOWNLOAD_TIMEOUT_MS,
+    MODEL_VERIFY_TIMEOUT_MS,
     MAX_AUDIO_BYTES,
     blobToBase64,
     createBroker,

@@ -860,7 +860,7 @@
 
   async function loadVoices() {
     try {
-      const response = await message({ type: 'voice:list', providerId: 'local-qwen' });
+      const response = await message({ type: 'voice:list', providerId: 'local-service' });
       state.voices = response.voices || response.profiles || [];
       renderVoices();
       const localVoices = state.voices.filter((voice) => voice.local && voice.editable !== false);
@@ -869,7 +869,7 @@
     } catch (error) {
       const saved = await chrome.storage.local.get('qwenReaderSettings').catch(() => ({}));
       const activeProviderId = saved.qwenReaderSettings?.activeProviderId || saved.qwenReaderSettings?.providerId || 'browser-system';
-      if (activeProviderId !== 'local-qwen') {
+      if (activeProviderId !== 'local-service') {
         state.voices = [];
         renderVoices();
         setStatus('当前使用系统或其他朗读引擎；音色克隆仅在本地 Qwen 下启用。');
@@ -1063,7 +1063,7 @@
       const saved = await chrome.storage.local.get('qwenReaderSettings');
       active = saved.qwenReaderSettings?.activeProviderId || saved.qwenReaderSettings?.providerId || 'browser-system';
     }
-    if (active === 'local-qwen') return loadVoices();
+    if (active === 'local-service') return loadVoices();
     state.voices = [];
     renderVoices();
     setStatus('当前使用系统或其他朗读引擎；音色克隆仅在本地 Qwen 下启用。');

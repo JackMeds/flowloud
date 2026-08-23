@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Flowloud Popup Design QA</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 28px; color: #0f1f3d; background: #eaf0f8; font: 14px/1.5 "Segoe UI", "Microsoft YaHei UI", sans-serif; }
+    h1 { margin: 0 0 6px; font-size: 20px; }
+    p { margin: 0 0 20px; color: #64748b; }
+    .grid { display: grid; grid-template-columns: repeat(2, 368px); gap: 24px; }
+    figure { margin: 0; }
+    figcaption { margin-bottom: 8px; font-size: 12px; font-weight: 700; }
+    .frame { width: 368px; height: 600px; overflow: hidden; border: 1px solid #dbe4f0; background: white; box-shadow: 0 12px 28px rgba(15,31,61,.12); }
+    .frame img { display: block; }
+    .source img { width: 100%; height: 100%; object-fit: contain; object-position: top; }
+    .implementation img { width: 1280px; height: 720px; max-width: none; transform: translate(-448.333px, -60px); }
+    .focus { height: 330px; margin-top: 18px; }
+    .source.focus img { object-fit: cover; object-position: top; }
+  </style>
+</head>
+<body>
+  <h1>Popup playing state comparison</h1>
+  <p>Both columns normalize to a 368 × 600 CSS frame. The source is scaled from 1010 × 1556; the implementation is a native 368 × 600 capture.</p>
+  <div class="grid">
+    <figure><figcaption>Source visual target</figcaption><div class="frame source"><img src="../../design-references/flowloud-popup-blue-white-v1.png" alt=""></div></figure>
+    <figure><figcaption>Implementation v3</figcaption><div class="frame implementation"><img src="implementation-popup-playing-full-v3.png" alt=""></div></figure>
+    <figure><figcaption>Source focused top region</figcaption><div class="frame source focus"><img src="../../design-references/flowloud-popup-blue-white-v1.png" alt=""></div></figure>
+    <figure><figcaption>Implementation focused top region</figcaption><div class="frame implementation focus"><img src="implementation-popup-playing-full-v3.png" alt=""></div></figure>
+  </div>
+</body>
+</html>

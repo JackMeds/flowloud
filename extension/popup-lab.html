@@ -5,20 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Flowloud Popup Lab</title>
   <link rel="stylesheet" href="design-system.css">
-  <link rel="stylesheet" href="popup.css">
-  <link rel="stylesheet" href="popup-paper.css">
+  <link rel="stylesheet" href="popup.css?v=0.9.7">
   <link rel="stylesheet" href="popup-lab.css">
 </head>
 <body class="qr-lab-body">
   <main class="qr-lab-shell">
-    <header class="qr-lab-header"><p>FLOWLOUD · 真实组件预览</p><h1>Popup B+C</h1><span>主控制与本页配音都在同一个原生 Popup 内切换，共用生产 renderer 与 CSS；不是生成图片。</span></header>
+    <header class="qr-lab-header"><p>FLOWLOUD · 真实组件预览</p><h1>Popup B+C</h1><span>主控制使用原生 Popup；复杂的本页配音在独立编辑器中打开，共用生产 renderer 与 CSS；不是生成图片。</span></header>
     <section id="popup-lab-root" class="qr-lab-grid"></section>
     <section class="qr-lab-editor-card">
-      <h2>C · Popup 内的本页配音状态</h2>
+      <h2>C · 独立页面编辑器状态</h2>
+      <p id="page-voices-lab-status" class="qr-lab-editor-note" role="status" aria-live="polite">入口：点击上方任一 Popup 的“调整本页配音”。</p>
       <div id="page-voices-lab-root" class="qr-popup-root"></div>
     </section>
   </main>
-  <script src="popup-view.js"></script>
-  <script src="popup-lab.js"></script>
+  <script src="popup-view.js?v=0.9.7"></script>
+  <script src="popup-lab.js?v=0.9.7"></script>
 </body>
 </html>

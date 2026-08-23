@@ -215,6 +215,25 @@ button {
   color: var(--qr-danger);
 }
 
+.qr-mini-provider-fallback {
+  display: none;
+  width: 100%;
+  min-height: 34px;
+  margin-top: 7px;
+  border: 1px solid #bfdbfe;
+  border-radius: 9px;
+  color: #1d4ed8;
+  background: #eff6ff;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.qr-mini-player[data-state="error"]:not(.is-minimized) .qr-mini-provider-fallback:not([hidden]) {
+  display: block;
+}
+
 .qr-mini-text {
   display: block;
   width: 100%;
@@ -719,8 +738,8 @@ button {
 }
 
 .qr-line-focus-layer[data-style="paper-wash"] .qr-line-focus-band {
-  background: linear-gradient(90deg, rgba(184, 190, 201, .055), rgba(166, 176, 190, .13) 15%, rgba(174, 184, 198, .105) 86%, rgba(184, 190, 201, .04));
-  box-shadow: inset 2px 0 0 rgba(129, 142, 159, .18);
+  background: linear-gradient(90deg, rgba(219, 234, 254, .26), rgba(219, 234, 254, .48) 15%, rgba(239, 246, 255, .34) 86%, rgba(239, 246, 255, .12));
+  box-shadow: inset 3px 0 0 rgba(37, 99, 235, .62);
 }
 
 .qr-line-focus-layer[data-style="underline-guide"] .qr-line-focus-band {
@@ -740,7 +759,7 @@ button {
   overflow: visible;
   padding: 0;
   border: 0;
-  color: #39353f;
+  color: #1d4ed8;
   white-space: pre;
   transform: none;
 }
@@ -772,9 +791,9 @@ button {
   border-radius: 999px;
   opacity: .92;
   background:
-    radial-gradient(circle at var(--qr-beam-x) 50%, rgba(255,255,255,.99) 0 4%, rgba(224,235,248,.86) 8%, rgba(138,151,173,.25) 20%, transparent 32%),
-    #3b3742;
-  box-shadow: 0 1px 3px rgba(31, 29, 36, .16);
+    radial-gradient(circle at var(--qr-beam-x) 50%, rgba(255,255,255,.99) 0 4%, rgba(219,234,254,.92) 8%, rgba(37,99,235,.28) 20%, transparent 32%),
+    #2563eb;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, .18);
   transform: none;
   transition:
     left 170ms cubic-bezier(.2,.72,.24,1),
@@ -1957,4 +1976,994 @@ button {
     box-shadow: none;
   }
   .qr-mini-button.is-primary { color: HighlightText; background: Highlight; }
+}
+
+/* The web affordance is a small, familiar launcher orb. The transport and
+ * caption remain in the DOM for keyboard/screen-reader continuity, but the
+ * page surface only exposes one clear play target. */
+.qr-mini-player.qr-mini-orb {
+  display: block;
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
+  min-height: 48px;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  cursor: grab;
+}
+
+.qr-mini-player.qr-mini-orb.is-visible {
+  transform: translate3d(0, 0, 0);
+}
+
+.qr-mini-player.qr-mini-orb.is-dragging {
+  transform: scale(1.06);
+  cursor: grabbing;
+}
+
+.qr-mini-player.qr-mini-orb.is-snapping {
+  transition: left 180ms cubic-bezier(.2, .8, .2, 1),
+    top 180ms cubic-bezier(.2, .8, .2, 1),
+    transform 180ms cubic-bezier(.2, .8, .2, 1);
+}
+
+.qr-mini-player.qr-mini-orb.is-edge-snapped[data-edge="left"] {
+  transform: translateX(-50%);
+}
+
+.qr-mini-player.qr-mini-orb.is-edge-snapped[data-edge="right"] {
+  transform: translateX(50%);
+}
+
+.qr-mini-player.qr-mini-orb:hover:not(.is-dragging) {
+  transform: translateY(-2px) scale(1.04);
+}
+
+.qr-mini-player.qr-mini-orb.is-edge-snapped[data-edge="left"]:hover:not(.is-dragging) {
+  transform: translateX(-42%) translateY(-2px) scale(1.04);
+}
+
+.qr-mini-player.qr-mini-orb.is-edge-snapped[data-edge="right"]:hover:not(.is-dragging) {
+  transform: translateX(42%) translateY(-2px) scale(1.04);
+}
+
+.qr-mini-player.qr-mini-orb .qr-mini-context {
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+}
+
+.qr-mini-player.qr-mini-orb .qr-mini-avatar {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 48px;
+  height: 48px;
+  border: 0;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #6247a5;
+  box-shadow: 0 5px 14px rgba(55, 39, 102, .24);
+}
+
+.qr-mini-player.qr-mini-orb .qr-mini-copy {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.qr-mini-player.qr-mini-orb .qr-mini-window-controls,
+.qr-mini-player.qr-mini-orb .qr-mini-compact-controls {
+  display: none;
+}
+
+.qr-mini-player.qr-mini-orb [data-role="mini-full-controls"] {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.qr-mini-player.qr-mini-orb [data-role="mini-full-controls"] .qr-mini-button:not(.is-primary) {
+  display: none;
+}
+
+.qr-mini-player.qr-mini-orb [data-role="mini-full-controls"] .qr-mini-button.is-primary {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
+  border: 0;
+  border-radius: 50%;
+  color: #fff;
+  background: transparent;
+  box-shadow: none;
+}
+
+.qr-mini-player.qr-mini-orb [data-role="mini-full-controls"] .qr-mini-button.is-primary:hover:not(:disabled),
+.qr-mini-player.qr-mini-orb [data-role="mini-full-controls"] .qr-mini-button.is-primary:active:not(:disabled) {
+  color: #fff;
+  background: rgba(49, 34, 103, .2);
+}
+
+.qr-mini-player.qr-mini-orb .qr-mini-icon {
+  width: 19px;
+  height: 19px;
+  filter: brightness(0) invert(1);
+  opacity: 1;
+}
+
+.qr-mini-player.qr-mini-orb[data-state="error"] .qr-mini-avatar {
+  background: #b83951;
+  box-shadow: 0 5px 14px rgba(132, 35, 58, .24);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qr-mini-player.qr-mini-orb,
+  .qr-mini-player.qr-mini-orb.is-snapping,
+  .qr-mini-player.qr-mini-orb .qr-mini-avatar {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* Orb v2: the launcher is intentionally smaller than a transport control.
+ * A click on the mark opens the card; the centered play button remains the
+ * direct playback affordance. */
+.qr-mini-player.qr-mini-orb.is-minimized {
+  display: block;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-context {
+  display: block;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  box-shadow: 0 4px 12px rgba(55, 39, 102, .22);
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-copy,
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-compact-controls {
+  display: none;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized [data-role="mini-full-controls"] {
+  z-index: 2;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized [data-role="mini-full-controls"] .qr-mini-button.is-primary {
+  inset: 3px;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  margin: auto;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(49, 34, 103, .12);
+  box-shadow: none;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized [data-role="mini-full-controls"] .qr-mini-button.is-primary:hover:not(:disabled),
+.qr-mini-player.qr-mini-orb.is-minimized [data-role="mini-full-controls"] .qr-mini-button.is-primary:active:not(:disabled) {
+  background: rgba(49, 34, 103, .28);
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-window-controls {
+  top: -6px;
+  right: -6px;
+  display: flex;
+  pointer-events: none;
+  transform: none;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-window-button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(98, 71, 165, .25);
+  border-radius: 50%;
+  color: #6247a5;
+  background: #fbfaf6;
+  opacity: 0;
+  pointer-events: auto;
+  box-shadow: 0 2px 6px rgba(33, 31, 36, .16);
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized:hover .qr-mini-window-button,
+.qr-mini-player.qr-mini-orb.is-minimized:focus-within .qr-mini-window-button {
+  opacity: 1;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-window-glyph {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) {
+  display: grid;
+  width: min(300px, calc(100vw - 24px));
+  min-width: min(300px, calc(100vw - 24px));
+  height: auto;
+  min-height: 76px;
+  padding: 10px 38px 10px 10px;
+  border: 1px solid #ded9d2;
+  border-radius: 14px;
+  background: #fbfaf6;
+  box-shadow: 0 10px 24px rgba(33, 31, 36, .14);
+  cursor: grab;
+  transform: none;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized).is-edge-snapped[data-edge="left"],
+.qr-mini-player.qr-mini-orb:not(.is-minimized).is-edge-snapped[data-edge="right"] {
+  transform: none;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-context {
+  position: static;
+  display: flex;
+  min-width: 0;
+  pointer-events: auto;
+  cursor: default;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-avatar {
+  position: static;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #ded9d2;
+  border-radius: 9px;
+  box-shadow: none;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-copy {
+  position: static;
+  display: grid;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-window-controls {
+  display: flex;
+  top: 8px;
+  right: 8px;
+  transform: none;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-window-button {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-window-glyph {
+  width: 14px;
+  height: 14px;
+  stroke: #6f6972;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] {
+  position: static;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  grid-column: 1 / -1;
+  margin-top: 4px;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button:not(.is-primary) {
+  display: grid;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button.is-primary {
+  position: static;
+  inset: auto;
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  min-height: 38px;
+  margin: 0;
+  border-radius: 10px;
+  background: #6247a5;
+  box-shadow: none;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-text {
+  max-width: 220px;
+  mask-image: none;
+}
+
+/* Orb v3 recovery contract: a fully visible 44 px launcher expands to a
+ * complete transport card. Playback controls never share the collapsed hit
+ * target, which keeps click, drag and playback intents deterministic. */
+.qr-mini-player.qr-mini-orb,
+.qr-mini-player.qr-mini-orb.is-visible,
+.qr-mini-player.qr-mini-orb.is-edge-snapped[data-edge="left"],
+.qr-mini-player.qr-mini-orb.is-edge-snapped[data-edge="right"] {
+  transform: none;
+}
+
+.qr-mini-player.qr-mini-orb:hover:not(.is-dragging),
+.qr-mini-player.qr-mini-orb.is-edge-snapped[data-edge="left"]:hover:not(.is-dragging),
+.qr-mini-player.qr-mini-orb.is-edge-snapped[data-edge="right"]:hover:not(.is-dragging) {
+  transform: translateY(-2px);
+}
+
+.qr-mini-player.qr-mini-orb.is-dragging { transform: scale(1.03); }
+
+.qr-mini-player.qr-mini-orb.is-minimized {
+  display: block;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .72);
+  border-radius: 50%;
+  background: #2563eb;
+  box-shadow: 0 7px 18px rgba(37, 99, 235, .28);
+  cursor: grab;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-context {
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-avatar {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: #2563eb;
+  box-shadow: none;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-copy,
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-window-controls,
+.qr-mini-player.qr-mini-orb.is-minimized [data-role="mini-full-controls"],
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-compact-controls {
+  display: none;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized[data-state="error"] {
+  background: #b4233a;
+  box-shadow: 0 7px 18px rgba(180, 35, 58, .24);
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  width: min(304px, calc(100vw - 24px));
+  min-width: min(304px, calc(100vw - 24px));
+  height: auto;
+  min-height: 112px;
+  padding: 12px 42px 12px 12px;
+  overflow: hidden;
+  border: 1px solid #dbe4f0;
+  border-radius: 16px;
+  color: #0f1f3d;
+  background: #fff;
+  box-shadow: 0 16px 36px rgba(15, 31, 61, .18);
+  cursor: grab;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-context {
+  position: static;
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 10px;
+  pointer-events: auto;
+  cursor: default;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-avatar {
+  position: static;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #dbe4f0;
+  border-radius: 10px;
+  background: #2563eb;
+  box-shadow: none;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-copy {
+  position: static;
+  display: grid;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  overflow: visible;
+  clip: auto;
+  gap: 1px;
+  white-space: normal;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-speaker {
+  color: #0f1f3d;
+  font-weight: 700;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-meta,
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-status {
+  color: #64748b;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-text {
+  max-width: 220px;
+  color: #334155;
+  mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 12px), transparent 100%);
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-window-controls {
+  top: 8px;
+  right: 8px;
+  display: flex;
+  transform: none;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-window-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #64748b;
+  background: transparent;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-window-button:hover {
+  border-color: #dbe4f0;
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-window-glyph {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] {
+  position: static;
+  display: grid;
+  grid-template-columns: repeat(4, 44px);
+  align-items: center;
+  justify-content: start;
+  gap: 6px;
+  grid-column: 1 / -1;
+  margin-top: 9px;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button,
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button:not(.is-primary),
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button.is-primary {
+  position: static;
+  inset: auto;
+  display: grid;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  margin: 0;
+  border: 1px solid #dbe4f0;
+  border-radius: 12px;
+  color: #334155;
+  background: #fff;
+  box-shadow: none;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button:hover:not(:disabled) {
+  border-color: #b9c8dc;
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button.is-primary {
+  border-color: #2563eb;
+  color: #fff;
+  background: #2563eb;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button.is-primary:hover:not(:disabled) {
+  border-color: #1d4ed8;
+  color: #fff;
+  background: #1d4ed8;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-icon {
+  width: 19px;
+  height: 19px;
+  filter: none;
+  opacity: 1;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button.is-primary .qr-mini-icon {
+  filter: brightness(0) invert(1);
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-follow-icon {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+}
+
+/* Approved blue/white floating player. The launcher remains one deterministic
+ * drag/click target; expansion restores progress, locate, and full transport. */
+:host {
+  --qr-purple: #2563eb;
+  --qr-purple-deep: #1d4ed8;
+  --qr-purple-soft: #eff6ff;
+  --qr-ink: #0f1f3d;
+  --qr-muted: #64748b;
+  --qr-line: #dbe4f0;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  border-width: 1px;
+  background: #2563eb;
+  box-shadow: 0 7px 18px rgba(37,99,235,.28), 0 0 0 2px rgba(147,197,253,.92);
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-avatar {
+  width: 44px;
+  height: 44px;
+  background: #2563eb;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized[data-state="playing"] {
+  box-shadow: 0 7px 18px rgba(37,99,235,.28), 0 0 0 2px #10b981;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized[data-state="paused"] {
+  box-shadow: 0 7px 18px rgba(37,99,235,.28), 0 0 0 2px #f59e0b;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized[data-state="error"] {
+  box-shadow: 0 7px 18px rgba(180,35,58,.24), 0 0 0 2px #ef4444;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) {
+  width: min(304px, calc(100vw - 24px));
+  min-width: min(304px, calc(100vw - 24px));
+  min-height: 112px;
+  padding: 10px;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 16px 40px rgba(15,31,61,.15);
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-context {
+  display: grid;
+  grid-template-columns: minmax(0,1fr);
+  align-items: center;
+  gap: 0;
+  padding-right: 0;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-avatar {
+  display: none;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-copy {
+  grid-template-columns: minmax(0,1fr) auto;
+  align-items: center;
+  gap: 2px 12px;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-speaker {
+  color: #0f1f3d;
+  font-size: 14px;
+  font-weight: 760;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-meta {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 550;
+  text-align: right;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-text {
+  display: block;
+  grid-column: 1 / -1;
+  width: 100%;
+  max-width: none;
+  margin-top: 4px;
+  color: #334155;
+  font-size: 12px;
+  line-height: 18px;
+  mask-image: linear-gradient(90deg,#000 0,#000 calc(100% - 14px),transparent 100%);
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-caption-word.is-active {
+  padding: 1px 3px;
+  border-radius: 5px;
+  color: #1d4ed8;
+  background: #dbeafe;
+  font-weight: 760;
+}
+
+.qr-mini-player.qr-mini-orb .qr-mini-progress-row {
+  display: none;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-progress-row {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.qr-mini-progress {
+  display: block;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8eef7;
+}
+
+.qr-mini-progress > span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: #2563eb;
+  transition: width 180ms ease;
+}
+
+.qr-mini-progress-copy {
+  color: #64748b;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] {
+  grid-template-columns: repeat(5, 40px);
+  justify-content: space-between;
+  gap: 7px;
+  margin-top: 7px;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button,
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button:not(.is-primary),
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button.is-primary {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button.is-primary {
+  box-shadow: 0 7px 17px rgba(37,99,235,.25);
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-button.is-collapse .qr-mini-follow-icon {
+  width: 19px;
+  height: 19px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qr-mini-progress > span { transition: none; }
+}
+
+/* Edge-peek v5: a 40 px visual control lives inside a 44 px hit area. When
+ * snapped, half the circle rests beyond the viewport edge; hover/focus slides
+ * it fully into view and reveals the two non-expansion quick actions above it. */
+.qr-mini-player.qr-mini-orb.is-minimized {
+  display: block;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-context,
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-window-controls,
+.qr-mini-player.qr-mini-orb.is-minimized [data-role="mini-full-controls"],
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-compact-controls {
+  display: none;
+}
+
+.qr-mini-launcher {
+  display: none;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-launcher {
+  position: absolute;
+  inset: 2px;
+  z-index: 2;
+  display: grid;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid #dbe4f0;
+  border-radius: 50%;
+  color: #2563eb;
+  background: #fff;
+  box-shadow: 0 5px 14px rgba(15,31,61,.14);
+  cursor: grab;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-launcher:focus-visible {
+  outline: 3px solid rgba(37,99,235,.28);
+  outline-offset: 2px;
+}
+
+.qr-mini-signal,
+.qr-mini-signal svg,
+.qr-mini-signal img {
+  display: block;
+  width: 19px;
+  height: 19px;
+  pointer-events: none;
+}
+
+.qr-mini-signal-loader,
+.qr-mini-signal-pause,
+.qr-mini-signal-error {
+  display: none !important;
+}
+
+.qr-mini-player.qr-mini-orb.is-loading .qr-mini-signal-wave {
+  display: none;
+}
+
+.qr-mini-player.qr-mini-orb.is-loading .qr-mini-signal-loader {
+  display: block !important;
+  animation: qr-mini-signal-spin 900ms linear infinite;
+}
+
+.qr-mini-player.qr-mini-orb[data-state="playing"] .qr-mini-signal-wave path {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: qr-mini-signal-wave 900ms ease-in-out infinite alternate;
+}
+
+.qr-mini-player.qr-mini-orb[data-state="playing"] .qr-mini-signal-wave path:nth-child(2n) { animation-delay: -300ms; }
+.qr-mini-player.qr-mini-orb[data-state="playing"] .qr-mini-signal-wave path:nth-child(3n) { animation-delay: -600ms; }
+
+.qr-mini-player.qr-mini-orb.is-paused .qr-mini-launcher,
+.qr-mini-player.qr-mini-orb[data-state="paused"] .qr-mini-launcher {
+  border-color: #fbbf24;
+  color: #d97706;
+}
+
+.qr-mini-player.qr-mini-orb.is-paused .qr-mini-signal-wave,
+.qr-mini-player.qr-mini-orb[data-state="paused"] .qr-mini-signal-wave {
+  display: none;
+}
+
+.qr-mini-player.qr-mini-orb.is-paused .qr-mini-signal-pause,
+.qr-mini-player.qr-mini-orb[data-state="paused"] .qr-mini-signal-pause {
+  display: block !important;
+  filter: brightness(0) saturate(100%) invert(47%) sepia(97%) saturate(1135%) hue-rotate(8deg) brightness(93%);
+}
+
+.qr-mini-player.qr-mini-orb[data-state="error"] .qr-mini-launcher {
+  border-color: #fecaca;
+  color: #dc2626;
+}
+
+.qr-mini-player.qr-mini-orb[data-state="error"] .qr-mini-signal-wave { display: none; }
+.qr-mini-player.qr-mini-orb[data-state="error"] .qr-mini-signal-error { display: block !important; }
+
+.qr-mini-quick-actions {
+  position: absolute;
+  z-index: 4;
+  right: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease, transform 160ms cubic-bezier(.2,.8,.2,1), visibility 0s linear 160ms;
+  pointer-events: none;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized .qr-mini-quick-actions.is-above {
+  bottom: 44px;
+  padding-bottom: 8px;
+  transform: translateY(6px);
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized:hover .qr-mini-quick-actions,
+.qr-mini-player.qr-mini-orb.is-minimized:focus-within .qr-mini-quick-actions {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition-delay: 0s;
+  pointer-events: auto;
+}
+
+.qr-mini-quick-button {
+  display: grid;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid #dbe4f0;
+  border-radius: 50%;
+  color: #334155;
+  background: #fff;
+  box-shadow: 0 3px 10px rgba(15,31,61,.11);
+  cursor: pointer;
+}
+
+.qr-mini-quick-button:hover:not(:disabled) {
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.qr-mini-quick-button.is-primary {
+  border-color: #dbe4f0;
+  color: #334155;
+  background: #fff;
+}
+
+.qr-mini-quick-button.is-primary .qr-mini-icon {
+  width: 16px;
+  height: 16px;
+  filter: none;
+  opacity: 1;
+}
+
+.qr-mini-quick-button .qr-mini-follow-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized.is-edge-snapped[data-edge="right"] {
+  transform: translateX(calc(50% + 12px));
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized.is-edge-snapped[data-edge="left"] {
+  transform: translateX(calc(-50% - 12px));
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized.is-edge-snapped[data-edge="right"]:hover:not(.is-dragging),
+.qr-mini-player.qr-mini-orb.is-minimized.is-edge-snapped[data-edge="right"]:focus-within {
+  transform: translateX(12px);
+}
+
+.qr-mini-player.qr-mini-orb.is-minimized.is-edge-snapped[data-edge="left"]:hover:not(.is-dragging),
+.qr-mini-player.qr-mini-orb.is-minimized.is-edge-snapped[data-edge="left"]:focus-within {
+  transform: translateX(-12px);
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) {
+  width: min(252px, calc(100vw - 24px));
+  min-width: min(252px, calc(100vw - 24px));
+  min-height: 112px;
+  padding: 5px 10px;
+  border: 1px solid #dbe4f0;
+  border-radius: 9px;
+  box-shadow: 0 12px 28px rgba(15,31,61,.15);
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized).is-edge-snapped[data-edge="right"] { transform: none; }
+.qr-mini-player.qr-mini-orb:not(.is-minimized).is-edge-snapped[data-edge="left"] { transform: none; }
+.qr-mini-player.qr-mini-orb:not(.is-minimized):hover:not(.is-dragging) { transform: none; }
+.qr-mini-player.qr-mini-orb:not(.is-minimized).is-edge-snapped[data-edge="right"]:hover:not(.is-dragging) { transform: none; }
+.qr-mini-player.qr-mini-orb:not(.is-minimized).is-edge-snapped[data-edge="left"]:hover:not(.is-dragging) { transform: none; }
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-speaker { font-size: 13px; }
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-meta { font-size: 10px; }
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-text {
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 17px;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-progress-row { margin-top: 3px; }
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-progress-copy { line-height: 10px; }
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] {
+  grid-template-columns: repeat(5, 32px);
+  gap: 8px;
+  margin-top: 5px;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button,
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button:not(.is-primary),
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button.is-primary {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  border-radius: 9px;
+}
+
+.qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-icon,
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-follow-icon {
+  width: 16px;
+  height: 16px;
+}
+
+@keyframes qr-mini-signal-spin { to { transform: rotate(360deg); } }
+@keyframes qr-mini-signal-wave {
+  from { transform: scaleY(.55); opacity: .68; }
+  to { transform: scaleY(1); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qr-mini-player.qr-mini-orb,
+  .qr-mini-player.qr-mini-orb.is-snapping,
+  .qr-mini-quick-actions,
+  .qr-mini-signal-loader,
+  .qr-mini-signal-wave path {
+    animation: none !important;
+    transition: none !important;
+  }
 }

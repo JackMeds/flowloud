@@ -7,8 +7,6 @@
   const settingsSchema = globalThis.FlowloudSettings;
   let context = null;
   let snapshot = null;
-  let view = 'reader';
-  let pageContext = null;
   let quickSettings = normalizeQuickSettings(null);
   let lastRenderSignature = '';
 
@@ -45,18 +43,21 @@
       if (!['op-exclusive', 'stable-author', 'round-robin'].includes(value)) return;
       current.preset = value;
     }
-    if (setting === 'activeProviderId' && ['browser-system', 'browser-model', 'local-qwen', 'openai-compatible'].includes(value)) {
-      if (value === 'local-qwen') {
-        const granted = await api.permissions.request({ origins: ['http://127.0.0.1:7811/*'] });
-        if (!granted) throw new Error('未授予本地 Qwen 连接权限。');
+    if (setting === 'activeProviderId' && ['browser-system', 'browser-model', 'local-service', 'openai-compatible'].includes(value)) {
+      if (value === 'local-service') {
+        const baseUrl = settingsSchema
+          ? settingsSchema.sanitizeLocalBaseUrl(current.providerSettings?.['local-service']?.baseUrl)
+          : 'http://127.0.0.1:7811';
+        const granted = await api.permissions.request({ origins: [`${new URL(baseUrl).origin}/*`] });
+        if (!granted) throw new Error('未授予本地服务连接权限。');
       }
       current.activeProviderId = value;
       current.providerId = value;
-      current.providerVersion = 3;
+      current.providerVersion = 4;
     }
     if (setting === 'playbackRate') current.playbackRate = settingsSchema ? settingsSchema.rate(value) : Number(value) || 1;
     if (setting === 'readingMode') current.readingMode = value === 'guide' ? 'guide' : 'content';
-    current.schemaVersion = 4;
+    current.schemaVersion = 5;
     current.interactionVersion = 3;
     const persisted = settingsSchema ? settingsSchema.publicSettings(current) : current;
     await api.storage.local.set({ [SETTINGS_KEY]: persisted });
@@ -69,10 +70,10 @@
 
   function render(message) {
     const signature = JSON.stringify({
-      view,
       message: message || '',
       tabId: context && context.tabId || null,
       title: context && context.title || '',
+      authors: context && context.authors || [],
       settings: quickSettings,
       snapshot: snapshot ? {
         pageKey: snapshot.pageKey,
@@ -81,18 +82,10 @@
         total: snapshot.segmentCount || snapshot.total,
         error: snapshot.error,
         current: snapshot.current
-      } : null,
-      pageContext: view === 'page-voices' ? pageContext : null
+      } : null
     });
     if (signature === lastRenderSignature) return;
     lastRenderSignature = signature;
-    if (view === 'page-voices') {
-      globalThis.QwenPopupView.mountPageVoices(root, Object.assign({}, pageContext || {}, {
-        compact: true,
-        error: message || ''
-      }));
-      return;
-    }
     if (!context || !context.tabId) {
       globalThis.QwenPopupView.mountPopup(root, { empty: true, settings: quickSettings, message: message || '正在读取当前网页…' });
       return;
@@ -121,40 +114,12 @@
         return;
       }
       if (detail.action === 'open-page-editor') {
-        const response = await request('reader:page-voices:get', {
+        const response = await request('page-editor:open', {
           tabId: context && context.tabId,
           pageKey: snapshot && snapshot.pageKey || context && context.pageKey
         });
-        if (response && response.ok === false) throw new Error(response.error && response.error.message || '无法读取本页配音。');
-        pageContext = response && response.pageContext || response;
-        view = 'page-voices';
-        render();
-        return;
-      }
-      if (detail.action === 'cancel-page-voices') {
-        view = 'reader';
-        pageContext = null;
-        render();
-        return;
-      }
-      if (detail.action === 'save-page-voices') {
-        const assignments = Array.from(root.querySelectorAll('[data-author-id]'))
-          .filter((select) => Boolean(select.value))
-          .map((select) => ({ authorId: select.dataset.authorId, voice: select.value }));
-        const response = await request('reader:page-voices:apply', {
-          tabId: context && context.tabId,
-          pageKey: pageContext && pageContext.pageKey || snapshot && snapshot.pageKey || context && context.pageKey,
-          assignments
-        });
-        if (response && response.ok === false) {
-          pageContext = response.pageContext || pageContext;
-          render(response.error && response.error.message || '本页配音没有保存，请重试。');
-          return;
-        }
-        pageContext = null;
-        view = 'reader';
-        snapshot = await request('reader:snapshot:get', { tabId: context && context.tabId });
-        render('本页配音已更新。');
+        if (response && response.ok === false) throw new Error(response.error && response.error.message || '无法打开本页配音编辑器。');
+        window.close();
         return;
       }
       if (detail.action === 'open-options') {
@@ -192,7 +157,7 @@
     if (!context || !context.tabId) return;
     try {
       snapshot = await request('reader:snapshot:get', { tabId: context.tabId });
-      if (view === 'reader') render();
+       render();
     } catch (_) {
       // A transient background restart should not replace a usable Popup with
       // an error while the user is interacting with it.
@@ -202,6 +167,6 @@
   api.storage.onChanged?.addListener((changes, areaName) => {
     if (areaName !== 'local' || !changes[SETTINGS_KEY]) return;
     quickSettings = normalizeQuickSettings(changes[SETTINGS_KEY].newValue);
-    if (view === 'reader') render();
+     render();
   });
 })();

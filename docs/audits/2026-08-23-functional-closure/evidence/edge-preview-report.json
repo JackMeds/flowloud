@@ -1,0 +1,71 @@
+{
+  "extensionId": "akgkceonjipdhmelcofoedlmgggdlcda",
+  "extensionOrigin": "chrome-extension://akgkceonjipdhmelcofoedlmgggdlcda",
+  "profile": "C:\\Users\\15300\\AppData\\Local\\Temp\\flowloud-preview-clean-20260823-e",
+  "output": "C:\\Users\\15300\\AppData\\Local\\Temp\\flowloud-preview-clean-20260823-e\\artifacts",
+  "actionPopupMode": "direct-extension-page",
+  "actionPopupError": "browserContext.waitForEvent: Timeout 10000ms exceeded while waiting for event \"page\"",
+  "reactPopupAudit": {
+    "width": 390,
+    "height": 600,
+    "mock": false,
+    "tabs": [
+      "声音",
+      "阅读",
+      "配音",
+      "更多"
+    ],
+    "transport": [
+      {
+        "width": 92,
+        "height": 48,
+        "label": "上一句"
+      },
+      {
+        "width": 64,
+        "height": 64,
+        "label": "开始朗读"
+      },
+      {
+        "width": 92,
+        "height": 48,
+        "label": "下一句"
+      }
+    ],
+    "hasOptions": true
+  },
+  "reactSettingsAudit": {
+    "mock": false,
+    "tabs": [
+      "朗读与交互",
+      "语音来源",
+      "声音库",
+      "角色配音",
+      "阅读外观",
+      "快捷键",
+      "高级"
+    ],
+    "hasSecretInput": true
+  },
+  "globalPlaybackE2E": {
+    "sourceATabId": 1079724417,
+    "sourceBTabId": 1079724420,
+    "takeoverSourceTabId": 1079724420,
+    "oldSourceStopped": true,
+    "navigationStopped": true,
+    "sourceCloseStopped": true
+  },
+  "e2ePermissionMode": "temporary-test-host-permission",
+  "readerHarness": {
+    "playing": "AUDIT READY · Popup-first floating orb, marker and word motion",
+    "minimized": "AUDIT READY · Edge-snapped floating orb",
+    "stopped": "PASS",
+    "zoomMatrix": {
+      "1": "PASS",
+      "2": "PASS",
+      "0.8": "PASS",
+      "1.5": "PASS"
+    }
+  },
+  "manualSmokeTest": "openPopup 自动化不可用；需人工确认工具栏锚点和失焦自动关闭。"
+}

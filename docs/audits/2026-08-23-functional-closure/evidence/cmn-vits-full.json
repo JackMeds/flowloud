@@ -1,0 +1,82 @@
+{
+  "generatedAt": "2026-08-22T23:37:00.459Z",
+  "browser": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+  "modelId": "cmn-vits",
+  "repoId": "BricksDisplay/vits-cmn",
+  "revision": "3265ca20151fb9c79fa00c8f3874cacb2c15b2ce",
+  "mode": "full",
+  "dtype": "q8",
+  "cancellation": null,
+  "download": {
+    "response": {
+      "ok": true,
+      "requestId": "model-full-smoke-1787441821061",
+      "result": {
+        "downloaded": true,
+        "ready": true,
+        "state": "ready",
+        "cacheId": "flowloud-model-BricksDisplay/vits-cmn@3265ca20151fb9c79fa00c8f3874cacb2c15b2ce",
+        "cacheKey": "flowloud-model-BricksDisplay/vits-cmn@3265ca20151fb9c79fa00c8f3874cacb2c15b2ce",
+        "modelId": "cmn-vits",
+        "repoId": "BricksDisplay/vits-cmn",
+        "revision": "3265ca20151fb9c79fa00c8f3874cacb2c15b2ce",
+        "license": "Apache-2.0",
+        "estimatedBytes": 356515840,
+        "device": "wasm",
+        "verifiedAt": "2026-08-22T23:37:13.200Z",
+        "downloadedAt": "2026-08-22T23:37:13.200Z",
+        "runtimeVersion": "transformers-js-bundled"
+      }
+    },
+    "progressEvents": 584
+  },
+  "offlineVerify": {
+    "ok": true,
+    "requestId": "model-offline-verify-1787441835157",
+    "result": {
+      "ready": true,
+      "cached": true,
+      "state": "ready",
+      "cacheId": "flowloud-model-BricksDisplay/vits-cmn@3265ca20151fb9c79fa00c8f3874cacb2c15b2ce",
+      "verifiedAt": "2026-08-22T23:37:21.630Z",
+      "device": "wasm"
+    }
+  },
+  "offlineSynthesis": {
+    "ok": true,
+    "mimeType": "audio/wav",
+    "audioBytes": 135726,
+    "error": null
+  },
+  "deletion": {
+    "deleted": {
+      "ok": true,
+      "requestId": "model-delete-1787441848044",
+      "result": {
+        "deleted": true,
+        "cacheId": "flowloud-model-BricksDisplay/vits-cmn@3265ca20151fb9c79fa00c8f3874cacb2c15b2ce",
+        "state": "missing"
+      }
+    },
+    "info": {
+      "ok": true,
+      "requestId": "model-info-1787441848069",
+      "result": {
+        "cacheId": "flowloud-model-BricksDisplay/vits-cmn@3265ca20151fb9c79fa00c8f3874cacb2c15b2ce",
+        "cacheKey": "flowloud-model-BricksDisplay/vits-cmn@3265ca20151fb9c79fa00c8f3874cacb2c15b2ce",
+        "modelId": "cmn-vits",
+        "repoId": "BricksDisplay/vits-cmn",
+        "revision": "3265ca20151fb9c79fa00c8f3874cacb2c15b2ce",
+        "license": "Apache-2.0",
+        "estimatedBytes": 356515840,
+        "cached": false,
+        "state": "missing",
+        "ready": false,
+        "verifiedAt": "",
+        "runtimeVersion": "transformers-js-bundled",
+        "device": "wasm"
+      }
+    }
+  },
+  "diagnostics": []
+}

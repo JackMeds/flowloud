@@ -2,12 +2,146 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  actionIconPaths,
   cancelPlaybackForTab,
   chromeStorage,
   createMessageRouter,
   createOffscreenManager,
+  createPopupBroker,
   install,
 } = require('../background.js');
+
+test('toolbar playback state recolors the full logo for each state without overlay badges', () => {
+  assert.deepEqual(actionIconPaths('playing'), {
+    16: 'assets/flowloud-toolbar-playing-16.png',
+    32: 'assets/flowloud-toolbar-playing-32.png',
+  });
+  assert.deepEqual(actionIconPaths('paused'), {
+    16: 'assets/flowloud-toolbar-paused-16.png',
+    32: 'assets/flowloud-toolbar-paused-32.png',
+  });
+  assert.deepEqual(actionIconPaths('unknown'), {
+    16: 'assets/flowloud-toolbar-idle-16.png',
+    32: 'assets/flowloud-toolbar-idle-32.png',
+  });
+  const backgroundSource = require('node:fs').readFileSync(require('node:path').resolve(__dirname, '..', 'background.js'), 'utf8');
+  assert.match(backgroundSource, /setBadgeText\(\{ tabId: target\.tabId, text: '' \}\)/u);
+  assert.doesNotMatch(backgroundSource, /status === 'playing' \? '▶'/u);
+});
+
+test('router injects only the active Provider model and format instead of legacy Qwen defaults', async () => {
+  const previousSchema = globalThis.FlowloudSettings;
+  globalThis.FlowloudSettings = require('../shared/settings-schema.js');
+  const forwarded = [];
+  const settings = globalThis.FlowloudSettings.migrate({
+    activeProviderId: 'local-service',
+    providerSettings: {
+      'local-service': { adapterId: 'cosyvoice', baseUrl: 'http://127.0.0.1:50000', model: 'CosyVoice2-0.5B', responseFormat: 'wav' },
+    },
+  });
+  try {
+    const router = createMessageRouter({
+      api: {},
+      offscreen: { async request(message) { forwarded.push(message); return { ok: true }; } },
+      storage: { async get(key) { return key === 'qwenReaderSettings' ? settings : undefined; }, async set() {} },
+      session: { async get() { return {}; } },
+    });
+    const result = await router({
+      type: 'tts:synthesize', providerId: 'local-service', prefetch: true,
+      request: { input: '你好' },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(forwarded[0].providerId, 'local-service');
+    assert.equal(forwarded[0].request.model, 'CosyVoice2-0.5B');
+    assert.equal(forwarded[0].request.response_format, 'wav');
+    assert.doesNotMatch(JSON.stringify(forwarded[0].request), /qwen3-tts/u);
+  } finally {
+    globalThis.FlowloudSettings = previousSchema;
+  }
+});
+
+test('settings secret messages keep credentials out of public settings and distinguish session from remembered storage', async () => {
+  const previousSchema = globalThis.FlowloudSettings;
+  globalThis.FlowloudSettings = require('../shared/settings-schema.js');
+  const localValues = {};
+  const sessionValues = {};
+  try {
+    const router = createMessageRouter({
+      api: {},
+      storage: {
+        async get(key) { return localValues[key]; },
+        async set(key, value) { localValues[key] = value; },
+      },
+      session: {
+        async get(key) { return sessionValues[key]; },
+        async set(key, value) { sessionValues[key] = value; },
+      },
+    });
+    const saved = await router({ type: 'settings:secret:set', providerId: 'openai-compatible', secret: 'sk-private-value', remember: false });
+    assert.deepEqual(saved, { ok: true, providerId: 'openai-compatible', present: true, remembered: false });
+    assert.equal(sessionValues.flowloudProviderSecrets['openai-compatible'], 'sk-private-value');
+    assert.equal(localValues.flowloudRememberedProviderSecrets?.['openai-compatible'], undefined);
+    const status = await router({ type: 'settings:secrets:status' });
+    assert.deepEqual(status.secrets['openai-compatible'], { present: true, remembered: false });
+    assert.doesNotMatch(JSON.stringify(status), /sk-private-value/u);
+  } finally {
+    globalThis.FlowloudSettings = previousSchema;
+  }
+});
+
+test('settings reset preserves model cache registry but restores safe Provider defaults', async () => {
+  const previousSchema = globalThis.FlowloudSettings;
+  globalThis.FlowloudSettings = require('../shared/settings-schema.js');
+  let stored = globalThis.FlowloudSettings.migrate({
+    activeProviderId: 'openai-compatible', playbackRate: 2,
+    modelCacheRegistry: { 'flowloud-model-pinned': { revision: 'a'.repeat(40) } },
+  });
+  try {
+    const router = createMessageRouter({
+      api: {},
+      storage: {
+        async get(key) { return key === 'qwenReaderSettings' ? stored : undefined; },
+        async set(key, value) { if (key === 'qwenReaderSettings') stored = value; },
+      },
+    });
+    const response = await router({ type: 'settings:reset' });
+    assert.equal(response.ok, true);
+    assert.equal(response.settings.activeProviderId, 'browser-system');
+    assert.equal(response.settings.playbackRate, 1);
+    assert.deepEqual(response.settings.modelCacheRegistry, { 'flowloud-model-pinned': { revision: 'a'.repeat(40) } });
+  } finally {
+    globalThis.FlowloudSettings = previousSchema;
+  }
+});
+
+test('successful browser-model download persists verified cache metadata instead of trusting a loose downloaded flag', async () => {
+  const previousSchema = globalThis.FlowloudSettings;
+  globalThis.FlowloudSettings = require('../shared/settings-schema.js');
+  let stored = globalThis.FlowloudSettings.migrate({});
+  const cacheId = 'flowloud-model-BricksDisplay/vits-cmn@3265ca20151fb9c79fa00c8f3874cacb2c15b2ce';
+  try {
+    const router = createMessageRouter({
+      api: {},
+      offscreen: { async request() { return { ok: true, result: {
+        ready: true, state: 'ready', cacheId, repoId: 'BricksDisplay/vits-cmn',
+        revision: '3265ca20151fb9c79fa00c8f3874cacb2c15b2ce', verifiedAt: '2026-08-23T00:00:00.000Z',
+        runtimeVersion: 'transformers-js-bundled', device: 'wasm', license: 'Apache-2.0', estimatedBytes: 356515840,
+      } }; } },
+      storage: {
+        async get(key) { return key === 'qwenReaderSettings' ? stored : undefined; },
+        async set(key, value) { if (key === 'qwenReaderSettings') stored = value; },
+      },
+    });
+    const response = await router({ type: 'provider:model:download', requestId: 'model-download-1' });
+    assert.equal(response.ok, true);
+    assert.equal(stored.providerSettings['browser-model'].downloaded, true);
+    assert.equal(stored.providerSettings['browser-model'].cacheMetadata.cacheId, cacheId);
+    assert.equal(stored.modelCacheRegistry[cacheId].verifiedAt, '2026-08-23T00:00:00.000Z');
+    assert.equal(stored.modelCacheRegistry[cacheId].estimatedBytes, 356515840);
+  } finally {
+    globalThis.FlowloudSettings = previousSchema;
+  }
+});
 
 test('closing a source tab requests cancellation for every offscreen job owned by that tab', async () => {
   const calls = [];
@@ -555,6 +689,88 @@ test('offscreen control bypasses a stale context snapshot and trusts the live re
   assert.equal(result.paused, true);
   assert.equal(sent.length, 1);
   assert.equal(sent[0].target, 'qwen-reader-offscreen');
+});
+
+test('an enabled reader tab is reinjected after a same-tab refresh and forgotten when closed', async () => {
+  const sessionValues = {};
+  const injected = [];
+  const chromeApi = {
+    storage: {
+      session: {
+        async get(key) { return { [key]: sessionValues[key] }; },
+        async set(values) { Object.assign(sessionValues, values); },
+        async remove(key) { delete sessionValues[key]; },
+      },
+    },
+    tabs: {
+      async get(tabId) { return { id: tabId, url: 'https://example.com/topic/1', title: 'Topic' }; },
+    },
+    scripting: {
+      async insertCSS(payload) { injected.push(['css', payload.target.tabId]); },
+      async executeScript(payload) { injected.push(['js', payload.target.tabId, payload.files.at(-1)]); },
+    },
+  };
+  const broker = createPopupBroker(chromeApi, {});
+  await broker.acceptSnapshot({
+    type: 'reader:snapshot',
+    snapshot: { pageKey: 'https://example.com/topic/1', status: 'ready', total: 2 },
+  }, { tab: { id: 17, url: 'https://example.com/topic/1', title: 'Topic' } });
+
+  await broker.forgetTab(17, false);
+  assert.equal(await broker.ensureInjected(17), true);
+  assert.deepEqual(injected, [
+    ['css', 17],
+    ['js', 17, 'content/reader.js'],
+  ]);
+
+  await broker.forgetTab(17, true);
+  assert.equal(await broker.ensureInjected(17), false);
+  assert.equal(injected.length, 2);
+});
+
+test('offscreen control reports a typed retryable failure instead of a false success', async () => {
+  const manager = createOffscreenManager({
+    runtime: {
+      getURL(path) { return `chrome-extension://reader/${path}`; },
+      async sendMessage() {
+        const error = new Error('Receiving end does not exist.');
+        error.code = 'offscreen_unavailable';
+        throw error;
+      },
+    },
+  });
+
+  const result = await manager.control({
+    type: 'tts:pause', clientId: 'tab', playbackId: 'play', requestId: 'req',
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.count, 0);
+  assert.equal(result.error.code, 'offscreen_unavailable');
+  assert.equal(result.error.retryable, true);
+  assert.match(result.error.message, /Receiving end/u);
+  assert.equal(Object.hasOwn(result, 'paused'), false);
+});
+
+test('background reports an unavailable playback control channel as a typed failure', async () => {
+  const router = createMessageRouter({
+    api: {},
+    storage: {
+      async get() { return { activeProviderId: 'local-qwen' }; },
+      async set() {},
+    },
+  });
+
+  const result = await router({
+    type: 'tts:pause', clientId: 'tab', playbackId: 'play', requestId: 'req',
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.error, {
+    code: 'offscreen_unavailable',
+    message: '后台音频运行环境不可用。',
+    retryable: true,
+  });
 });
 
 test('background cancellation is a fast no-op when no offscreen document exists', async () => {

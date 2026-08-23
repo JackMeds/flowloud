@@ -125,6 +125,65 @@
     };
   }
 
+  function segmentIdentity(segment) {
+    const item = segment && typeof segment === "object" ? segment : {};
+    return String(
+      item.sourceIdentity ||
+      item.id ||
+      [item.sourceKey || "", item.sourceStart || 0, item.sourceEnd || 0, item.text || ""].join("|")
+    );
+  }
+
+  function shouldWaitForProgressiveQueue(document) {
+    const source = document && typeof document === "object" ? document : {};
+    return source.kind === "forum" && source.complete === false;
+  }
+
+  function segmentOrderValue(segment, fallback) {
+    const item = segment && typeof segment === "object" ? segment : {};
+    const floor = Number(item.floor);
+    const unit = Number(item.sourceLocator && item.sourceLocator.unitIndex);
+    const start = Number(item.sourceStart);
+    return {
+      floor: Number.isFinite(floor) ? floor : Number.MAX_SAFE_INTEGER,
+      unit: Number.isFinite(unit) ? unit : 0,
+      start: Number.isFinite(start) ? start : 0,
+      fallback,
+    };
+  }
+
+  // Forum adapters can reveal the visible posts before the canonical API has
+  // finished. Merge those immutable snapshots so a currently playing sentence
+  // is not removed when an earlier page arrives a moment later.
+  function mergeProgressiveSegments(previous, incoming) {
+    const before = Array.isArray(previous) ? previous : [];
+    const after = Array.isArray(incoming) ? incoming : [];
+    const entries = [];
+    const positions = new Map();
+    [...after, ...before].forEach((segment) => {
+      const key = segmentIdentity(segment);
+      if (!key || positions.has(key)) return;
+      positions.set(key, entries.length);
+      entries.push(segment);
+    });
+    return entries
+      .map((segment, fallback) => ({ segment, order: segmentOrderValue(segment, fallback) }))
+      .sort((left, right) => (
+        left.order.floor - right.order.floor ||
+        left.order.unit - right.order.unit ||
+        left.order.start - right.order.start ||
+        left.order.fallback - right.order.fallback
+      ))
+      .map((entry) => entry.segment);
+  }
+
+  function findSegmentByIdentity(segments, identity) {
+    const key = String(identity || "");
+    if (!key) return -1;
+    return (Array.isArray(segments) ? segments : [])
+      .findIndex((segment) => segmentIdentity(segment) === key);
+  }
+
   function withCurrent(state, index) {
     const segments = state.segments || [];
     const safeIndex = segments.length
@@ -318,6 +377,9 @@
           );
         }
       },
+      clearAll() {
+        entries.clear();
+      },
       clear(index) {
         entries.delete(index);
       },
@@ -389,6 +451,10 @@
 
   return {
     createInitialState,
+    segmentIdentity,
+    mergeProgressiveSegments,
+    shouldWaitForProgressiveQueue,
+    findSegmentByIdentity,
     reduce,
     ORB_STATUS_PRIORITY,
     ORB_STATUS_META,

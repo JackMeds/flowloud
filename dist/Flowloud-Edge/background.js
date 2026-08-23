@@ -2,8 +2,11 @@
 if (typeof importScripts === 'function') {
   const backgroundScripts = [];
   if (!globalThis.FlowloudSettings) backgroundScripts.push('shared/settings-schema.js');
-  if (!globalThis.FlowloudProviderV3) backgroundScripts.push('shared/provider-v3.js');
   if (!globalThis.QwenReaderApiClient) backgroundScripts.push('shared/api-client.js');
+  if (!globalThis.FlowloudProviderCore) backgroundScripts.push('shared/provider-core.js');
+  if (!globalThis.FlowloudProviderV3) backgroundScripts.push('shared/provider-v3.js');
+  if (!globalThis.FlowloudProviderV4) backgroundScripts.push('shared/provider-v4.js');
+  if (!globalThis.FlowloudDocumentProviderV1) backgroundScripts.push('shared/document-provider-v1.js');
   if (!globalThis.QwenReaderVoiceLibrary) {
     if (!globalThis.QwenReaderVoiceNaming) backgroundScripts.push('shared/voice-naming.js');
     backgroundScripts.push('shared/voice-library.js');
@@ -29,14 +32,27 @@ if (typeof importScripts === 'function') {
   const OFFSCREEN_TARGET = 'qwen-reader-offscreen';
   const STREAM_EVENT_TARGET = 'qwen-reader-stream-event';
   const OFFSCREEN_PATH = 'offscreen.html';
-  const REQUIRED_ORIGIN = 'http://127.0.0.1:7811/*';
+  const REQUIRED_ORIGIN = 'http://127.0.0.1/*';
   const SETTINGS_KEY = 'qwenReaderSettings';
   const CLEANUP_QUEUE_KEY = 'voiceCleanupQueue';
   const POPUP_TARGET_KEY = 'qwenReaderPopupTarget';
   const POPUP_SNAPSHOTS_KEY = 'qwenReaderPopupSnapshots';
+  const READER_ENABLED_TABS_KEY = 'qwenReaderEnabledTabsV1';
   const PAGE_EDITOR_CONTEXTS_KEY = 'qwenReaderPageEditorContexts';
+  const GLOBAL_PLAYBACK_KEY = 'flowloudGlobalPlaybackV1';
+  const DOCUMENT_WORKSPACE_SEED_KEY = 'flowloudDocumentWorkspaceSeedV1';
   const PAGE_EDITOR_PATH = 'page-voices.html';
   const BUILTIN_VOICES = ['邵思萌', 'qwen-clone'];
+
+  function actionIconPaths(status) {
+    const normalized = ['playing', 'paused', 'error'].includes(String(status || ''))
+      ? String(status)
+      : 'idle';
+    return {
+      16: `assets/flowloud-toolbar-${normalized}-16.png`,
+      32: `assets/flowloud-toolbar-${normalized}-32.png`,
+    };
+  }
 
   function isReadOnlyProfile(profile) {
     if (!profile || typeof profile !== 'object') return false;
@@ -171,6 +187,7 @@ if (typeof importScripts === 'function') {
       'popup:reset-target',
       'reader:active-context',
       'reader:snapshot:get',
+      'reader:document:get',
       'reader:command',
       'reader:page-voices:get',
       'reader:page-voices:apply',
@@ -250,13 +267,18 @@ if (typeof importScripts === 'function') {
 
   function errorEnvelope(error) {
     if (error && error.name === 'AbortError') {
-      return { ok: false, error: { code: 'cancelled', message: '朗读已取消。' } };
+      return { ok: false, error: { stage: 'provider', code: 'cancelled', message: '朗读已取消。', retryable: false } };
     }
     return {
       ok: false,
       error: {
+        stage: String(error && (error.stage || error.operation) || 'provider'),
         code: error && error.code ? error.code : 'unexpected_error',
         message: error && error.message ? error.message : '本地朗读服务发生未知错误。',
+        retryable: error && error.retryable != null
+          ? Boolean(error.retryable)
+          : ['network_error', 'timeout', 'offscreen_unavailable'].includes(String(error && error.code || ''))
+            || /^http_5\d\d$/u.test(String(error && error.code || '')),
       },
     };
   }
@@ -282,17 +304,23 @@ if (typeof importScripts === 'function') {
       return assumedOpen;
     }
 
-    async function assertPermission() {
+    async function assertPermission(baseUrl) {
       if (!chromeApi.permissions || typeof chromeApi.permissions.contains !== 'function') return;
-      const granted = await chromeApi.permissions.contains({ origins: [REQUIRED_ORIGIN] });
+      let origin = REQUIRED_ORIGIN;
+      try { origin = `${new URL(String(baseUrl || 'http://127.0.0.1:7811')).origin}/*`; } catch (_) {}
+      const granted = await chromeApi.permissions.contains({ origins: [origin] });
       if (granted) return;
-      const error = new Error('请在 Edge 扩展详情中允许访问 127.0.0.1:7811。');
+      const error = new Error(`请先允许扩展访问本地服务：${origin.replace(/\/\*$/, '')}`);
       error.code = 'host_permission_missing';
+      error.retryable = true;
       throw error;
     }
 
-    async function ensureDocument(providerId) {
-      if (providerId === 'local-qwen') await assertPermission();
+    async function ensureDocument(message) {
+      const providerId = String(message && message.providerId || '');
+      if (providerId === 'local-qwen' || providerId === 'local-service') {
+        await assertPermission(message && message.providerSettings && message.providerSettings.baseUrl);
+      }
       if (await hasDocument()) {
         assumedOpen = true;
         return;
@@ -338,7 +366,7 @@ if (typeof importScripts === 'function') {
 
     return {
       async request(message) {
-        await ensureDocument(message && message.providerId);
+        await ensureDocument(message);
         return send(message);
       },
       async control(message) {
@@ -348,12 +376,15 @@ if (typeof importScripts === 'function') {
         // non-applied control below.
         try {
           return await send(message);
-        } catch (_) {
+        } catch (error) {
           return {
-            ok: true,
-            paused: message && message.type === 'tts:pause' ? false : undefined,
-            resumed: message && message.type === 'tts:resume' ? false : undefined,
+            ok: false,
             count: 0,
+            error: {
+              code: error && error.code ? error.code : 'offscreen_unavailable',
+              message: error && error.message ? error.message : '后台音频运行环境没有响应。',
+              retryable: true,
+            },
           };
         }
       },
@@ -364,6 +395,189 @@ if (typeof importScripts === 'function') {
       hasDocument,
       ensureDocument,
     };
+  }
+
+  function createGlobalPlaybackCoordinator(options) {
+    const config = options || {};
+    const session = config.session || null;
+    const cancel = typeof config.cancel === 'function' ? config.cancel : async () => ({ ok: true, cancelled: false });
+    let active = null;
+    let restored = false;
+    let intentSequence = 0;
+    let serial = Promise.resolve();
+
+    function identity(message) {
+      const body = message || {};
+      const sourceTabValue = body.sourceTabId;
+      return {
+        sourceTabId: sourceTabValue == null || sourceTabValue === ''
+          ? null : (Number.isInteger(Number(sourceTabValue)) ? Number(sourceTabValue) : null),
+        sourceDocumentId: String(body.sourceDocumentId || ''),
+        pageKey: String(body.pageKey || ''),
+        segmentId: String(body.segmentId || body.request && body.request.segmentId || ''),
+        playbackId: String(body.playbackId || body.sessionId || ''),
+        requestId: String(body.requestId || body.request && body.request.requestId || ''),
+        clientId: String(body.clientId || ''),
+        providerId: String(body.providerId || ''),
+      };
+    }
+
+    async function restore() {
+      if (restored) return active;
+      restored = true;
+      const saved = session && typeof session.get === 'function' ? await session.get(GLOBAL_PLAYBACK_KEY) : null;
+      if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+        active = Object.assign({}, saved);
+        intentSequence = Math.max(intentSequence, Number(active.intentSequence) || 0);
+      }
+      return active;
+    }
+
+    async function persist() {
+      if (!session) return;
+      if (active && typeof session.set === 'function') await session.set(GLOBAL_PLAYBACK_KEY, active);
+      else if (typeof session.remove === 'function') await session.remove(GLOBAL_PLAYBACK_KEY);
+    }
+
+    function samePlayback(left, right) {
+      if (!left || !right) return false;
+      if (left.playbackId && right.playbackId) return left.playbackId === right.playbackId;
+      return left.sourceTabId === right.sourceTabId && left.requestId && left.requestId === right.requestId;
+    }
+
+    function snapshot() {
+      return active ? Object.assign({ active: true }, safeJsonClone(active)) : {
+        active: false, state: 'idle', intentSequence,
+      };
+    }
+
+    async function claim(message) {
+      const requested = identity(message);
+      if (requested.sourceTabId == null || !requested.playbackId) {
+        const error = new Error('全局播放会话缺少来源标签页或 playbackId。');
+        error.code = 'invalid_playback_identity';
+        throw error;
+      }
+      serial = serial.then(async () => {
+        await restore();
+        if (active && !samePlayback(active, requested)) {
+          await cancel(Object.assign({}, active), 'replaced-by-new-playback');
+        }
+        if (active && samePlayback(active, requested)) {
+          active = Object.assign({}, active, requested, {
+            state: active.state === 'idle' ? 'loading' : active.state,
+            updatedAt: Date.now(),
+          });
+        } else {
+          intentSequence += 1;
+          active = Object.assign({}, requested, {
+            intentSequence,
+            state: String(message && message.state || 'loading'),
+            desiredPaused: Boolean(message && message.startPaused),
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          });
+        }
+        await persist();
+        return snapshot();
+      });
+      return { ok: true, playback: await serial };
+    }
+
+    async function resolve(message) {
+      await restore();
+      const body = Object.assign({}, message || {});
+      if (!active) return body;
+      const supplied = identity(body);
+      if (supplied.playbackId || supplied.requestId || supplied.sourceTabId != null) return body;
+      return Object.assign({}, body, {
+        sourceTabId: active.sourceTabId,
+        sourceDocumentId: active.sourceDocumentId,
+        pageKey: active.pageKey,
+        segmentId: active.segmentId,
+        playbackId: active.playbackId,
+        requestId: active.requestId,
+        sessionId: active.playbackId,
+        clientId: active.clientId,
+        providerId: active.providerId,
+        intentSequence: active.intentSequence,
+      });
+    }
+
+    async function update(patch, matcher) {
+      await restore();
+      if (!active) return snapshot();
+      const expected = matcher ? identity(matcher) : null;
+      if (expected && (expected.playbackId || expected.requestId || expected.sourceTabId != null)) {
+        if (expected.playbackId && expected.playbackId !== active.playbackId) return snapshot();
+        if (expected.requestId && expected.requestId !== active.requestId) return snapshot();
+        if (expected.sourceTabId != null && expected.sourceTabId !== active.sourceTabId) return snapshot();
+      }
+      active = Object.assign({}, active, patch || {}, { updatedAt: Date.now() });
+      await persist();
+      return snapshot();
+    }
+
+    async function release(message, reason) {
+      serial = serial.then(async () => {
+        await restore();
+        if (!active) return snapshot();
+        const expected = identity(message);
+        if (expected.playbackId && expected.playbackId !== active.playbackId) return snapshot();
+        if (expected.sourceTabId != null && expected.sourceTabId !== active.sourceTabId) return snapshot();
+        active = null;
+        await persist();
+        return Object.assign(snapshot(), { reason: String(reason || 'released') });
+      });
+      return serial;
+    }
+
+    async function stopForTab(tabId, reason) {
+      serial = serial.then(async () => {
+        await restore();
+        if (!active || Number(active.sourceTabId) !== Number(tabId)) return snapshot();
+        const previous = Object.assign({}, active);
+        await cancel(previous, reason || 'source-tab-stopped');
+        active = null;
+        await persist();
+        return Object.assign(snapshot(), { stopped: true, reason: String(reason || '') });
+      });
+      return serial;
+    }
+
+    async function acceptStreamEvent(message) {
+      await restore();
+      if (!active) return snapshot();
+      const incoming = identity(message);
+      if (incoming.playbackId && incoming.playbackId !== active.playbackId) return snapshot();
+      if (incoming.requestId && incoming.requestId !== active.requestId) return snapshot();
+      const event = String(message && message.event || '').toLowerCase();
+      if (['ended', 'cancelled', 'error'].includes(event)) return release(message, event);
+      const states = { started: 'playing', progress: active.state, paused: 'paused', resumed: 'playing', retrying: 'loading' };
+      return update({
+        state: states[event] || active.state,
+        desiredPaused: event === 'paused' ? true : event === 'resumed' ? false : active.desiredPaused,
+      }, message);
+    }
+
+    async function acceptReaderSnapshot(value, source) {
+      await restore();
+      const normalized = snapshotFromMessage(value);
+      const tabId = source && source.tabId != null ? Number(source.tabId) : null;
+      if (!normalized || !active || tabId !== active.sourceTabId) return snapshot();
+      if (normalized.pageKey && active.pageKey && normalized.pageKey !== active.pageKey) return snapshot();
+      if (['playing', 'paused', 'loading', 'extracting', 'ready'].includes(normalized.status)) {
+        return update({ state: normalized.status, readerSnapshot: normalized }, { sourceTabId: tabId, playbackId: active.playbackId });
+      }
+      if (['idle', 'error'].includes(normalized.status)) return release({ sourceTabId: tabId, playbackId: active.playbackId }, `reader-${normalized.status}`);
+      return snapshot();
+    }
+
+    return Object.freeze({
+      claim, resolve, update, release, stopForTab, acceptStreamEvent, acceptReaderSnapshot,
+      getSnapshot: async () => { await restore(); return snapshot(); },
+      getActive: async () => { await restore(); return active ? Object.assign({}, active) : null; },
+    });
   }
 
   function createChromeTtsManager(chromeApi) {
@@ -392,7 +606,7 @@ if (typeof importScripts === 'function') {
     function emit(event, extra, session) {
       const current = session || active;
       if (!current || current.sourceTabId == null || !chromeApi.tabs?.sendMessage) return;
-      const payload = Object.assign({ target: STREAM_EVENT_TARGET, event, type: `tts:stream:${event}`, requestId: current.requestId, playbackId: current.playbackId, sessionId: current.sessionId, clientId: current.clientId, sourceTabId: current.sourceTabId, providerId: 'browser-system', utteranceToken: current.token, capabilityMode: current.capabilityMode, directPlayback: true, transportStreaming: false, progressivePlayback: true }, extra || {});
+      const payload = Object.assign({ target: STREAM_EVENT_TARGET, event, type: 'tts:stream:event', streamEventType: `tts:stream:${event}`, requestId: current.requestId, playbackId: current.playbackId, sessionId: current.sessionId, clientId: current.clientId, sourceTabId: current.sourceTabId, providerId: 'browser-system', utteranceToken: current.token, capabilityMode: current.capabilityMode, directPlayback: true, transportStreaming: false, progressivePlayback: true }, extra || {});
       try { const sent = chromeApi.tabs.sendMessage(current.sourceTabId, payload); sent?.catch?.(() => {}); } catch (_) {}
     }
     function terminal(session, event, extra) {
@@ -421,7 +635,8 @@ if (typeof importScripts === 'function') {
           const localIndex = Math.max(0, Number(event.charIndex) || 0);
           session.lastBoundary = session.offset + localIndex;
           session.capabilityMode = type === 'word' ? 'word' : session.capabilityMode === 'word' ? 'word' : 'sentence';
-          emit('boundary', { boundaryType: type, charIndex: session.lastBoundary, charLength: Number(event.charLength) || 0, preciseBoundary: type === 'word', restartedFromBoundary: Boolean(restartedFromBoundary) }, session);
+          session.boundarySequence += 1;
+          emit('boundary', { boundaryType: type, charIndex: session.lastBoundary, charLength: Math.max(0, Number(event.length ?? event.charLength) || 0), sequence: session.boundarySequence, preciseBoundary: type === 'word', restartedFromBoundary: Boolean(restartedFromBoundary) }, session);
         } else if (type === 'pause') {
           session.state = 'paused';
         } else if (type === 'resume') {
@@ -465,7 +680,7 @@ if (typeof importScripts === 'function') {
       const catalog = await voices().catch(() => []);
       const selectedMetadata = catalog.find((voice) => voice.voiceId === selectedVoice) || {};
       const eventTypes = Array.isArray(selectedMetadata.eventTypes) ? selectedMetadata.eventTypes : [];
-      active = { requestId: String(body.requestId || ''), playbackId: String(body.playbackId || ''), sessionId: String(body.sessionId || ''), clientId: String(body.clientId || ''), sourceTabId: Number.isInteger(sourceTabId) && sourceTabId >= 0 ? sourceTabId : null, token: `system-${Date.now().toString(36)}-${++tokenSequence}`, generation: 0, state: 'idle', desiredPaused: false, restarting: false, watchdog: null, input, offset: 0, sentenceOffset: 0, lastBoundary: 0, capabilityMode: eventTypes.includes('word') ? 'word' : eventTypes.includes('sentence') ? 'sentence' : 'sentence-restart' };
+      active = { requestId: String(body.requestId || ''), playbackId: String(body.playbackId || ''), sessionId: String(body.sessionId || ''), clientId: String(body.clientId || ''), sourceTabId: Number.isInteger(sourceTabId) && sourceTabId >= 0 ? sourceTabId : null, token: `system-${Date.now().toString(36)}-${++tokenSequence}`, generation: 0, boundarySequence: 0, state: 'idle', desiredPaused: false, restarting: false, watchdog: null, input, offset: 0, sentenceOffset: 0, lastBoundary: 0, capabilityMode: eventTypes.includes('word') ? 'word' : eventTypes.includes('sentence') ? 'sentence' : 'sentence-restart' };
       const acceptedRequestId = active.requestId;
       active.options = { enqueue: false, rate: Math.max(.75, Math.min(2, Number(speech.rate || body.playbackRate) || 1)), pitch: Math.max(0, Math.min(2, Number(speech.pitch) || 1)), volume: Math.max(0, Math.min(1, speech.volume == null ? 1 : Number(speech.volume))) };
       if (selectedVoice) active.options.voiceName = selectedVoice; if (speech.lang) active.options.lang = String(speech.lang);
@@ -475,21 +690,27 @@ if (typeof importScripts === 'function') {
     async function control(message) {
       if (!matches(message)) return { ok: true, count: 0 };
       if (message.type === 'tts:pause') {
-        active.desiredPaused = true; active.state = 'paused'; clearWatchdog(active);
-        try { tts.pause(); } catch (_) {}
-        emit('paused', { charIndex: active.lastBoundary }, active);
-        return { ok: true, paused: true, count: 1, utteranceToken: active.token };
+        const session = active;
+        session.desiredPaused = true; session.state = 'paused'; clearWatchdog(session);
+        // Several operating-system voices implement chrome.tts.pause() only at
+        // a word/sentence boundary. Stop the utterance immediately and retain
+        // the latest safe boundary; resume re-speaks only the remaining text.
+        session.restarting = true;
+        session.generation += 1;
+        try { tts.stop(); } catch (_) {}
+        session.restarting = false;
+        emit('paused', { charIndex: session.lastBoundary, hardPaused: true }, session);
+        return { ok: true, paused: true, hardPaused: true, count: 1, utteranceToken: session.token };
       }
       if (message.type === 'tts:resume') {
         const session = active;
-        session.desiredPaused = false; session.state = 'playing'; session.lastActivityAt = Date.now();
-        try { tts.resume(); } catch (_) {}
-        emit('resumed', { charIndex: session.lastBoundary, restartedFromBoundary: false }, session);
-        session.watchdog = setTimeout(() => {
-          session.watchdog = null;
-          if (active === session && !session.desiredPaused && Date.now() - session.lastActivityAt >= 650) restartFromBoundary(session);
-        }, 700);
-        session.watchdog?.unref?.();
+        const offset = Math.max(0, Number(session.lastBoundary) || Number(session.sentenceOffset) || 0);
+        session.desiredPaused = false; session.state = 'starting'; session.lastActivityAt = Date.now();
+        speakSession(session, offset, true);
+        if (active === session) {
+          session.state = 'playing';
+          emit('resumed', { charIndex: offset, restartedFromBoundary: true, hardPaused: true }, session);
+        }
         return { ok: true, resumed: true, count: 1, utteranceToken: session.token };
       }
       if (message.type === 'tts:cancel') { const session = active; try { tts.stop(); } catch (_) {} terminal(session, 'cancelled'); return { ok: true, cancelled: true, count: 1 }; }
@@ -498,7 +719,7 @@ if (typeof importScripts === 'function') {
     return { request, control, voices, active: () => active };
   }
 
-  function createMessageRouter({ api, storage, session, openVoiceStudio, offscreen, systemTts, testProvider }) {
+  function createMessageRouter({ api, storage, session, openVoiceStudio, openDocumentWorkspace, captureVisibleTab, offscreen, systemTts, testProvider, playbackCoordinator }) {
     if (!api) throw new TypeError('缺少本地 TTS 客户端。');
     let requestSequence = 0;
 
@@ -519,9 +740,8 @@ if (typeof importScripts === 'function') {
       const explicit = saved && typeof saved === 'object' && !Array.isArray(saved) && (saved.activeProviderId || saved.providerId);
       if (explicit) return activeProviderId();
       // One-version read compatibility: pre-V4 voice messages had no
-      // providerId. Only installations with actual legacy Qwen profiles are
-      // routed to local-qwen; a clean install remains browser-system.
-      if ((await profiles()).length) return 'local-qwen';
+      // providerId. Legacy Qwen data is now owned by local-service.
+      if ((await profiles()).length) return globalThis.FlowloudSettings ? 'local-service' : 'local-qwen';
       return activeProviderId();
     }
 
@@ -560,17 +780,52 @@ if (typeof importScripts === 'function') {
           if (payload.request && typeof payload.request === 'object') {
             payload.request.rate = payload.playbackRate;
             if (!payload.request.voice && settings.providerVoices[payload.providerId]) payload.request.voice = settings.providerVoices[payload.providerId];
+            if (!payload.request.model && payload.providerSettings.model) payload.request.model = payload.providerSettings.model;
+            if (!payload.request.response_format && payload.providerSettings.responseFormat) {
+              payload.request.response_format = payload.providerSettings.responseFormat;
+            }
           }
           if (payload.providerId === 'openai-compatible' && session) {
             const sessionSecrets = await session.get(schema.SESSION_SECRET_KEY) || {};
             const remembered = await storage.get(schema.REMEMBERED_SECRET_KEY) || {};
             payload.apiKey = sessionSecrets['openai-compatible'] || remembered['openai-compatible'] || '';
           }
-          if (payload.providerId === 'local-qwen' && session) {
+          if (payload.providerId === 'doubao-tts' && session) {
             const sessionSecrets = await session.get(schema.SESSION_SECRET_KEY) || {};
             const remembered = await storage.get(schema.REMEMBERED_SECRET_KEY) || {};
-            payload.clientToken = sessionSecrets['local-qwen'] || remembered['local-qwen'] || '';
+            payload.apiKey = sessionSecrets['doubao-tts'] || remembered['doubao-tts'] || '';
           }
+          if (payload.providerId === 'local-service' && session) {
+            const sessionSecrets = await session.get(schema.SESSION_SECRET_KEY) || {};
+            const remembered = await storage.get(schema.REMEMBERED_SECRET_KEY) || {};
+            payload.clientToken = sessionSecrets['local-service'] || remembered['local-service']
+              || sessionSecrets['local-qwen'] || remembered['local-qwen'] || '';
+          }
+        }
+      }
+      if (/^document:(probe|extract|translate|cancel)$/u.test(String(payload.type || ''))) {
+        const schema = globalThis.FlowloudSettings;
+        if (schema && payload.type !== 'document:cancel') {
+          const settings = schema.migrate(await storage.get(SETTINGS_KEY));
+          const operation = payload.type.slice('document:'.length);
+          const selectedId = String(payload.profileId || (operation === 'extract'
+            ? settings.aiProfileSelections?.ocr : settings.aiProfileSelections?.translation) || '');
+          const profile = settings.aiProfiles.find((item) => item && item.id === selectedId);
+          if (!profile) throw Object.assign(new Error('请选择并配置可用的 AI Profile。'), { code: 'ai_profile_missing' });
+          const secretKey = `ai:${profile.id}`;
+          const sessionSecrets = session ? await session.get(schema.SESSION_SECRET_KEY) || {} : {};
+          const remembered = await storage.get(schema.REMEMBERED_SECRET_KEY) || {};
+          payload.profileId = profile.id;
+          payload.profile = profile;
+          payload.secret = sessionSecrets[secretKey] || remembered[secretKey] || '';
+        }
+      }
+      if (payload.type === 'tts:synthesize' && payload.prefetch !== true && playbackCoordinator) {
+        const claimed = await playbackCoordinator.claim(payload);
+        if (claimed && claimed.playback) {
+          payload.intentSequence = claimed.playback.intentSequence;
+          payload.sourceDocumentId = claimed.playback.sourceDocumentId || payload.sourceDocumentId;
+          payload.pageKey = claimed.playback.pageKey || payload.pageKey;
         }
       }
       if (payload.providerId === 'browser-system' && systemTts) return systemTts.request(payload);
@@ -602,7 +857,7 @@ if (typeof importScripts === 'function') {
       const remaining = [];
       for (const name of uniqueNames) {
         try {
-          const result = await forward({ type: 'voice:delete', name, providerId: 'local-qwen' }, false);
+          const result = await forward({ type: 'voice:delete', name, providerId: 'local-service' }, false);
           if (!result || !result.ok) remaining.push(name);
         } catch (_) {
           remaining.push(name);
@@ -629,6 +884,61 @@ if (typeof importScripts === 'function') {
             await storage.set(SETTINGS_KEY, next);
             return { ok: true, settings: next };
           }
+          case 'settings:reset': {
+            const schema = globalThis.FlowloudSettings;
+            const current = schema ? schema.migrate(await storage.get(SETTINGS_KEY)) : {};
+            const defaults = schema ? schema.migrate(schema.DEFAULTS) : {};
+            // Reset preferences without deleting or orphaning downloaded model
+            // metadata. Model deletion remains an explicit, separate action.
+            defaults.modelCacheRegistry = current.modelCacheRegistry || {};
+            const next = schema ? schema.publicSettings(defaults) : defaults;
+            await storage.set(SETTINGS_KEY, next);
+            return { ok: true, settings: next };
+          }
+          case 'settings:secrets:status': {
+            const schema = globalThis.FlowloudSettings;
+            if (!schema) throw Object.assign(new Error('设置 Schema 尚未加载。'), { code: 'settings_schema_unavailable' });
+            const sessionSecrets = session ? await session.get(schema.SESSION_SECRET_KEY) || {} : {};
+            const rememberedSecrets = await storage.get(schema.REMEMBERED_SECRET_KEY) || {};
+            const status = {};
+            for (const providerId of ['local-service', 'openai-compatible', 'doubao-tts']) {
+              status[providerId] = {
+                present: Boolean(sessionSecrets[providerId] || rememberedSecrets[providerId]),
+                remembered: Boolean(rememberedSecrets[providerId]),
+              };
+            }
+            const settings = schema.migrate(await storage.get(SETTINGS_KEY));
+            for (const profile of settings.aiProfiles) {
+              const key = `ai:${profile.id}`;
+              status[key] = {
+                present: Boolean(sessionSecrets[key] || rememberedSecrets[key]),
+                remembered: Boolean(rememberedSecrets[key]),
+              };
+            }
+            return { ok: true, secrets: status };
+          }
+          case 'settings:secret:set': {
+            const schema = globalThis.FlowloudSettings;
+            if (!schema) throw Object.assign(new Error('设置 Schema 尚未加载。'), { code: 'settings_schema_unavailable' });
+            const providerId = String(body.providerId || body.secretId || '');
+            const settings = schema.migrate(await storage.get(SETTINGS_KEY));
+            const validAiSecret = providerId.startsWith('ai:')
+              && settings.aiProfiles.some((profile) => `ai:${profile.id}` === providerId);
+            if (!['local-service', 'openai-compatible', 'doubao-tts'].includes(providerId) && !validAiSecret) {
+              throw Object.assign(new Error('不支持保存该 Provider 的凭据。'), { code: 'invalid_secret_provider' });
+            }
+            const secret = String(body.secret || '').trim();
+            if (secret.length > 8192) throw Object.assign(new Error('凭据长度超出限制。'), { code: 'secret_too_long' });
+            const sessionSecrets = session ? await session.get(schema.SESSION_SECRET_KEY) || {} : {};
+            const rememberedSecrets = await storage.get(schema.REMEMBERED_SECRET_KEY) || {};
+            if (secret) sessionSecrets[providerId] = secret;
+            else delete sessionSecrets[providerId];
+            if (body.remember === true && secret) rememberedSecrets[providerId] = secret;
+            else delete rememberedSecrets[providerId];
+            if (session) await session.set(schema.SESSION_SECRET_KEY, sessionSecrets);
+            await storage.set(schema.REMEMBERED_SECRET_KEY, rememberedSecrets);
+            return { ok: true, providerId, present: Boolean(secret), remembered: Boolean(body.remember && secret) };
+          }
           case 'reader:position:get':
             return { ok: true, position: await storage.get('qwenReaderMiniPlayerPosition') };
           case 'reader:position:set': {
@@ -639,15 +949,60 @@ if (typeof importScripts === 'function') {
             await storage.set('qwenReaderMiniPlayerPosition', position);
             return { ok: true, position };
           }
+          case 'playback:claim':
+            if (!playbackCoordinator) return { ok: false, error: { code: 'playback_coordinator_unavailable', message: '全局播放协调器不可用。' } };
+            return playbackCoordinator.claim(body);
+          case 'playback:snapshot:get':
+          case 'playback:global:get':
+            return { ok: true, playback: playbackCoordinator ? await playbackCoordinator.getSnapshot() : { active: false, state: 'idle' } };
+          case 'playback:release':
+            return { ok: true, playback: playbackCoordinator ? await playbackCoordinator.release(body, body.reason) : { active: false, state: 'idle' } };
           case 'provider:test':
             if (typeof testProvider !== 'function') throw Object.assign(new Error('朗读引擎测试不可用。'), { code: 'provider_test_unavailable' });
-            return await testProvider(body.providerId);
+            return await testProvider(body.providerId, body);
+
+          case 'document:workspace:open':
+            if (typeof openDocumentWorkspace !== 'function') throw Object.assign(new Error('文档工作台暂时无法打开。'), { code: 'document_workspace_unavailable' });
+            await openDocumentWorkspace(Number(body.tabId));
+            return { ok: true };
+          case 'document:workspace:seed': {
+            const seed = session ? await session.get(DOCUMENT_WORKSPACE_SEED_KEY) : null;
+            return { ok: true, seed: seed && typeof seed === 'object' ? seed : {} };
+          }
+          case 'document:capture-visible':
+            if (typeof captureVisibleTab !== 'function') throw Object.assign(new Error('当前浏览器无法截取可见区域。'), { code: 'capture_unavailable' });
+            return { ok: true, dataUrl: await captureVisibleTab() };
+          case 'document:probe':
+          case 'document:extract':
+          case 'document:translate':
+          case 'document:cancel':
+            return await forward(body, false);
 
           case 'provider:model:info':
           case 'provider:model:download':
+          case 'provider:model:verify':
           case 'provider:model:delete':
-          case 'provider:model:cancel':
-            return await forward(Object.assign({}, body, { providerId: 'browser-model' }), false);
+          case 'provider:model:cancel': {
+            const response = await forward(Object.assign({}, body, { providerId: 'browser-model' }), false);
+            if (response?.ok === false || !['provider:model:download', 'provider:model:verify', 'provider:model:delete'].includes(body.type)) return response;
+            const schema = globalThis.FlowloudSettings;
+            const settings = schema ? schema.migrate(await storage.get(SETTINGS_KEY)) : await storage.get(SETTINGS_KEY);
+            const result = response?.result && typeof response.result === 'object' ? response.result : {};
+            const browserModel = settings?.providerSettings?.['browser-model'];
+            if (!browserModel) return response;
+            settings.modelCacheRegistry = Object.assign({}, settings.modelCacheRegistry || {});
+            if (body.type === 'provider:model:delete') {
+              browserModel.downloaded = false;
+              browserModel.cacheMetadata = {};
+              if (result.cacheId) delete settings.modelCacheRegistry[result.cacheId];
+            } else {
+              browserModel.downloaded = result.ready === true;
+              browserModel.cacheMetadata = Object.assign({}, result);
+              if (result.cacheId) settings.modelCacheRegistry[result.cacheId] = Object.assign({}, settings.modelCacheRegistry[result.cacheId] || {}, result);
+            }
+            await storage.set(SETTINGS_KEY, schema ? schema.publicSettings(settings) : settings);
+            return response;
+          }
 
           case 'model:list': {
             const schema = globalThis.FlowloudSettings;
@@ -707,10 +1062,11 @@ if (typeof importScripts === 'function') {
           case 'voice:list':
             {
               const providerId = await requestedProviderId(body);
-              if (providerId === 'local-qwen') await cleanupPendingVoices();
-              const result = await forward(Object.assign({}, body, { providerId }), providerId === 'local-qwen');
+              const editableLocal = providerId === 'local-service' || providerId === 'local-qwen';
+              if (editableLocal) await cleanupPendingVoices();
+              const result = await forward(Object.assign({}, body, { providerId }), editableLocal);
               if (!result || !result.ok || !Array.isArray(result.voices)) return result;
-              if (providerId !== 'local-qwen') {
+              if (!editableLocal) {
                 return Object.assign({}, result, {
                   voices: result.voices.map((voice) => Object.assign({}, voice, {
                     providerId,
@@ -747,24 +1103,42 @@ if (typeof importScripts === 'function') {
             }
 
           case 'tts:cancel':
-            if (systemTts && await activeProviderId() === 'browser-system') return systemTts.control(body);
-            if (!offscreen || typeof offscreen.cancel !== 'function') {
-              return { ok: true, cancelled: false, count: 0 };
+            {
+              const control = playbackCoordinator ? await playbackCoordinator.resolve(body) : body;
+              let result;
+              if (systemTts && String(control.providerId || await activeProviderId()) === 'browser-system') result = await systemTts.control(control);
+              else if (!offscreen || typeof offscreen.cancel !== 'function') result = { ok: true, cancelled: false, count: 0 };
+              else result = await offscreen.cancel(control);
+              if (playbackCoordinator) await playbackCoordinator.release(control, body.reason || 'cancelled');
+              return result;
             }
-            return await offscreen.cancel(body);
 
           case 'tts:pause':
           case 'tts:resume':
-            if (systemTts && await activeProviderId() === 'browser-system') return systemTts.control(withIdentity(body));
-            if (!offscreen || typeof offscreen.control !== 'function') {
-              return {
-                ok: true,
-                paused: body.type === 'tts:pause' ? false : undefined,
-                resumed: body.type === 'tts:resume' ? false : undefined,
-                count: 0,
-              };
+            {
+              const resolved = playbackCoordinator ? await playbackCoordinator.resolve(body) : body;
+              const control = withIdentity(resolved);
+              let result;
+              if (systemTts && String(control.providerId || await activeProviderId()) === 'browser-system') result = await systemTts.control(control);
+              else if (!offscreen || typeof offscreen.control !== 'function') {
+                result = {
+                  ok: false,
+                  error: {
+                    code: 'offscreen_unavailable',
+                    message: '后台音频运行环境不可用。',
+                    retryable: true,
+                  },
+                  count: 0,
+                };
+              } else result = await offscreen.control(control);
+              if (playbackCoordinator && result && result.ok !== false) {
+                await playbackCoordinator.update({
+                  state: body.type === 'tts:pause' ? (result.paused ? 'paused' : 'loading') : (result.resumed ? 'playing' : 'loading'),
+                  desiredPaused: body.type === 'tts:pause',
+                }, control);
+              }
+              return result;
             }
-            return await offscreen.control(withIdentity(body));
 
           case 'voice:save': {
             const profile = body.profile || {};
@@ -870,7 +1244,7 @@ if (typeof importScripts === 'function') {
     };
   }
 
-  async function cancelPlaybackForTab(offscreen, tabId) {
+  async function cancelPlaybackForTab(offscreen, tabId, reason) {
     const sourceTabId = Number(tabId);
     if (!Number.isInteger(sourceTabId) || sourceTabId < 0) {
       return { ok: false, error: { code: 'invalid_source_tab', message: '来源标签页无效。' } };
@@ -882,7 +1256,7 @@ if (typeof importScripts === 'function') {
       return await offscreen.cancel({
         type: 'tts:cancel',
         sourceTabId,
-        reason: 'source-tab-closed',
+        reason: String(reason || 'source-tab-closed'),
       });
     } catch (_) {
       return { ok: true, cancelled: false, count: 0 };
@@ -896,8 +1270,11 @@ if (typeof importScripts === 'function') {
     const config = options || {};
     const session = config.session || chromeSessionStorage(chromeApi);
     const onSnapshot = typeof config.onSnapshot === 'function' ? config.onSnapshot : () => {};
+    const getGlobalPlayback = typeof config.getGlobalPlayback === 'function'
+      ? config.getGlobalPlayback : async () => ({ active: false, state: 'idle' });
     let targetMemory = null;
     const snapshots = new Map();
+    let enabledTabs = null;
     const contentScriptFiles = [
       'shared/defaults.js', 'shared/settings-schema.js', 'shared/text.js', 'shared/forum-content.js',
       'shared/generic-thread-detector.js', 'vendor/readability/Readability.js', 'shared/normalized-document.js',
@@ -906,13 +1283,50 @@ if (typeof importScripts === 'function') {
       'shared/semantic-guide.js', 'content/page-guide-content.js', 'content/reader.js',
     ];
 
+    async function readEnabledTabs() {
+      if (enabledTabs) return enabledTabs;
+      const stored = await session.get(READER_ENABLED_TABS_KEY);
+      enabledTabs = new Set((Array.isArray(stored) ? stored : [])
+        .map((tabId) => Number(tabId))
+        .filter((tabId) => Number.isInteger(tabId) && tabId >= 0));
+      return enabledTabs;
+    }
+
+    async function rememberEnabledTab(tabId) {
+      const numericId = Number(tabId);
+      if (!Number.isInteger(numericId) || numericId < 0) return false;
+      const tabs = await readEnabledTabs();
+      if (tabs.has(numericId)) return true;
+      tabs.add(numericId);
+      await session.set(READER_ENABLED_TABS_KEY, Array.from(tabs));
+      return true;
+    }
+
+    async function forgetEnabledTab(tabId) {
+      const numericId = Number(tabId);
+      const tabs = await readEnabledTabs();
+      if (!tabs.delete(numericId)) return;
+      await session.set(READER_ENABLED_TABS_KEY, Array.from(tabs));
+    }
+
     async function injectContentScripts(tabId) {
       if (!chromeApi.scripting?.executeScript) return false;
       const tab = chromeApi.tabs?.get ? await chromeApi.tabs.get(tabId) : null;
       if (tab?.url && !/^https?:/i.test(tab.url)) return false;
       await chromeApi.scripting.insertCSS({ target: { tabId }, files: ['content/page-highlight.css'] });
       await chromeApi.scripting.executeScript({ target: { tabId }, files: contentScriptFiles });
+      await rememberEnabledTab(tabId);
       return true;
+    }
+
+    async function ensureInjected(tabId) {
+      const tabs = await readEnabledTabs();
+      if (!tabs.has(Number(tabId))) return false;
+      try {
+        return await injectContentScripts(tabId);
+      } catch (_) {
+        return false;
+      }
     }
 
     async function readSnapshots() {
@@ -1110,9 +1524,14 @@ if (typeof importScripts === 'function') {
       // Opening a new toolbar popup always starts from the tab that is active
       // at that moment. Follow-up snapshot and command messages carry tabId,
       // so they remain pinned even if the user changes tabs while it is open.
-      const target = message && message.type === 'reader:active-context' && message.tabId == null
+      const currentTarget = message && message.type === 'reader:active-context' && message.tabId == null
         ? await beginTarget(true)
         : await targetForTab(message && message.tabId);
+      const globalPlayback = await getGlobalPlayback();
+      const useCurrent = message && (message.scope === 'current' || message.takeover === true);
+      const target = globalPlayback && globalPlayback.active && !useCurrent
+        ? await targetForTab(globalPlayback.sourceTabId)
+        : currentTarget;
       switch (message && message.type) {
         case 'reader:active-context': {
           const result = await requestSnapshot(target);
@@ -1129,11 +1548,21 @@ if (typeof importScripts === 'function') {
             total: snapshot.total || 0,
             authors: snapshot.authorSummary || [],
             snapshot,
+            currentTab: currentTarget,
+            globalPlayback,
+            controllingGlobalPlayback: Boolean(globalPlayback && globalPlayback.active),
+            sourceIsCurrentTab: Boolean(globalPlayback && globalPlayback.active && currentTarget && Number(globalPlayback.sourceTabId) === Number(currentTarget.tabId)),
           });
         }
         case 'reader:snapshot:get': {
           const result = await requestSnapshot(target);
           return result.snapshot || { status: 'idle', index: 0, total: 0, current: null };
+        }
+        case 'reader:document:get': {
+          const sent = await sendToTarget(target, { type: 'reader:document:get', source: 'document-workbench' });
+          if (!sent.ok) return sent;
+          const body = sent.response && typeof sent.response === 'object' ? sent.response : {};
+          return Object.assign({ ok: true }, body);
         }
         case 'reader:command': {
           const result = await sendCommand(target, message);
@@ -1155,19 +1584,27 @@ if (typeof importScripts === 'function') {
       switch (message && message.type) {
         case 'popup:init':
         case 'popup:target': {
-          const target = await beginTarget(true);
-          return Object.assign({ ok: Boolean(target), target }, await requestSnapshot(target));
+          const currentTarget = await beginTarget(true);
+          const globalPlayback = await getGlobalPlayback();
+          const target = globalPlayback.active
+            ? await targetForTab(globalPlayback.sourceTabId) : currentTarget;
+          return Object.assign({ ok: Boolean(target), target, currentTarget, globalPlayback }, await requestSnapshot(target));
         }
         case 'popup:snapshot':
         case 'popup:get-state':
           return requestSnapshot(await getTarget());
-        case 'popup:command':
-          return sendCommand(await getTarget(), message);
+        case 'popup:command': {
+          const globalPlayback = await getGlobalPlayback();
+          const target = globalPlayback.active && message.scope !== 'current' && message.takeover !== true
+            ? await targetForTab(globalPlayback.sourceTabId) : await getTarget();
+          return sendCommand(target, message);
+        }
         case 'popup:reset-target':
           await clearTarget();
           return { ok: true, target: null };
         case 'reader:active-context':
         case 'reader:snapshot:get':
+        case 'reader:document:get':
         case 'reader:command':
         case 'reader:page-voices:get':
         case 'reader:page-voices:apply':
@@ -1179,18 +1616,20 @@ if (typeof importScripts === 'function') {
 
     async function acceptSnapshot(message, sender) {
       if (!sender || !sender.tab || sender.tab.id == null) return false;
+      await rememberEnabledTab(sender.tab.id);
       return Boolean(await rememberSnapshot(normalizeTabTarget(sender.tab), message));
     }
 
-    async function forgetTab(tabId) {
+    async function forgetTab(tabId, disableReader) {
       const numericId = Number(tabId);
       if (targetMemory && targetMemory.tabId === numericId) await clearTarget();
       await readSnapshots();
       snapshots.delete(String(numericId));
       await persistSnapshots();
+      if (disableReader) await forgetEnabledTab(numericId);
     }
 
-    return { beginTarget, getTarget, clearTarget, sendToTarget, sendCommand, requestSnapshot, targetForTab, handleReaderMessage, handle, acceptSnapshot, forgetTab };
+    return { beginTarget, getTarget, clearTarget, sendToTarget, sendCommand, requestSnapshot, targetForTab, handleReaderMessage, handle, acceptSnapshot, forgetTab, ensureInjected };
   }
 
   function createPageEditorBroker(chromeApi, options) {
@@ -1310,46 +1749,153 @@ if (typeof importScripts === 'function') {
     const openVoiceStudio = () => chromeApi.tabs.create({
       url: `${chromeApi.runtime.getURL('voice-studio.html')}#voices`,
     });
-    async function testProvider(providerId) {
-      if (providerId !== 'openai-compatible') throw Object.assign(new Error('当前引擎暂不支持连接测试。'), { code: 'provider_test_unsupported' });
+    const openDocumentWorkspace = async (requestedTabId) => {
+      let sourceTabId = Number(requestedTabId);
+      let sourceTab = Number.isInteger(sourceTabId) ? await chromeApi.tabs.get(sourceTabId).catch(() => null) : null;
+      if (!sourceTab) {
+        const [active] = await chromeApi.tabs.query({ active: true, currentWindow: true });
+        sourceTab = active || null;
+        sourceTabId = Number(sourceTab?.id);
+      }
+      let screenshotDataUrl = '';
+      if (sourceTab?.active && sourceTab.windowId != null && chromeApi.tabs.captureVisibleTab) {
+        try { screenshotDataUrl = await chromeApi.tabs.captureVisibleTab(sourceTab.windowId, { format: 'png' }); } catch (_) {}
+      }
+      if (session) await session.set(DOCUMENT_WORKSPACE_SEED_KEY, {
+        sourceTabId: Number.isInteger(sourceTabId) ? sourceTabId : null,
+        sourceTitle: String(sourceTab?.title || ''), sourceUrl: String(sourceTab?.url || ''),
+        screenshotDataUrl, capturedAt: Date.now(),
+      });
+      return chromeApi.tabs.create({
+        url: `${chromeApi.runtime.getURL('document-workbench.html')}?sourceTabId=${Number.isInteger(sourceTabId) ? sourceTabId : ''}`,
+      });
+    };
+    const captureVisibleTab = async () => {
+      if (!chromeApi.tabs?.query || !chromeApi.tabs?.captureVisibleTab) {
+        throw Object.assign(new Error('浏览器未提供可见区域截图能力。'), { code: 'capture_unavailable' });
+      }
+      const [tab] = await chromeApi.tabs.query({ active: true, currentWindow: true });
+      if (!tab || tab.windowId == null) throw Object.assign(new Error('没有可截图的活动网页。'), { code: 'active_tab_missing' });
+      return chromeApi.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    };
+    const playbackCoordinator = createGlobalPlaybackCoordinator({
+      session,
+      async cancel(playback, reason) {
+        const message = Object.assign({ type: 'tts:cancel', reason }, playback || {});
+        const sourceWideCancel = {
+          type: 'tts:cancel',
+          sourceTabId: playback && playback.sourceTabId,
+          reason,
+        };
+        const results = await Promise.allSettled([
+          systemTts && typeof systemTts.control === 'function'
+            ? systemTts.control(message) : Promise.resolve({ ok: true, cancelled: false }),
+          offscreen && typeof offscreen.cancel === 'function'
+            ? offscreen.cancel(sourceWideCancel) : Promise.resolve({ ok: true, cancelled: false }),
+          playback && Number.isInteger(Number(playback.sourceTabId))
+            && chromeApi.tabs && typeof chromeApi.tabs.sendMessage === 'function'
+            ? chromeApi.tabs.sendMessage(Number(playback.sourceTabId), {
+              type: 'reader:playback:revoked',
+              pageKey: String(playback.pageKey || ''),
+              playbackId: String(playback.playbackId || ''),
+              reason: String(reason || 'replaced-by-new-playback'),
+            }).catch(() => null)
+            : Promise.resolve(null),
+        ]);
+        return { ok: true, cancelled: results.some((item) => item.status === 'fulfilled' && item.value && item.value.cancelled) };
+      },
+    });
+    async function testProvider(providerId, request) {
       const schema = globalThis.FlowloudSettings;
-      const providerApi = globalThis.FlowloudProviderV3;
+      const providerApi = globalThis.FlowloudProviderV4 || globalThis.FlowloudProviderV3;
       const stored = await chromeApi.storage.local.get([SETTINGS_KEY, schema.REMEMBERED_SECRET_KEY]);
       const sessionStored = await chromeApi.storage.session.get(schema.SESSION_SECRET_KEY).catch(() => ({}));
       const settings = schema.migrate(stored[SETTINGS_KEY]);
+      if (providerId === 'local-service') {
+        const config = settings.providerSettings['local-service'];
+        const clientToken = sessionStored[schema.SESSION_SECRET_KEY]?.['local-service']
+          || stored[schema.REMEMBERED_SECRET_KEY]?.['local-service'] || '';
+        const provider = providerApi.createLocalServiceProvider(Object.assign({}, config, { clientToken }));
+        const result = await provider.health({ requestId: String(request && request.requestId || `health-${Date.now().toString(36)}`) });
+        return {
+          ok: result && result.ok !== false,
+          providerId,
+          adapterId: result.adapterId || config.adapterId,
+          ready: result.ready !== false,
+          capabilities: result.capabilities || provider.capabilities,
+          requestId: result.requestId || String(request && request.requestId || ''),
+        };
+      }
+      if (providerId === 'doubao-tts') {
+        const config = settings.providerSettings['doubao-tts'];
+        const apiKey = sessionStored[schema.SESSION_SECRET_KEY]?.['doubao-tts'] || stored[schema.REMEMBERED_SECRET_KEY]?.['doubao-tts'] || '';
+        const provider = providerApi.createDoubaoTtsProvider(Object.assign({}, config, { apiKey }));
+        const previewText = String(request && request.previewText || '').trim();
+        if (!previewText) throw Object.assign(new Error('请填写用于试听的短句。'), { code: 'missing_preview_text' });
+        const result = await provider.synthesize({ input: previewText, voice: config.voice, response_format: config.responseFormat, requestId: String(request && request.requestId || `doubao-${Date.now().toString(36)}`) });
+        const blob = result && (result.blob || result.audio);
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        let binary = '';
+        for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+        return { ok: true, audition: true, audioBase64: btoa(binary), mimeType: result.mimeType || blob.type || 'audio/mpeg', providerId, requestId: result.requestId };
+      }
+      if (providerId !== 'openai-compatible') throw Object.assign(new Error('当前引擎暂不支持连接测试。'), { code: 'provider_test_unsupported' });
       const config = settings.providerSettings['openai-compatible'];
       const apiKey = sessionStored[schema.SESSION_SECRET_KEY]?.['openai-compatible'] || stored[schema.REMEMBERED_SECRET_KEY]?.['openai-compatible'] || '';
       const provider = providerApi.createOpenAICompatibleProvider(Object.assign({}, config, { apiKey }));
-      const health = await provider.health({ apiKey });
-      return { ok: true, status: health };
+      const previewText = String(request && request.previewText || '').trim();
+      if (!previewText) throw Object.assign(new Error('请填写用于试听的短句。'), { code: 'missing_preview_text' });
+      const result = await provider.synthesize({
+        input: previewText,
+        model: config.model,
+        voice: config.voice,
+        response_format: config.responseFormat,
+        requestId: String(request && request.requestId || `audition-${Date.now().toString(36)}`),
+      }, { apiKey });
+      const blob = result && (result.blob || result.audio);
+      if (!blob || typeof blob.arrayBuffer !== 'function') throw Object.assign(new Error('在线服务没有返回可试听的音频。'), { code: 'invalid_response' });
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let binary = '';
+      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+      }
+      return {
+        ok: true,
+        audition: true,
+        audioBase64: btoa(binary),
+        mimeType: result.mimeType || blob.type || 'audio/mpeg',
+        providerId,
+        requestId: result.requestId || String(request && request.requestId || ''),
+      };
     }
-    const router = createMessageRouter({ api, storage, session, openVoiceStudio, offscreen, systemTts, testProvider });
+    const router = createMessageRouter({
+      api, storage, session, openVoiceStudio, openDocumentWorkspace, captureVisibleTab,
+      offscreen, systemTts, testProvider, playbackCoordinator,
+    });
 
-    async function setBadge(target, snapshot) {
+    async function setToolbarPlaybackState(target, snapshot) {
       if (!target || target.tabId == null || !chromeApi.action) return;
       const status = String(snapshot && snapshot.status || 'idle');
-      const text = status === 'playing' ? '▶' : status === 'paused' ? '❚❚' : status === 'error' ? '!' : '';
       try {
         if (typeof chromeApi.action.setBadgeText === 'function') {
-          await chromeApi.action.setBadgeText({ tabId: target.tabId, text });
+          await chromeApi.action.setBadgeText({ tabId: target.tabId, text: '' });
         }
-        if (typeof chromeApi.action.setBadgeBackgroundColor === 'function' && text) {
-          await chromeApi.action.setBadgeBackgroundColor({
-            tabId: target.tabId,
-            color: status === 'error' ? '#dc2626' : status === 'paused' ? '#475569' : '#6d28d9',
-          });
+        if (typeof chromeApi.action.setIcon === 'function') {
+          await chromeApi.action.setIcon({ tabId: target.tabId, path: actionIconPaths(status) });
         }
-        if (typeof chromeApi.action.setBadgeTextColor === 'function' && text) {
-          await chromeApi.action.setBadgeTextColor({ tabId: target.tabId, color: '#ffffff' });
+        if (typeof chromeApi.action.setTitle === 'function') {
+          const labels = { playing: '正在朗读', paused: '已暂停', error: '朗读异常', idle: '准备就绪' };
+          await chromeApi.action.setTitle({ tabId: target.tabId, title: `Flowloud · ${labels[status] || labels.idle}` });
         }
       } catch (_) {
-        // The badge is a convenience, never a playback dependency.
+        // Toolbar state is a convenience, never a playback dependency.
       }
     }
 
     const popupBroker = createPopupBroker(chromeApi, {
       session,
-      onSnapshot: (target, snapshot) => { void setBadge(target, snapshot); },
+      onSnapshot: (target, snapshot) => { void setToolbarPlaybackState(target, snapshot); },
+      getGlobalPlayback: () => playbackCoordinator.getSnapshot(),
     });
     const pageEditorBroker = createPageEditorBroker(chromeApi, {
       session,
@@ -1370,6 +1916,7 @@ if (typeof importScripts === 'function') {
       if (!isOffscreenSender(message && message.sender)) return;
       const sourceTabId = message && message.message && message.message.sourceTabId;
       if (!Number.isInteger(sourceTabId) || sourceTabId < 0) return;
+      void playbackCoordinator.acceptStreamEvent(message.message);
       if (!chromeApi.tabs || typeof chromeApi.tabs.sendMessage !== 'function') return;
       try {
         const result = chromeApi.tabs.sendMessage(sourceTabId, message.message);
@@ -1423,6 +1970,20 @@ if (typeof importScripts === 'function') {
         respondWith(chromeApi.tabs.create({ url: `${chromeApi.runtime.getURL('page-guide.html')}?tabId=${tabId}` }).then(() => ({ ok: true })), sendResponse);
         return true;
       }
+      if (message && message.type === 'playback:source:focus') {
+        respondWith((async () => {
+          const playback = await playbackCoordinator.getSnapshot();
+          if (!playback.active || playback.sourceTabId == null) {
+            return { ok: false, error: { code: 'playback_source_missing', message: '当前没有可返回的朗读来源页。' } };
+          }
+          const tab = await chromeApi.tabs.update(Number(playback.sourceTabId), { active: true });
+          if (tab?.windowId != null && chromeApi.windows?.update) {
+            await chromeApi.windows.update(tab.windowId, { focused: true }).catch(() => {});
+          }
+          return { ok: true, tabId: playback.sourceTabId };
+        })(), sendResponse);
+        return true;
+      }
       if (message && (message.type === 'guide:snapshot' || message.type === 'guide:focus')) {
         const targetType = message.type === 'guide:snapshot' ? 'flowloud:guide:snapshot' : 'flowloud:guide:focus';
         respondWith(chromeApi.tabs.sendMessage(Number(message.tabId), { type: targetType, filter: message.filter, id: message.id }), sendResponse);
@@ -1455,20 +2016,38 @@ if (typeof importScripts === 'function') {
         return true;
       }
       if (snapshotEvents.has(message && message.type)) {
-        respondWith(popupBroker.acceptSnapshot(message, sender).then(() => ({ ok: true })), sendResponse);
+        respondWith(Promise.all([
+          popupBroker.acceptSnapshot(message, sender),
+          playbackCoordinator.acceptReaderSnapshot(message, {
+            tabId: sender && sender.tab && sender.tab.id,
+            documentId: sender && sender.documentId,
+          }),
+        ]).then(() => ({ ok: true })), sendResponse);
         return true;
       }
       const sourceTabId = sender && sender.tab && sender.tab.id != null
         ? sender.tab.id : null;
-      const forwarded = sourceTabId == null || !message || message.sourceTabId != null
+      let forwarded = sourceTabId == null || !message || message.sourceTabId != null
         ? message
         : Object.assign({}, message, { sourceTabId });
+      if (forwarded && sender && sender.documentId && !forwarded.sourceDocumentId) {
+        forwarded = Object.assign({}, forwarded, { sourceDocumentId: String(sender.documentId) });
+      }
       respondWith(router(forwarded), sendResponse);
       return true;
     });
     if (chromeApi.commands && chromeApi.commands.onCommand) {
       chromeApi.commands.onCommand.addListener(async (command) => {
         if (command !== 'toggle-reader') return;
+        const globalPlayback = await playbackCoordinator.getSnapshot();
+        if (globalPlayback.active) {
+          const target = await popupBroker.targetForTab(globalPlayback.sourceTabId);
+          const commandResult = await popupBroker.sendCommand(target, {
+            command: 'play-toggle', source: 'shortcut', pageKey: globalPlayback.pageKey,
+          });
+          if (commandResult && commandResult.snapshot) await setToolbarPlaybackState(target, commandResult.snapshot);
+          return;
+        }
         const tabs = await chromeApi.tabs.query({ active: true, currentWindow: true });
         const tab = normalizeTabTarget(tabs && tabs[0]);
         const result = await popupBroker.requestSnapshot(tab);
@@ -1478,7 +2057,7 @@ if (typeof importScripts === 'function') {
         const commandResult = await popupBroker.sendCommand(target, {
           command: 'play-toggle', source: 'shortcut', pageKey,
         });
-        if (commandResult && commandResult.snapshot) await setBadge(target, commandResult.snapshot);
+        if (commandResult && commandResult.snapshot) await setToolbarPlaybackState(target, commandResult.snapshot);
       });
     }
     if (chromeApi.runtime.onInstalled && typeof chromeApi.runtime.onInstalled.addListener === 'function') {
@@ -1492,9 +2071,26 @@ if (typeof importScripts === 'function') {
     }
     if (chromeApi.tabs && chromeApi.tabs.onRemoved && typeof chromeApi.tabs.onRemoved.addListener === 'function') {
       chromeApi.tabs.onRemoved.addListener((tabId) => {
+        void playbackCoordinator.stopForTab(tabId, 'source-tab-closed');
         void cancelPlaybackForTab(offscreen, tabId);
-        void popupBroker.forgetTab(tabId);
+        void popupBroker.forgetTab(tabId, true);
         void pageEditorBroker.forgetTab(tabId);
+      });
+    }
+    if (chromeApi.tabs && chromeApi.tabs.onUpdated && typeof chromeApi.tabs.onUpdated.addListener === 'function') {
+      chromeApi.tabs.onUpdated.addListener((tabId, changeInfo) => {
+        if (!changeInfo) return;
+        if (changeInfo.status === 'complete') {
+          void popupBroker.ensureInjected(tabId);
+          return;
+        }
+        if (changeInfo.status === 'loading') {
+          void setToolbarPlaybackState({ tabId }, { status: 'idle' });
+          void playbackCoordinator.stopForTab(tabId, 'source-document-navigation');
+          void cancelPlaybackForTab(offscreen, tabId, 'source-document-navigation');
+          void popupBroker.forgetTab(tabId, false);
+          void pageEditorBroker.forgetTab(tabId);
+        }
       });
     }
     chromeApi.storage.onChanged?.addListener((changes, areaName) => {
@@ -1504,7 +2100,10 @@ if (typeof importScripts === 'function') {
         tab.id == null ? null : chromeApi.tabs.sendMessage(tab.id, { type: 'flowloud:settings:changed', settings })
       )))).catch(() => {});
     });
-    return { popupBroker, pageEditorBroker, stopPlaybackForTab: (tabId) => cancelPlaybackForTab(offscreen, tabId) };
+    return {
+      popupBroker, pageEditorBroker, playbackCoordinator,
+      stopPlaybackForTab: (tabId) => playbackCoordinator.stopForTab(tabId, 'explicit-stop'),
+    };
   }
 
   return {
@@ -1519,12 +2118,14 @@ if (typeof importScripts === 'function') {
     POPUP_SNAPSHOTS_KEY,
     PAGE_EDITOR_CONTEXTS_KEY,
     PAGE_EDITOR_PATH,
+    actionIconPaths,
     createMessageRouter,
     createOffscreenManager,
     createChromeTtsManager,
     chromeStorage,
     chromeSessionStorage,
     createPopupBroker,
+    createGlobalPlaybackCoordinator,
     createPageEditorBroker,
     errorEnvelope,
     repairVoiceSettings,

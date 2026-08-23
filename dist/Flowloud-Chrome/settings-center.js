@@ -16,7 +16,7 @@
   const settingKeys = [
     'readingFocus', 'readingFocusStyle',
     'wordHighlightStyle', 'wordHighlightColor', 'wordHighlightGlow',
-    'wordHighlightSpeed', 'opVoice', 'replyVoices', 'interactionVersion',
+    'wordHighlightSpeed', 'opVoice', 'replyVoices', 'clickToRead', 'showFloatingPlayer', 'preset', 'interactionVersion',
   ];
 
   function unique(values) {
@@ -40,12 +40,13 @@
     next.clickToRead = Number(value && value.interactionVersion || 0) < 3
       ? false
       : next.clickToRead === true;
+    next.showFloatingPlayer = next.showFloatingPlayer !== false;
     next.preset = oneOf(next.preset || next.voiceMode, ['op-exclusive', 'stable-author', 'round-robin'], 'op-exclusive');
     next.readingFocus = oneOf(next.readingFocus, ['off', 'line', 'sentence'], 'sentence');
-    next.readingFocusStyle = oneOf(next.readingFocusStyle, ['soft-glow', 'edge-glow', 'paper-wash', 'underline-guide'], 'soft-glow');
+    next.readingFocusStyle = oneOf(next.readingFocusStyle, ['soft-glow', 'edge-glow', 'paper-wash', 'underline-guide'], 'paper-wash');
     next.wordHighlightStyle = oneOf(next.wordHighlightStyle, ['edge-dissolve', 'classic-glow', 'aurora-tide', 'custom'], 'edge-dissolve');
     next.wordHighlightColor = /^#[0-9a-f]{6}$/i.test(String(next.wordHighlightColor || ''))
-      ? String(next.wordHighlightColor).toLowerCase() : '#6f58bd';
+      ? String(next.wordHighlightColor).toLowerCase() : '#2563eb';
     next.wordHighlightGlow = clamp(next.wordHighlightGlow, 0, 100, 48);
     next.wordHighlightSpeed = clamp(next.wordHighlightSpeed, .6, 1.8, 1);
     const voicePrefix = `${next.activeProviderId}:`;
@@ -112,7 +113,7 @@
     if (!replyOptions.children.length) {
       const empty = document.createElement('p');
       empty.className = 'settings-empty-note';
-      empty.textContent = settings.activeProviderId === 'local-qwen'
+      empty.textContent = settings.activeProviderId === 'local-service'
         ? '请先在“音色与克隆”中添加另一个音色。'
         : '未选择回复音色时，所有内容使用当前音色。';
       replyOptions.append(empty);
@@ -127,15 +128,19 @@
     setControlValue('wordHighlightColor', settings.wordHighlightColor);
     setControlValue('wordHighlightGlow', settings.wordHighlightGlow);
     setControlValue('wordHighlightSpeed', settings.wordHighlightSpeed);
+    setControlValue('clickToRead', settings.clickToRead);
+    setControlValue('showFloatingPlayer', settings.showFloatingPlayer);
+    setControlValue('preset', settings.preset);
     renderVoiceOptions();
     const replyHelp = document.getElementById('reply-voice-help');
-    if (replyHelp) replyHelp.textContent = settings.activeProviderId === 'local-qwen'
+    if (replyHelp) replyHelp.textContent = settings.activeProviderId === 'local-service'
       ? '可为回复作者选择多个本地音色；楼主音色不会重复分配。'
       : '未选择时使用旁白音色；不同 Provider 的分配互不混用。';
     document.querySelectorAll('[data-open-voice-studio]').forEach((control) => {
-      const enabled = settings.activeProviderId === 'local-qwen';
+      const enabled = settings.activeProviderId === 'local-service'
+        && settings.providerSettings?.['local-service']?.adapterId === 'flowloud-qwen';
       control.disabled = !enabled;
-      control.title = enabled ? '' : '音色克隆仅在本地 Qwen 下启用';
+      control.title = enabled ? '' : '音色克隆仅在 Flowloud Qwen 适配器下启用';
     });
     updateOutputs();
   }
@@ -148,6 +153,9 @@
     next.wordHighlightColor = form.elements.wordHighlightColor.value;
     next.wordHighlightGlow = Number(form.elements.wordHighlightGlow.value);
     next.wordHighlightSpeed = Number(form.elements.wordHighlightSpeed.value);
+    next.clickToRead = Boolean(form.elements.clickToRead.checked);
+    next.showFloatingPlayer = Boolean(form.elements.showFloatingPlayer.checked);
+    next.preset = form.elements.preset.value;
     next.opVoice = opVoiceSelect.value;
     next.replyVoices = Array.from(form.querySelectorAll('[name="replyVoice"]:checked'))
       .map((control) => control.value)

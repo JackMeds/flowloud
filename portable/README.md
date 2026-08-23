@@ -6,6 +6,9 @@
 
 - 推荐：`./Download-FlowloudModels.ps1 -Profile 0.6b-q4`
 - 高质量：`./Download-FlowloudModels.ps1 -Profile 1.7b-q8`
+- 指定参考音频并同步已有网关配置：`./Download-FlowloudModels.ps1 -Profile 1.7b-q8 -GatewayConfig ./gateway.json -ReferenceAudio ./voices/my-voice.wav`
 - 删除模型：`./Download-FlowloudModels.ps1 -Profile 0.6b-q4 -Delete`
+
+下载器使用固定 Hugging Face revision 和 SHA-256 校验。如果 `gateway.json` 已存在，会更新模型路径、模型 ID、别名和量化；参考音频只在显式传入 `-ReferenceAudio` 时修改。也可以直接编辑 `gateway.json` 或设置 `FLOWLOUD_TTS_MODEL`、`FLOWLOUD_TTS_CODEC`、`FLOWLOUD_TTS_MODEL_ID`、`FLOWLOUD_TTS_QUANTIZATION`、`FLOWLOUD_TTS_REFERENCE_AUDIO` 等环境变量，因此网关不限制 0.6B/1.7B。
 
 qwentts.cpp 固定到提交 `a8a7716b530e49fed537c57711247c12fbbb903c`。Vulkan 不可用时启动器应给出明确提示，而不是静默回退或崩溃。

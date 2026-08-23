@@ -76,6 +76,7 @@
     const scheduledValue = finiteNumber(event.scheduledSeconds);
     const bufferedValue = finiteNumber(event.bufferedSeconds);
     const sequenceValue = finiteNumber(event.sequence ?? event.eventSequence);
+    const speechOffsetValue = finiteNumber(event.speechOffset ?? event.charIndex);
     const playedSeconds = playedValue === null
       ? timeline.playedSeconds
       : Math.max(timeline.playedSeconds, playedValue);
@@ -94,14 +95,30 @@
         ? Math.max(0, boundedScheduled - boundedPlayed)
         : Math.max(0, bufferedValue),
       sequence: sequenceValue,
+      speechOffset: speechOffsetValue === null
+        ? null
+        : clamp(speechOffsetValue, 0, Math.max(0, timeline.speechLength)),
       done: event.done === true || event.event === 'ended'
     };
+  }
+
+  function wordIndexAtSpeechOffset(timeline, value) {
+    const words = timeline && Array.isArray(timeline.words) ? timeline.words : [];
+    if (!words.length) return -1;
+    const offsetValue = finiteNumber(value);
+    if (offsetValue === null) return -1;
+    const offset = clamp(offsetValue, 0, Math.max(0, timeline.speechLength));
+    for (const word of words) {
+      if (offset <= word.speechStart || offset < word.speechEnd) return word.index;
+    }
+    return words.length - 1;
   }
 
   function wordIndexAtProgress(timeline, progress) {
     const words = timeline && Array.isArray(timeline.words) ? timeline.words : [];
     if (!words.length) return -1;
     const snapshot = normalizeProgress(timeline, progress);
+    if (snapshot.speechOffset !== null) return wordIndexAtSpeechOffset(timeline, snapshot.speechOffset);
     let ratio = null;
     if (snapshot.durationSeconds !== null) {
       ratio = clamp(snapshot.playedSeconds / snapshot.durationSeconds, 0, 1);
@@ -143,7 +160,7 @@
     current.durationSeconds = snapshot.durationSeconds;
     current.timingMode = snapshot.durationSeconds !== null
       ? 'duration-ratio'
-      : (snapshot.scheduledSeconds > EPSILON ? 'scheduled-ratio' : 'unavailable');
+      : (snapshot.speechOffset !== null ? 'character-boundary' : snapshot.scheduledSeconds > EPSILON ? 'scheduled-ratio' : 'unavailable');
     current.playedSeconds = snapshot.playedSeconds;
     current.scheduledSeconds = snapshot.scheduledSeconds;
     current.bufferedSeconds = snapshot.bufferedSeconds;
@@ -192,6 +209,7 @@
   return Object.freeze({
     EPSILON,
     createTimeline,
+    wordIndexAtSpeechOffset,
     wordIndexAtProgress,
     selectWordAtProgress: wordIndexAtProgress,
     applyProgress,

@@ -10,6 +10,10 @@ const offscreenSource = fs.readFileSync(
   path.join(__dirname, '..', 'offscreen.js'),
   'utf8',
 );
+const runtimeBuildSource = fs.readFileSync(
+  path.join(__dirname, '..', '..', 'scripts', 'build-transformers-runtime.mjs'),
+  'utf8',
+);
 
 test('offscreen sends stream events to the service worker for tab relay', () => {
   assert.match(
@@ -17,6 +21,31 @@ test('offscreen sends stream events to the service worker for tab relay', () => 
     /emit\(message\)\s*\{[\s\S]*chromeApi\.runtime[\s\S]*sendMessage\(message\)/u,
   );
   assert.doesNotMatch(offscreenSource, /chromeApi\.tabs\.sendMessage/u);
+});
+
+test('offscreen reuses resolved provider instances so model pipelines and cancellation state survive commands', () => {
+  assert.match(offscreenSource, /const\s+resolvedProviderCache\s*=\s*new Map\(\)/u);
+  assert.match(offscreenSource, /function\s+cachedProvider\([^)]*\)[\s\S]*resolvedProviderCache\.get\(providerId\)[\s\S]*resolvedProviderCache\.set\(providerId, \{ signature, provider \}\)/u);
+  assert.match(offscreenSource, /providerId\s*===\s*'browser-model'[\s\S]*cachedProvider\(providerId/u);
+  assert.match(offscreenSource, /providerId\s*===\s*'local-service'[\s\S]*cachedProvider\(providerId/u);
+});
+
+test('browser model download and offline verification have bounded model-specific timeouts', () => {
+  assert.match(offscreenSource, /MODEL_DOWNLOAD_TIMEOUT_MS\s*=\s*30\s*\*\s*60\s*\*\s*1000/u);
+  assert.match(offscreenSource, /MODEL_VERIFY_TIMEOUT_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000/u);
+  assert.match(offscreenSource, /message\.type\s*===\s*'provider:model:download'[\s\S]*modelDownloadTimeoutMs[\s\S]*message\.type\s*===\s*'provider:model:verify'[\s\S]*modelVerifyTimeoutMs/u);
+});
+
+test('Kokoro v1.1 uses one bundled runtime and pinned on-demand model and voice caches', () => {
+  assert.match(offscreenSource, /vendor\/kokoro\/kokoro\.web\.min\.js/);
+  assert.match(offscreenSource, /flowloudCreateKokoro/);
+  assert.match(offscreenSource, /Kokoro-82M-v1\.1-zh-ONNX/);
+  assert.match(runtimeBuildSource, /6cc0f0d2ebe369a68b0df87c2b65c1af8c0ac3e3/);
+  assert.match(offscreenSource, /kokoro-voices/);
+  assert.match(offscreenSource, /browserPipeline\.deleteCache/);
+  assert.match(runtimeBuildSource, /env\.fetch = offline/);
+  assert.match(runtimeBuildSource, /env\.customCache/);
+  assert.doesNotMatch(offscreenSource, /BricksDisplay\/vits-cmn|Kokoro-82M-v1\.0-ONNX/u);
 });
 
 async function blobToBase64(blob) {
@@ -272,9 +301,13 @@ test('offscreen broker returns a stable timeout error after its deadline', async
     ok: false,
     requestId: 'slow',
     error: {
+      stage: 'synthesize',
       code: 'timeout',
       message: '模型启动或语音合成超过 60 秒，请检查本地 Qwen 服务。',
+      retryable: true,
       retriable: true,
+      providerId: 'local-qwen',
+      requestId: 'slow',
     },
   });
 });

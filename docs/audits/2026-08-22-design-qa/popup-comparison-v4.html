@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Flowloud Popup Design QA v4</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;padding:28px;font:14px/1.5 "Segoe UI","Microsoft YaHei UI",sans-serif;color:#0f1f3d;background:#eef3f9}
+    h1{margin:0 0 20px;font-size:22px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}.panel{padding:18px;border:1px solid #dbe4f0;border-radius:16px;background:#fff;box-shadow:0 8px 24px rgba(15,31,61,.08)}
+    .panel h2{margin:0 0 12px;font-size:14px}.stage{display:grid;min-height:620px;place-items:center;overflow:hidden;border-radius:12px;background:#fff}.stage img{display:block;max-width:100%;max-height:620px;object-fit:contain}
+    .note{margin:12px 0 0;color:#64748b;font-size:12px}
+  </style>
+</head>
+<body>
+  <h1>Popup 与悬浮播放器：目标图 / 实现图同屏对照</h1>
+  <div class="grid">
+    <section class="panel"><h2>已批准目标图</h2><div class="stage"><img src="../../design-references/flowloud-popup-approved.png" alt="已批准的 Flowloud Popup 与悬浮播放器目标图"></div><p class="note">概念图完整展示全部设置，因此高度高于浏览器 Popup 的 600px 上限。</p></section>
+    <section class="panel"><h2>实际 Storybook 实现</h2><div class="stage"><img src="popup-component-v4.png" alt="实际实现的 Flowloud Popup"></div><p class="note">相同播放状态；上方播放器与快捷操作固定，下方设置独立滚动。</p></section>
+  </div>
+</body>
+</html>

@@ -233,7 +233,7 @@
       }
     }
     const posts = Array.from(uniquePosts.values()).sort((left, right) => postNumber(left) - postNumber(right));
-    const firstPost = posts.find((post) => htmlToReadableText(
+    const firstPost = posts.find((post) => postNumber(post) === 1 && htmlToReadableText(
       (post.attributes || {}).contentHtml || '',
       options && options.DOMParserCtor,
       { removeBlockquotes: true }
@@ -272,17 +272,24 @@
 
   function flarumRoute(document) {
     const url = getLocationUrl(document);
-    const match = url.pathname.match(/^(.*?)\/d\/(\d+)(?:-[^/]*)?(?:\/.*)?$/u);
-    return match ? { url, basePath: match[1], discussionId: match[2] } : null;
+    const match = url.pathname.match(/^(.*?)\/d\/(\d+)(?:-[^/]*)?(?:\/(\d+))?(?:\/.*)?$/u);
+    if (!match) return null;
+    const floor = Number(match[3]);
+    return {
+      url,
+      basePath: match[1],
+      discussionId: match[2],
+      floor: Number.isFinite(floor) && floor > 0 ? floor : 1
+    };
   }
 
-  function makeFlarumPostsUrl(origin, discussionId, basePath) {
+  function makeFlarumPostsUrl(origin, discussionId, basePath, offset) {
     const path = `${basePath || ''}/api/posts`.replace(/\/{2,}/gu, '/');
     const url = new URL(path.startsWith('/') ? path : `/${path}`, origin);
     url.searchParams.set('filter[discussion]', discussionId);
     url.searchParams.set('sort', 'number');
     url.searchParams.set('page[limit]', '50');
-    url.searchParams.set('page[offset]', '0');
+    url.searchParams.set('page[offset]', String(Math.max(0, Number(offset) || 0)));
     url.searchParams.set('include', 'user');
     return url.toString();
   }
@@ -318,7 +325,7 @@
       const floor = Number(post.getAttribute && post.getAttribute('data-number')) || (Number.isFinite(streamIndex) ? streamIndex + 1 : index + 1);
       return { post, body, author, postId, floor };
     });
-    const first = normalized.find((item) => elementReadableText(item.body, { removeBlockquotes: true }));
+    const first = normalized.find((item) => item.floor === 1 && elementReadableText(item.body, { removeBlockquotes: true }));
     const opKey = first && first.author.id;
     return normalized.flatMap((item) => {
       const idSelector = `.PostStream-item[data-id="${cssString(item.postId)}"]`;
@@ -342,16 +349,32 @@
   async function extractFlarumDocument(document, options) {
     const route = flarumRoute(document);
     const fetchFn = options && options.fetchFn;
+    const domBlocks = extractFlarumDom(document);
     if (!route || typeof fetchFn !== 'function') {
       return documentResult(document, {
         adapterId: 'flarum',
-        blocks: extractFlarumDom(document),
+        blocks: domBlocks,
         complete: false,
         warnings: ['flarum-current-dom-only']
       });
     }
+    if (domBlocks.length) {
+      await reportProgress(options, documentResult(document, {
+        adapterId: 'flarum',
+        blocks: domBlocks,
+        complete: false,
+        warnings: ['flarum-visible-posts-first'],
+        stats: { extractedPosts: domBlocks.length }
+      }), { phase: 'visible', floor: route.floor });
+    }
     const combined = { data: [], included: [] };
-    let nextUrl = makeFlarumPostsUrl(route.url.origin, route.discussionId, route.basePath);
+    const prioritizedFromFloor = route.floor > 1;
+    let nextUrl = makeFlarumPostsUrl(
+      route.url.origin,
+      route.discussionId,
+      route.basePath,
+      prioritizedFromFloor ? route.floor - 1 : 0
+    );
     const visited = new Set();
     let fetchedPages = 0;
     try {
@@ -373,8 +396,11 @@
         await reportProgress(options, documentResult(document, {
           adapterId: 'flarum',
           blocks: parseFlarumApi(combined, options),
-          complete: !nextUrl,
-          warnings: nextUrl ? ['flarum-loading-more'] : [],
+          complete: !nextUrl && !prioritizedFromFloor,
+          warnings: [
+            ...(nextUrl ? ['flarum-loading-more'] : []),
+            ...(prioritizedFromFloor ? [`flarum-prioritized-from-floor:${route.floor}`] : [])
+          ],
           stats: { fetchedPages, extractedPosts: combined.data.length }
         }), { phase: fetchedPages === 1 ? 'initial' : 'page', page: fetchedPages });
       }
@@ -382,8 +408,11 @@
       return documentResult(document, {
         adapterId: 'flarum',
         blocks,
-        complete: !nextUrl,
-        warnings: nextUrl ? ['flarum-pagination-limit'] : [],
+        complete: !nextUrl && !prioritizedFromFloor,
+        warnings: [
+          ...(nextUrl ? ['flarum-pagination-limit'] : []),
+          ...(prioritizedFromFloor ? [`flarum-prioritized-from-floor:${route.floor}`] : [])
+        ],
         stats: { fetchedPages, extractedPosts: blocks.length }
       });
     } catch (error) {
@@ -400,7 +429,7 @@
       }
       return documentResult(document, {
         adapterId: 'flarum',
-        blocks: extractFlarumDom(document),
+        blocks: domBlocks,
         complete: false,
         warnings: ['flarum-api-unavailable']
       });
@@ -419,6 +448,7 @@
     const topicIndex = /^\d+$/u.test(routeParts[0] || '') ? 0 : 1;
     if (!/^\d+$/u.test(routeParts[topicIndex] || '')) return null;
     const topicId = routeParts[topicIndex];
+    const floor = Number(routeParts[topicIndex + 1]);
     let basePath = url.pathname.slice(0, markerIndex);
     const setup = document && typeof document.querySelector === 'function'
       ? document.querySelector('#data-discourse-setup')
@@ -427,7 +457,12 @@
       ? setup.getAttribute('data-base-uri')
       : '';
     if (declaredBase && String(declaredBase).startsWith('/')) basePath = String(declaredBase).replace(/\/$/u, '');
-    return { url, basePath, topicId };
+    return {
+      url,
+      basePath,
+      topicId,
+      floor: Number.isFinite(floor) && floor > 0 ? floor : 1
+    };
   }
 
   function discourseAuthor(post) {
@@ -455,11 +490,18 @@
     const posts = Array.from(unique.values())
       .filter((post) => !post.deleted_at && !post.hidden && (post.post_type == null || Number(post.post_type) === 1))
       .sort((left, right) => Number(left.post_number) - Number(right.post_number));
-    const first = posts.find((post) => htmlToReadableText(
+    const firstAtFloorOne = posts.find((post) => Number(post.post_number) === 1 && htmlToReadableText(
       post.cooked,
       options && options.DOMParserCtor,
       { removeBlockquotes: true }
     ));
+    const first = firstAtFloorOne || ((options && Number(options.currentFloor) > 1)
+      ? null
+      : posts.find((post) => htmlToReadableText(
+          post.cooked,
+          options && options.DOMParserCtor,
+          { removeBlockquotes: true }
+        )));
     const firstId = first && first.id != null ? String(first.id) : '';
     const opAuthor = first ? discourseAuthor(first) : null;
     return posts.flatMap((post) => {
@@ -494,7 +536,7 @@
       const floorMatch = clean(floorNode && floorNode.textContent).match(/(\d+)/u);
       return { postId, floor: floorMatch ? Number(floorMatch[1]) : index + 1, authorId, authorName, content };
     }).filter((item) => ForumContent.semanticUnitsFromElement(item.content, { removeBlockquotes: true }).length);
-    const first = mapped.slice().sort((a, b) => a.floor - b.floor)[0];
+    const first = mapped.find((item) => item.floor === 1);
     return mapped.sort((a, b) => a.floor - b.floor).flatMap((item) => {
       const sourceSelector = `article[data-post-id="${cssString(item.postId)}"], article#post_${cssString(item.postId)}`;
       return expandForumPost({
@@ -515,15 +557,27 @@
   async function extractDiscourseDocument(document, options) {
     const route = discourseRoute(document);
     const fetchFn = options && options.fetchFn;
+    const domBlocks = extractDiscourseDom(document);
+    const parseOptions = Object.assign({}, options || {}, { currentFloor: route && route.floor });
     if (!route || typeof fetchFn !== 'function') {
       return documentResult(document, {
         adapterId: 'discourse',
-        blocks: extractDiscourseDom(document),
+        blocks: domBlocks,
         complete: false,
         warnings: ['discourse-current-dom-only']
       });
     }
-    const initialUrl = new URL(`${route.basePath || ''}/t/${route.topicId}.json`.replace(/\/{2,}/gu, '/'), route.url.origin);
+    if (domBlocks.length) {
+      await reportProgress(options, documentResult(document, {
+        adapterId: 'discourse',
+        blocks: domBlocks,
+        complete: false,
+        warnings: ['discourse-visible-posts-first'],
+        stats: { extractedPosts: domBlocks.length }
+      }), { phase: 'visible', floor: route.floor });
+    }
+    const topicSuffix = route.floor > 1 ? `/${route.floor}` : '';
+    const initialUrl = new URL(`${route.basePath || ''}/t/${route.topicId}${topicSuffix}.json`.replace(/\/{2,}/gu, '/'), route.url.origin);
     try {
       const initialResponse = await fetchJson(fetchFn, initialUrl, {
         origin: route.url.origin,
@@ -536,9 +590,17 @@
       const embedded = stream && Array.isArray(stream.posts) ? stream.posts : [];
       const present = new Set(embedded.map((post) => String(post.id)));
       const missing = ids.filter((id) => !present.has(id));
+      const anchorPost = embedded.find((post) => Number(post && post.post_number) === route.floor) || embedded[0];
+      const anchorIndex = anchorPost && anchorPost.id != null ? ids.indexOf(String(anchorPost.id)) : -1;
+      const prioritizedMissing = anchorIndex >= 0
+        ? [
+            ...missing.filter((id) => ids.indexOf(id) > anchorIndex),
+            ...missing.filter((id) => ids.indexOf(id) < anchorIndex)
+          ]
+        : missing;
       const batches = [];
-      for (let index = 0; index < missing.length; index += 20) {
-        batches.push(missing.slice(index, index + 20));
+      for (let index = 0; index < prioritizedMissing.length; index += 20) {
+        batches.push(prioritizedMissing.slice(index, index + 20));
       }
       const fetchBatch = async (batch) => {
         const batchUrl = new URL(`${route.basePath || ''}/t/${route.topicId}/posts.json`.replace(/\/{2,}/gu, '/'), route.url.origin);
@@ -562,7 +624,7 @@
       await reportProgress(options, documentResult(document, {
         adapterId: 'discourse',
         title: initial.title || (document && document.title),
-        blocks: parseDiscourseTopic(initial, [], options),
+        blocks: parseDiscourseTopic(initial, [], parseOptions),
         complete: missing.length === 0,
         warnings: missing.length ? ['discourse-loading-more'] : [],
         stats: { expectedPosts: ids.length, extractedPosts: embedded.length, fetchedPages: 1 }
@@ -572,9 +634,9 @@
         pages.push(firstBatchResult.payload);
         await reportProgress(options, documentResult(document, {
           adapterId: 'discourse', title: initial.title || (document && document.title),
-          blocks: parseDiscourseTopic(initial, pages, options), complete: false,
+          blocks: parseDiscourseTopic(initial, pages, parseOptions), complete: false,
           warnings: ['discourse-loading-more'],
-          stats: { expectedPosts: ids.length, extractedPosts: parseDiscourseTopic(initial, pages, options).length, fetchedPages: 1 + pages.length }
+          stats: { expectedPosts: ids.length, extractedPosts: parseDiscourseTopic(initial, pages, parseOptions).length, fetchedPages: 1 + pages.length }
         }), { phase: 'page', page: 1 + pages.length });
       }
       const remainingBatchResults = await mapWithConcurrency(batches.slice(1), FETCH_CONCURRENCY, async (batch) => {
@@ -583,16 +645,16 @@
           pages.push(result.payload);
           await reportProgress(options, documentResult(document, {
             adapterId: 'discourse', title: initial.title || (document && document.title),
-            blocks: parseDiscourseTopic(initial, pages, options), complete: false,
+            blocks: parseDiscourseTopic(initial, pages, parseOptions), complete: false,
             warnings: ['discourse-loading-more'],
-            stats: { expectedPosts: ids.length, extractedPosts: parseDiscourseTopic(initial, pages, options).length, fetchedPages: 1 + pages.length }
+            stats: { expectedPosts: ids.length, extractedPosts: parseDiscourseTopic(initial, pages, parseOptions).length, fetchedPages: 1 + pages.length }
           }), { phase: 'page' });
         }
         return result;
       });
       const batchResults = [firstBatchResult, ...remainingBatchResults].filter(Boolean);
       const failedIds = batchResults.flatMap((result) => result.failedIds);
-      const blocks = parseDiscourseTopic(initial, pages, options);
+      const blocks = parseDiscourseTopic(initial, pages, parseOptions);
       return documentResult(document, {
         adapterId: 'discourse',
         title: initial.title || (document && document.title),
@@ -605,7 +667,7 @@
       if (isAbortError(error)) throw error;
       return documentResult(document, {
         adapterId: 'discourse',
-        blocks: extractDiscourseDom(document),
+        blocks: domBlocks,
         complete: false,
         warnings: ['discourse-api-unavailable']
       });
@@ -617,12 +679,16 @@
     const match = url.pathname.match(/^(.*?)\/topic\/(\d+)(\/.*)?$/u);
     if (!match) return null;
     const suffixParts = String(match[3] || '').split('/').filter(Boolean);
-    if (suffixParts.length > 1 && /^\d+$/u.test(suffixParts[suffixParts.length - 1])) {
+    const lastSuffix = String(suffixParts[suffixParts.length - 1] || '');
+    const hasPageSuffix = /^\d+$/u.test(lastSuffix);
+    const pageCandidate = Number(lastSuffix);
+    const page = hasPageSuffix && Number.isFinite(pageCandidate) && pageCandidate > 0 ? pageCandidate : 1;
+    if (hasPageSuffix) {
       suffixParts.pop();
     }
     const suffix = suffixParts.length ? `/${suffixParts.join('/')}` : '';
     const apiPath = `${match[1]}/api/topic/${match[2]}${suffix}`.replace(/\/{2,}/gu, '/');
-    return { url, topicId: match[2], apiUrl: new URL(apiPath, url.origin) };
+    return { url, topicId: match[2], page, apiUrl: new URL(apiPath, url.origin) };
   }
 
   function parseNodebbTopicPages(pages, options) {
@@ -638,7 +704,7 @@
     const posts = Array.from(unique.values())
       .filter((post) => !post.deleted && !post.isDeleted && post.status !== 'deleted')
       .sort((left, right) => Number(left.index) - Number(right.index));
-    const first = posts[0];
+    const first = posts.find((post) => Number(post && post.index) === 0);
     const firstId = first && first.pid != null ? String(first.pid) : '';
     const firstUser = first && first.user || {};
     const firstName = clean(firstUser.displayname || firstUser.username || first && first.username);
@@ -689,7 +755,7 @@
       const indexValue = Number(post.getAttribute && post.getAttribute('data-index'));
       return { postId, floor: Number.isFinite(indexValue) ? indexValue + 1 : index + 1, authorId: author.id, authorName, content };
     }).filter((item) => ForumContent.semanticUnitsFromElement(item.content, { removeBlockquotes: true }).length);
-    const first = mapped.slice().sort((a, b) => a.floor - b.floor)[0];
+    const first = mapped.find((item) => item.floor === 1);
     return mapped.sort((a, b) => a.floor - b.floor).flatMap((item) => {
       const sourceSelector = `[component="post"][data-pid="${cssString(item.postId)}"]`;
       return expandForumPost({
@@ -710,19 +776,31 @@
   async function extractNodebbDocument(document, options) {
     const route = nodebbRoute(document);
     const fetchFn = options && options.fetchFn;
+    const domBlocks = extractNodebbDom(document);
     if (!route || typeof fetchFn !== 'function') {
       return documentResult(document, {
         adapterId: 'nodebb',
-        blocks: extractNodebbDom(document),
+        blocks: domBlocks,
         complete: false,
         warnings: ['nodebb-current-dom-only']
       });
     }
+    if (domBlocks.length) {
+      await reportProgress(options, documentResult(document, {
+        adapterId: 'nodebb',
+        blocks: domBlocks,
+        complete: false,
+        warnings: ['nodebb-visible-posts-first'],
+        stats: { extractedPosts: domBlocks.length }
+      }), { phase: 'visible', page: route.page });
+    }
     const pages = [];
     try {
-      const firstResponse = await fetchJson(fetchFn, route.apiUrl, {
+      const initialUrl = new URL(route.apiUrl.toString());
+      if (route.page > 1) initialUrl.searchParams.set('page', String(route.page));
+      const firstResponse = await fetchJson(fetchFn, initialUrl, {
         origin: route.url.origin,
-        baseUrl: route.apiUrl,
+        baseUrl: initialUrl,
         signal: options.signal
       });
       pages.push(firstResponse.payload);
@@ -744,10 +822,10 @@
       }), { phase: 'initial', page: 1 });
       const pageCount = Math.min(MAX_PAGES, reportedPageCount);
       const paginationCapped = reportedPageCount > MAX_PAGES;
-      const pageNumbers = Array.from(
-        { length: Math.max(0, pageCount - 1) },
-        (_, index) => index + 2
-      );
+      const pageNumbers = [
+        ...Array.from({ length: Math.max(0, pageCount - route.page) }, (_, index) => route.page + index + 1),
+        ...Array.from({ length: Math.max(0, Math.min(route.page, pageCount) - 1) }, (_, index) => index + 1)
+      ];
       const pageResults = await mapWithConcurrency(pageNumbers, FETCH_CONCURRENCY, async (page) => {
         const pageUrl = new URL(route.apiUrl.toString());
         pageUrl.searchParams.set('page', String(page));
@@ -805,7 +883,7 @@
       }
       return documentResult(document, {
         adapterId: 'nodebb',
-        blocks: extractNodebbDom(document),
+        blocks: domBlocks,
         complete: false,
         warnings: ['nodebb-api-unavailable']
       });

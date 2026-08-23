@@ -1,0 +1,29 @@
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  --fl-paper: #fff;
+  --fl-surface: #f8fafc;
+  --fl-ink: #0f1f3d;
+  --fl-muted: #64748b;
+  --fl-line: #dbe4f0;
+  --fl-blue: #2563eb;
+  --fl-blue-hover: #1d4ed8;
+  --fl-blue-active: #1e40af;
+  --fl-blue-soft: #eff6ff;
+  --fl-danger: #b4233a;
+  --fl-success: #0f766e;
+  --fl-radius-sm: 8px;
+  --fl-radius: 12px;
+  --fl-radius-lg: 16px;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; min-width: 320px; min-height: 100%; color: var(--fl-ink); background: var(--fl-paper); }
+body.fl-popup-document, body.fl-popup-document #root {
+  width: 420px;
+  min-width: 420px;
+  height: 600px;
+  min-height: 600px;
+  overflow: hidden;
+}
+button, select, input { font: inherit; }

@@ -29,6 +29,16 @@ test('wordIndexAtProgress uses duration-ratio text positions and assigns punctua
   assert.equal(Timeline.wordIndexAtProgress(timeline, { playedSeconds: 10 }), 3);
   assert.equal(Timeline.wordIndexAtProgress(timeline, { playedSeconds: 10, done: true }), 3);
 });
+
+test('chrome.tts character boundaries select the exact word without requiring audio duration', () => {
+  const timeline = sampleTimeline({ durationSeconds: null });
+  assert.equal(Timeline.wordIndexAtSpeechOffset(timeline, 0), 0);
+  assert.equal(Timeline.wordIndexAtSpeechOffset(timeline, 3), 1);
+  assert.equal(Timeline.wordIndexAtSpeechOffset(timeline, 6), 2);
+  const result = Timeline.applyProgress(timeline, { charIndex: 12, sequence: 1 });
+  assert.equal(result.index, 3);
+  assert.equal(timeline.timingMode, 'character-boundary');
+});
 test('applyProgress is monotonic and ignores duplicate or stale event sequences', () => {
   const timeline = sampleTimeline();
 

@@ -12,18 +12,23 @@ test('project README explains purpose, capabilities, model access, and quick use
   for (const heading of ['我们能实现什么', '我们是干什么用的', '支持什么模型和接入方式', '快速使用']) {
     assert.match(projectReadme, new RegExp(`## ${heading}`));
   }
-  assert.match(projectReadme, /local-qwen/);
   assert.match(projectReadme, /browser-system/);
-  assert.match(projectReadme, /local-qwen/);
+  assert.match(projectReadme, /local-service/);
+  assert.match(projectReadme, /Provider V4/);
   assert.match(projectReadme, /dist\\Flowloud-Edge/);
   assert.match(projectReadme, /edge:\/\/extensions\//);
   assert.match(projectReadme, /页面导览/);
 });
 
-test('extension README describes the popup-first floating-player experience', () => {
-  assert.match(extensionReadme, /网页悬浮播放器/);
-  assert.match(extensionReadme, /完整\/最小化/);
+test('extension README describes the popup-first floating-orb experience', () => {
+  assert.match(extensionReadme, /网页悬浮球/);
+  assert.match(extensionReadme, /拖动吸附/);
+  assert.match(extensionReadme, /40px 可见圆形/);
+  assert.match(extensionReadme, /44×44px/);
+  assert.match(extensionReadme, /默认只露出一半/);
+  assert.match(extensionReadme, /点击后展开/);
+  assert.match(extensionReadme, /上一句、暂停\/继续、下一句和回到正文/);
   assert.match(extensionReadme, /网页点读默认关闭/);
   assert.match(extensionReadme, /麦克风录制和批量上传音频/);
-  assert.doesNotMatch(extensionReadme, /悬浮球|右侧栏|打开侧栏/);
+  assert.doesNotMatch(extensionReadme, /右侧栏|打开侧栏/);
 });

@@ -22,6 +22,27 @@ const thread = [
   { id: '5', floor: 5, authorId: 'op', authorName: '楼主', isOp: true, text: '总结。' }
 ];
 
+test('everyone-one uses the explicitly selected narrator voice for every role by default', () => {
+  const { assignVoices } = loadVoiceAssignment();
+  const result = assignVoices(thread, {
+    opVoice: '系统中文音色',
+    replyVoices: ['不应自动使用的机械音'],
+    mode: 'everyone-one',
+    allowSingleVoice: true,
+  });
+  assert.deepEqual(result.map((segment) => segment.voice), [
+    '系统中文音色', '系统中文音色', '系统中文音色', '系统中文音色', '系统中文音色',
+  ]);
+});
+
+test('new multi-role strategies have explicit and stable semantics', () => {
+  const { assignVoices } = loadVoiceAssignment();
+  const options = { opVoice: 'A', replyVoices: ['B', 'C'], allowSingleVoice: true };
+  assert.deepEqual(assignVoices(thread, { ...options, mode: 'op-plus-one' }).map((item) => item.voice), ['A', 'B', 'B', 'B', 'A']);
+  assert.deepEqual(assignVoices(thread, { ...options, mode: 'op-stable-random' }).map((item) => item.voice), ['A', 'B', 'C', 'B', 'A']);
+  assert.deepEqual(assignVoices(thread, { ...options, mode: 'op-round-robin' }).map((item) => item.voice), ['A', 'B', 'C', 'B', 'A']);
+});
+
 test('op-exclusive reserves voice A for the original poster at every floor', () => {
   const { assignVoices } = loadVoiceAssignment();
   const result = assignVoices(thread, {
@@ -152,4 +173,12 @@ test('assignVoices rejects an empty reply voice pool with a Chinese error', () =
     () => assignVoices(thread, { opVoice: 'A', replyVoices: [], mode: 'op-exclusive' }),
     /回复音色池不能为空/u
   );
+});
+
+test('system Provider may intentionally use the browser default voice for every author', () => {
+  const { assignVoices } = loadVoiceAssignment();
+  const assigned = assignVoices(thread, {
+    opVoice: '', replyVoices: [], mode: 'op-exclusive', allowSingleVoice: true,
+  });
+  assert.deepEqual(assigned.map((segment) => segment.voice), ['', '', '', '', '']);
 });

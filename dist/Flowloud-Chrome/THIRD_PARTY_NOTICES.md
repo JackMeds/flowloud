@@ -27,6 +27,10 @@ This distribution includes or interoperates with:
 - Mozilla Readability — Apache-2.0 (`vendor/readability/LICENSE.md`).
 - Transformers.js 4.2.0 — Apache-2.0 (`vendor/transformers/LICENSE`).
 - ONNX Runtime Web 1.26.0 dev build — MIT (`vendor/transformers/ONNXRUNTIME-LICENSE`); bundled WASM runtime files originate from Microsoft ONNX Runtime.
+- pinyin-pro 3.29.3 — MIT (`vendor/transformers/PINYIN-PRO-LICENSE`); bundled locally to convert Chinese text to the tone-mark pinyin required by the fixed VITS model.
+- kokoro-js 1.2.1 — Apache-2.0 (`vendor/kokoro/LICENSE`); used as the fixed local adapter for the Kokoro model rather than duplicating its phonemization and voice-conditioning logic.
+- Transformers.js 3.5.1 — Apache-2.0 (`vendor/kokoro/TRANSFORMERS-LICENSE`); isolated inside the Kokoro adapter because Transformers.js 4.2.0 does not register `style_text_to_speech_2` in its automatic text-to-audio mapping.
+- phonemizer 1.2.1 — Apache-2.0 (`vendor/kokoro/PHONEMIZER-LICENSE`); bundled with the Kokoro adapter and never loaded as remote code.
 - BricksDisplay/vits-cmn — Apache-2.0; downloaded only after user confirmation.
 - onnx-community/Kokoro-82M-v1.0-ONNX — Apache-2.0; downloaded only after user confirmation.
 - qwentts.cpp pinned at `a8a7716b530e49fed537c57711247c12fbbb903c` — MIT.

@@ -18,12 +18,28 @@ test('popup and the comparison lab load the shared production renderer and CSS',
   assert.doesNotMatch(lab, /<script[^>]*>[^<]/);
 });
 
-test('popup controller keeps current-page voice editing inside the native popup', () => {
+test('comparison lab connects Popup page-voice entry to an interactive C editor', () => {
+  const lab = read('popup-lab.html');
+  const script = read('popup-lab.js');
+  const css = read('popup-lab.css');
+  assert.match(lab, /page-voices-lab-status/);
+  assert.match(lab, /调整本页配音/);
+  for (const action of ['qwen-popup-command', 'open-page-editor', 'cancel-page-voices', 'save-page-voices']) {
+    assert.match(script, new RegExp(action));
+  }
+  assert.match(script, /scrollIntoView/);
+  assert.match(script, /已应用到本页预览/);
+  assert.match(css, /qr-lab-editor-card\s*\{[^}]*width: min\(390px, 100%\)/);
+  assert.match(read('popup.css'), /\.qr-page-root-compact\s*\{[^}]*padding: 0 16px 16px/);
+  assert.match(read('popup.css'), /\.qr-page-root-compact \{ width: 100%; padding: 0 14px 14px/);
+});
+
+test('popup delegates complex current-page voice editing to a dedicated editor page', () => {
   const source = read('popup.js');
-  for (const type of ['reader:active-context', 'reader:snapshot:get', 'reader:command', 'reader:page-voices:get', 'reader:page-voices:apply']) {
+  for (const type of ['reader:active-context', 'reader:snapshot:get', 'reader:command', 'page-editor:open']) {
     assert.match(source, new RegExp(type));
   }
-  assert.doesNotMatch(source, /reader:page-editor:open/);
+  assert.doesNotMatch(source, /reader:page-voices:(?:get|apply)/);
   assert.match(read('popup-view.js'), /mountPopup/);
   assert.match(read('popup-view.js'), /mountPageVoices/);
   assert.match(read('popup-view.js'), /qr-page-root-compact/);
@@ -43,15 +59,16 @@ test('floating player, click-to-read, and author strategy are quick settings in 
   const view = read('popup-view.js');
   const controller = read('popup.js');
   const settingsPage = read('voice-studio.html');
-  assert.match(view, /dataset\.setting = 'clickToRead'/);
-  assert.match(view, /dataset\.setting = 'showFloatingPlayer'/);
-  assert.match(view, /dataset\.setting = 'preset'/);
-  assert.match(view, /网页点读/);
-  assert.match(view, /网页悬浮窗/);
+  assert.match(view, /switchRow\('clickToRead'/);
+  assert.match(view, /switchRow\('showFloatingPlayer'/);
+  assert.match(view, /selectRow\(\s*'preset'/);
+  assert.match(view, /点击正文朗读/);
+  assert.match(view, /显示网页悬浮球/);
   assert.match(view, /作者配音策略/);
+  assert.match(view, /网页交互/);
   assert.match(controller, /api\.storage\.local\.set/);
   assert.match(controller, /qwenReaderSettings/);
-  assert.doesNotMatch(settingsPage, /name="(?:clickToRead|preset)"/);
+  assert.match(settingsPage, /name="(?:clickToRead|preset)"/);
 });
 
 test('rerendering cannot accumulate delegated control listeners', () => {
@@ -68,18 +85,50 @@ test('popup polling preserves focus and keeps live announcements scoped to statu
   assert.doesNotMatch(html, /id="popup-root"[^>]*aria-live/);
   assert.match(view, /function captureFocus/);
   assert.match(view, /function restoreFocus/);
+  assert.match(view, /function captureScroll/);
+  assert.match(view, /function restoreScroll/);
+  assert.match(view, /data-scroll-key/);
   assert.match(view, /dataset\.focusKey/);
-  assert.match(view, /headerRight\.setAttribute\('role', 'status'\)/);
+  assert.match(view, /status\.setAttribute\('role', 'status'\)/);
   assert.match(view, /progress\.setAttribute\('role', 'progressbar'\)/);
   assert.match(controller, /lastRenderSignature/);
   assert.match(read('popup.css'), /@media \(forced-colors: active\)/);
+  assert.match(read('popup.css'), /\.qr-control-primary:hover/);
 });
 
-test('toolbar badge uses an intuitive neutral pause treatment', () => {
+test('snapshot updates keep the popup shell stable and preserve its scroll container', () => {
+  const view = read('popup-view.js');
+  const mountStart = view.indexOf('function mountPopup');
+  const pageEditorStart = view.indexOf('function mountPageVoices');
+  assert.ok(mountStart >= 0 && pageEditorStart > mountStart);
+  const mountSource = view.slice(mountStart, pageEditorStart);
+  assert.doesNotMatch(mountSource, /root\.replaceChildren\(\)/);
+  assert.match(view, /popupRefs\.set\(root, refs\)/);
+  assert.match(read('popup.css'), /overscroll-behavior: contain/);
+});
+
+test('global interaction settings expose one explicit scope across Popup and settings center', () => {
+  const view = read('popup-view.js');
+  const settings = read('voice-studio.html');
+  const controller = read('settings-center.js');
+  assert.match(view, /全局设置/);
+  assert.match(view, /网页交互/);
+  assert.match(settings, /name="showFloatingPlayer"/);
+  assert.match(settings, /name="clickToRead"/);
+  assert.match(settings, /name="preset"/);
+  assert.match(controller, /setControlValue\('showFloatingPlayer'/);
+  assert.match(controller, /setControlValue\('clickToRead'/);
+  assert.match(controller, /setControlValue\('preset'/);
+  assert.doesNotMatch(read('popup.html'), /popup-paper\.css/);
+  assert.doesNotMatch(settings, /settings-paper\.css/);
+});
+
+test('toolbar keeps one logo and uses state-color icons without overlay badge glyphs', () => {
   const background = read('background.js');
-  assert.match(background, /status === 'paused' \? '❚❚'/u);
-  assert.match(background, /status === 'paused' \? '#475569'/u);
-  assert.doesNotMatch(background, /#d97706|status === 'paused' \? 'Ⅱ'/u);
+  assert.match(background, /setBadgeText\(\{ tabId: target\.tabId, text: '' \}\)/u);
+  assert.match(background, /flowloud-toolbar-\$\{normalized\}-16\.png/u);
+  assert.match(background, /flowloud-toolbar-\$\{normalized\}-32\.png/u);
+  assert.doesNotMatch(background, /'▶'|'❚❚'|'Ⅱ'/u);
 });
 
 test('page editor trusts contextId, keeps global voice choices implicit, and only closes after success', () => {
@@ -100,7 +149,6 @@ test('page editor trusts contextId, keeps global voice choices implicit, and onl
 test('popup commands carry the current page identity', () => {
   const source = read('popup.js');
   assert.match(source, /pageKey: snapshot && snapshot\.pageKey \|\| context && context\.pageKey/);
-  assert.match(source, /pageKey: pageContext && pageContext\.pageKey/);
 });
 
 test('the popup has no legacy sidebar or floating-orb surface and exposes page guide mode', () => {

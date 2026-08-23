@@ -111,12 +111,18 @@
       ? canSpeak
       : (value) => /[\p{L}\p{N}]/u.test(String(value == null ? '' : value));
     const output = [];
+    const documentKey = String(source.pageKey || pageKey(source.url || source.location));
     blocks.forEach((input, blockIndex) => {
       const normalized = createBlock(input);
       const chunks = typeof split === 'function'
         ? split(normalized.text, maxChars)
         : [normalized.text];
+      let sourceCursor = 0;
       chunks.forEach((chunk, chunkIndex) => {
+        const locatedStart = normalized.text.indexOf(chunk, sourceCursor);
+        const sourceStart = locatedStart >= 0 ? locatedStart : sourceCursor;
+        const sourceEnd = Math.min(normalized.text.length, sourceStart + chunk.length);
+        sourceCursor = Math.max(sourceCursor, sourceEnd);
         const prepared = typeof prepare === 'function'
           ? prepare(chunk)
           : { sourceText: chunk, speechText: chunk, ranges: [] };
@@ -125,6 +131,21 @@
           id: `${normalized.id || `block-${blockIndex}`}:${chunkIndex}`,
           text: chunk
         }));
+        const locator = segment.sourceLocator;
+        const locatorIdentity = locator
+          // Live forum DOM and canonical forum APIs often describe the same
+          // post with different selector strings (for example, the live DOM
+          // adds a virtualized floor selector).  A selector-based identity
+          // therefore leaves two copies of the clicked sentence in the
+          // progressive queue.  Prefer the immutable post id when available;
+          // unit index, fingerprint and text offsets still keep genuinely
+          // repeated sentences distinct.
+          ? [locator.adapter, segment.postId || locator.containerSelector, locator.unitIndex, locator.fingerprint].join(':')
+          : String(segment.sourceKey || segment.sourceSelector || normalized.id || `block-${blockIndex}`);
+        segment.sourceText = normalized.text;
+        segment.sourceStart = sourceStart;
+        segment.sourceEnd = sourceEnd;
+        segment.sourceIdentity = [documentKey, locatorIdentity, sourceStart, sourceEnd].join('|');
         segment.speechText = prepared.speechText;
         segment.speechSourceMap = {
           sourceText: prepared.sourceText,
