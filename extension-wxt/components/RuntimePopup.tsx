@@ -180,6 +180,11 @@ export function RuntimePopup() {
     setModel((current) => ({ ...current, settings: nextSettings, message: undefined }));
     if (!bridge.available) return;
     try {
+      if (key === 'showFloatingPlayer' && value === true) {
+        const granted = await bridge.requestPageOrigin(context);
+        if (!granted) throw new globalThis.Error('未授予当前网站的悬浮播放器权限。');
+        setModel((current) => ({ ...current, persistentSiteAccess: true }));
+      }
       if (key === 'activeProviderId' && value === 'local-service') {
         const providerSettings = savedSettings.current.providerSettings as Record<string, Record<string, unknown>> | undefined;
         const baseUrl = String(providerSettings?.['local-service']?.baseUrl || 'http://127.0.0.1:7811');
@@ -194,6 +199,18 @@ export function RuntimePopup() {
         ...current, settings: previous,
         message: messageFrom(error, '设置保存失败。'),
       }));
+    }
+  };
+
+  const requestPersistentSiteAccess = async () => {
+    if (!bridge.available) return;
+    try {
+      const granted = await bridge.requestPageOrigin(context);
+      if (!granted) throw new globalThis.Error('未授予当前网站的悬浮播放器权限。');
+      setModel((current) => ({ ...current, persistentSiteAccess: true, message: undefined }));
+      showControlNotice('已允许当前网站；之后刷新会自动显示悬浮播放器。', 3200);
+    } catch (error) {
+      setModel((current) => ({ ...current, message: messageFrom(error, '无法授权当前网站。') }));
     }
   };
 
@@ -292,6 +309,7 @@ export function RuntimePopup() {
       model={model}
       onCommand={sendCommand}
       onSettingChange={changeSetting}
+      onRequestPersistentSiteAccess={requestPersistentSiteAccess}
       onOpenOptions={() => bridge.openOptions()}
       onOpenGuide={openGuide}
       onReturnSource={focusSource}

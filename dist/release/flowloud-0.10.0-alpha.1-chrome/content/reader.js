@@ -454,6 +454,20 @@
         if (requestedPageKey && requestedPageKey !== String(state.pageKey || getCurrentPageKey())) {
           return { ok: true, ignored: true, snapshot: getReaderSnapshot() };
         }
+        const revokedPlaybackId = String(message.playbackId || "");
+        // Replacing a finished sentence with its successor can overlap with the
+        // background coordinator releasing the previous global session. Never
+        // let that late revocation stop the newer sentence that now owns this
+        // page. Identity-less messages remain supported for one-version
+        // compatibility with older backgrounds.
+        if (revokedPlaybackId && revokedPlaybackId !== String(activeSession || "")) {
+          return {
+            ok: true,
+            ignored: true,
+            reason: "stale_playback",
+            snapshot: getReaderSnapshot(),
+          };
+        }
         await stopPlayback({ localOnly: true });
         return { ok: true, revoked: true, snapshot: getReaderSnapshot() };
       }
@@ -1837,10 +1851,10 @@
 
   function finishBufferedPlayback(audio) {
     if (!audio || currentAudio !== audio) return;
-    finishStreamPlayback();
+    finishStreamPlayback(audio);
   }
 
-  function finishStreamPlayback() {
+  function finishStreamPlayback(reusableAudio) {
     if (!activeSession) return;
     const finishedSession = activeSession;
     if (finishedSession && completedStreamSession === finishedSession) return;
@@ -1857,7 +1871,11 @@
     const finishedSegment = state.current;
     const nextIndex = findNextSpeakableIndex(state.segments, state.index + 1);
     if (nextIndex >= 0) {
-      void playIndex(nextIndex);
+      // Browser-hosted models return complete audio buffers. Reusing the media
+      // element that the user's first click already unlocked prevents Chrome
+      // and Edge from treating every automatically-advanced sentence as a new
+      // autoplay request.
+      void playIndex(nextIndex, reusableAudio ? { reusableAudio } : undefined);
       return;
     }
     if (activeScanController || dynamicScanPending || progressiveQueueMayGrow()) {
@@ -1978,6 +1996,9 @@
   async function playIndex(index, options) {
     const playOptions = options || {};
     const providerOverride = String(playOptions.providerId || "");
+    const reusableAudio = playOptions.reusableAudio && playOptions.reusableAudio === currentAudio
+      ? currentAudio
+      : null;
     clearProgressiveContinuation();
     const wasInactive = !miniPlayerEngaged || !["extracting", "loading", "playing", "paused", "ready", "error"].includes(state.status);
     miniPlayerEngaged = true;
@@ -2012,7 +2033,7 @@
       await requestCache.discard(prefetched);
       return;
     }
-    if (currentAudio) {
+    if (currentAudio && currentAudio !== reusableAudio) {
       currentAudio.pause();
       currentAudio.removeAttribute("src");
       currentAudio = null;
@@ -2108,23 +2129,24 @@
       } else {
         setServiceStatus("正在朗读", "playing");
       }
-      const audio = new Audio(
-        `data:${audioResult.mimeType || "audio/wav"};base64,${audioResult.audioBase64}`,
-      );
+      const audio = reusableAudio || new Audio();
+      audio.src = `data:${audioResult.mimeType || "audio/wav"};base64,${audioResult.audioBase64}`;
       audio.preservesPitch = true;
       audio.playbackRate = playbackRate;
       currentAudio = audio;
       audioProgressSequence = 0;
-      ["loadedmetadata", "timeupdate", "play", "playing"].forEach((eventName) => {
-        audio.addEventListener(eventName, () => updateAudioWordProgress(audio, false));
-      });
-      audio.addEventListener("pause", () => updateAudioWordProgress(audio, false));
-      audio.addEventListener("ended", () => {
+      const updateBufferedProgress = () => updateAudioWordProgress(audio, false);
+      audio.onloadedmetadata = updateBufferedProgress;
+      audio.ontimeupdate = updateBufferedProgress;
+      audio.onplay = updateBufferedProgress;
+      audio.onplaying = updateBufferedProgress;
+      audio.onpause = updateBufferedProgress;
+      audio.onended = () => {
         if (!playbackGate.isCurrent(playbackId) || currentAudio !== audio) return;
         updateAudioWordProgress(audio, true);
         finishBufferedPlayback(audio);
-      });
-      audio.addEventListener("error", () => {
+      };
+      audio.onerror = () => {
         if (!playbackGate.isCurrent(playbackId) || currentAudio !== audio) return;
         desiredPlaybackPaused = false;
         playbackControlPending = "";
@@ -2135,9 +2157,10 @@
           message: "音频无法播放，请重新加载扩展后重试。",
         });
         setServiceStatus("音频播放失败", "error");
+        clearHighlight();
         render();
         flushPendingDynamicScan();
-      });
+      };
       await audio.play();
       if (!playbackGate.isCurrent(playbackId) || currentAudio !== audio) return;
       const nextIndex = findNextSpeakableIndex(state.segments, index + 1);

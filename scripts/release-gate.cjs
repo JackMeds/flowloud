@@ -40,6 +40,9 @@ function runReleaseGate() {
   if (!Array.isArray(manifest.optional_host_permissions) || !manifest.optional_host_permissions.includes('https://*/*')) {
     throw new Error('在线 TTS 的运行时精确 origin 请求必须有通用可选 HTTPS 范围作为上限。');
   }
+  if (!manifest.optional_host_permissions.includes('http://*/*')) {
+    throw new Error('普通 HTTP 网站的悬浮播放器恢复必须有通用可选 HTTP 范围作为授权上限。');
+  }
   if (!manifest.optional_host_permissions.some((pattern) => pattern.includes('localhost'))) throw new Error('Manifest 缺少 localhost 可选权限。');
   const extensionCsp = String(manifest.content_security_policy?.extension_pages || '');
   if (!extensionCsp.includes('connect-src') || !extensionCsp.includes('http:') || !extensionCsp.includes('https:')) {
@@ -56,6 +59,7 @@ function runReleaseGate() {
   }
   for (const required of [
     'shared/provider-core.js', 'shared/provider-v4.js', 'shared/document-provider-v1.js', 'shared/settings-schema.js', 'offscreen.html',
+    'content/reader-bootstrap.js',
     'document-workbench.html', 'vendor/transformers/runtime-build.json',
     'vendor/transformers/LICENSE', 'vendor/transformers/ONNXRUNTIME-LICENSE',
     'vendor/transformers/ort-wasm-simd-threaded.asyncify.mjs', 'vendor/transformers/ort-wasm-simd-threaded.asyncify.wasm', 'LICENSE',

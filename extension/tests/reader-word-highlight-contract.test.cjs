@@ -135,7 +135,7 @@ test('fixed ink hides the native glyph while its light copy is visible and keeps
 test('stop, stream errors, and audio errors share idempotent word-motion cleanup', () => {
   assert.match(source, /function\s+stopPlayback\(options\)[\s\S]*?clearHighlight\(\)/);
   assert.match(source, /event\s*===\s*"error"[\s\S]*?clearHighlight\(\)/);
-  assert.match(source, /audio\.addEventListener\("error"[\s\S]*?clearHighlight\(\)/);
+  assert.match(source, /audio\.onerror\s*=\s*\(\)\s*=>[\s\S]*?clearHighlight\(\)/);
   assert.match(source, /function\s+clearWordMotion\(\)[\s\S]*?layer\.replaceChildren\(\)/);
 });
 

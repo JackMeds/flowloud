@@ -32,6 +32,9 @@
       extractCalls: 0,
       synthCalls: 0,
       audioPlays: 0,
+      audioInstances: [],
+      blessedAudio: null,
+      blockReplacementAudio: false,
       holdSynthesis: false,
       pendingSynthesis: null,
       streamMode: false,
@@ -54,14 +57,33 @@
     window.cancelAnimationFrame = (handle) => clearTimeout(handle);
     window.Audio = class HarnessAudio {
       constructor(src) {
-        this.src = src;
+        this.src = src || "";
+        this.currentTime = 0;
+        this.duration = 1;
+        this.paused = true;
         this.listeners = new Map();
+        window.__qrHarness.audioInstances.push(this);
       }
       addEventListener(type, listener) { this.listeners.set(type, listener); }
-      async play() { window.__qrHarness.audioPlays += 1; }
-      pause() {}
+      async play() {
+        if (window.__qrHarness.blockReplacementAudio
+          && window.__qrHarness.blessedAudio
+          && window.__qrHarness.blessedAudio !== this) {
+          throw new DOMException("Autoplay blocked for a replacement media element", "NotAllowedError");
+        }
+        window.__qrHarness.audioPlays += 1;
+        window.__qrHarness.blessedAudio ||= this;
+        this.paused = false;
+        this.onplay?.();
+        this.onplaying?.();
+      }
+      pause() { this.paused = true; this.onpause?.(); }
       removeAttribute(name) { if (name === "src") this.src = ""; }
       load() {}
+      dispatch(type) {
+        this.listeners.get(type)?.();
+        this[`on${type}`]?.();
+      }
     };
     window.QwenReaderDefaults = {
       SETTINGS_KEY: "qwenReaderSettings",
@@ -639,6 +661,26 @@
         if (wordMotionLayer.querySelector('.qr-word-motion-cursor')) throw new Error("completed stream left the word-motion cursor behind");
         if (document.documentElement.classList.contains("qwen-reader-word-motion-paused")) throw new Error("completed stream left the page motion state behind");
         if (root.querySelector('.qr-queue-item.is-current')?.dataset.index !== "1") throw new Error("matching stream identity did not advance exactly once");
+        const continuedIdentity = Object.assign({}, window.__qrHarness.streamIdentity);
+        if (!continuedIdentity.playbackId || continuedIdentity.playbackId === streamIdentity.playbackId) {
+          throw new Error("auto-next did not establish a distinct successor playback session");
+        }
+        const staleRevocation = await requestReader({
+          type: "reader:playback:revoked",
+          pageKey,
+          playbackId: streamIdentity.playbackId,
+          reason: "replaced-by-new-playback"
+        });
+        await new Promise(resolve => setTimeout(resolve, 30));
+        if (!staleRevocation?.ignored || staleRevocation.reason !== "stale_playback") {
+          throw new Error("late revocation for the completed sentence was not ignored");
+        }
+        if (root.querySelector('.qr-queue-item.is-current')?.dataset.index !== "1") {
+          throw new Error("late revocation stopped the automatically-started successor sentence");
+        }
+        if (window.__qrHarness.streamIdentity?.playbackId !== continuedIdentity.playbackId) {
+          throw new Error("late revocation replaced the successor playback identity");
+        }
         window.__qrHarness.runtimeMessageListener(Object.assign({
           type: "tts:stream:event",
           event: "ended"
@@ -703,6 +745,34 @@
         await new Promise(resolve => setTimeout(resolve, 20));
         window.__qrHarness.streamMode = false;
         window.__qrHarness.streamIdentity = null;
+
+        const bufferedTarget = root.querySelector('.qr-queue-item[data-index="0"]');
+        if (!bufferedTarget) throw new Error("buffered continuation target was unavailable");
+        bufferedTarget.click();
+        await new Promise(resolve => setTimeout(resolve, 80));
+        const unlockedAudio = window.__qrHarness.audioInstances.at(-1);
+        if (!unlockedAudio) throw new Error("buffered playback did not create its initial media element");
+        const audioInstanceCount = window.__qrHarness.audioInstances.length;
+        window.__qrHarness.blessedAudio = unlockedAudio;
+        window.__qrHarness.blockReplacementAudio = true;
+        unlockedAudio.currentTime = unlockedAudio.duration;
+        unlockedAudio.dispatch("ended");
+        await new Promise(resolve => setTimeout(resolve, 120));
+        window.__qrHarness.blockReplacementAudio = false;
+        if (root.querySelector('.qr-queue-item.is-current')?.dataset.index !== "1") {
+          throw new Error("buffered browser-model playback did not advance to its successor sentence");
+        }
+        if (window.__qrHarness.audioInstances.length !== audioInstanceCount
+          || window.__qrHarness.audioInstances.at(-1) !== unlockedAudio) {
+          throw new Error("buffered auto-next replaced the user-unlocked media element");
+        }
+        const bufferedSnapshot = await requestReader({ type: "reader:snapshot:get" });
+        if (bufferedSnapshot?.snapshot?.status !== "playing") {
+          throw new Error(`buffered successor did not remain audible: ${JSON.stringify(bufferedSnapshot?.snapshot)}`);
+        }
+        await requestReader({ type: "reader:command", pageKey, command: "stop" });
+        await new Promise(resolve => setTimeout(resolve, 20));
+
         window.__qrHarness.synthCalls = 0;
         const tabs = root.querySelectorAll('[role="tab"]');
         if (tabs.length !== 3) throw new Error("expected three tabs");

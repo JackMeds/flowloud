@@ -6,7 +6,7 @@
   "default_locale": "zh_CN",
   "description": "__MSG_extensionDescription__",
   "permissions": ["storage", "unlimitedStorage", "offscreen", "activeTab", "scripting", "tts"],
-  "optional_host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "http://[::1]/*", "https://127.0.0.1/*", "https://localhost/*", "https://[::1]/*", "https://huggingface.co/*", "https://*.huggingface.co/*", "https://*.hf.co/*", "https://*/*"],
+  "optional_host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "http://[::1]/*", "https://127.0.0.1/*", "https://localhost/*", "https://[::1]/*", "https://huggingface.co/*", "https://*.huggingface.co/*", "https://*.hf.co/*", "http://*/*", "https://*/*"],
   "icons": {
     "16": "assets/flowloud-16.png",
     "32": "assets/flowloud-32.png",

@@ -48,6 +48,7 @@ export interface PopupModel {
   providerBaseUrl?: string;
   providerDevice?: string;
   providerAdapter?: string;
+  persistentSiteAccess?: boolean;
   controlNotice?: string;
   message?: string;
   isMock?: boolean;
@@ -114,6 +115,7 @@ export const demoPopupModel: PopupModel = {
   pageVoiceLoadState: 'ready',
   voiceLoadState: 'ready',
   providerNotice: '支持逐词边界；实际能力取决于所选系统音色。',
+  persistentSiteAccess: false,
   isMock: true,
   currentTabId: null,
   sourceTabId: null,

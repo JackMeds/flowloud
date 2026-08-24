@@ -9,6 +9,8 @@ const {
   createOffscreenManager,
   createPopupBroker,
   install,
+  normalizeReaderSitePattern,
+  registerReaderSite,
 } = require('../background.js');
 
 test('toolbar playback state recolors the full logo for each state without overlay badges', () => {
@@ -726,6 +728,117 @@ test('an enabled reader tab is reinjected after a same-tab refresh and forgotten
   await broker.forgetTab(17, true);
   assert.equal(await broker.ensureInjected(17), false);
   assert.equal(injected.length, 2);
+});
+
+test('a persistently authorized site restores the floating reader after background state is lost', async () => {
+  const injected = [];
+  const chromeApi = {
+    storage: {
+      local: {
+        async get(key) { return { [key]: { showFloatingPlayer: true } }; },
+      },
+      session: {
+        async get(key) { return { [key]: undefined }; },
+        async set() {},
+        async remove() {},
+      },
+    },
+    permissions: {
+      async contains(request) {
+        assert.deepEqual(request, { origins: ['https://example.com/*'] });
+        return true;
+      },
+    },
+    tabs: {
+      async get(tabId) { return { id: tabId, url: 'https://example.com/topic/1' }; },
+    },
+    scripting: {
+      async insertCSS(payload) { injected.push(['css', payload.target.tabId]); },
+      async executeScript(payload) { injected.push(['js', payload.target.tabId, payload.files.at(-1)]); },
+    },
+  };
+
+  const broker = createPopupBroker(chromeApi, {});
+  assert.equal(await broker.ensureInjected(23), true);
+  assert.deepEqual(injected, [
+    ['css', 23],
+    ['js', 23, 'content/reader.js'],
+  ]);
+});
+
+test('persistent site access does not inject when the floating reader is disabled', async () => {
+  let permissionChecked = false;
+  const chromeApi = {
+    storage: {
+      local: {
+        async get(key) { return { [key]: { showFloatingPlayer: false } }; },
+      },
+      session: {
+        async get(key) { return { [key]: undefined }; },
+        async set() {},
+        async remove() {},
+      },
+    },
+    permissions: {
+      async contains() { permissionChecked = true; return true; },
+    },
+    tabs: {
+      async get(tabId) { return { id: tabId, url: 'https://example.com/topic/1' }; },
+    },
+    scripting: {
+      async insertCSS() { throw new Error('must not inject'); },
+      async executeScript() { throw new Error('must not inject'); },
+    },
+  };
+
+  const broker = createPopupBroker(chromeApi, {});
+  assert.equal(await broker.ensureInjected(24), false);
+  assert.equal(permissionChecked, false);
+});
+
+test('an authorized site is registered at document idle for fast persistent restoration', async () => {
+  const registered = [];
+  const chromeApi = {
+    permissions: {
+      async contains(request) {
+        assert.deepEqual(request, { origins: ['https://example.com/*'] });
+        return true;
+      },
+    },
+    scripting: {
+      async getRegisteredContentScripts() { return []; },
+      async registerContentScripts(definitions) { registered.push(...definitions); },
+    },
+  };
+
+  const result = await registerReaderSite(chromeApi, 'https://example.com/*');
+  assert.deepEqual(result, { ok: true, pattern: 'https://example.com/*', registered: true });
+  assert.deepEqual(registered, [{
+    id: 'flowloud-reader-sites-v1',
+    matches: ['https://example.com/*'],
+    js: ['content/reader-bootstrap.js'],
+    runAt: 'document_idle',
+    persistAcrossSessions: true,
+  }]);
+});
+
+test('reader site registration merges origins and rejects paths or non-web schemes', async () => {
+  const updated = [];
+  const chromeApi = {
+    permissions: { async contains() { return true; } },
+    scripting: {
+      async getRegisteredContentScripts() {
+        return [{ id: 'flowloud-reader-sites-v1', matches: ['https://first.example/*'] }];
+      },
+      async registerContentScripts() {},
+      async updateContentScripts(definitions) { updated.push(...definitions); },
+    },
+  };
+  await registerReaderSite(chromeApi, 'https://second.example/');
+  assert.deepEqual(updated[0].matches, ['https://first.example/*', 'https://second.example/*']);
+  assert.equal(normalizeReaderSitePattern('http://localhost:8080/*'), 'http://localhost:8080/*');
+  assert.throws(() => normalizeReaderSitePattern('https://example.com/private'), /origin/u);
+  assert.throws(() => normalizeReaderSitePattern('file:///tmp/article'), /HTTP 或 HTTPS/u);
 });
 
 test('offscreen control reports a typed retryable failure instead of a false success', async () => {

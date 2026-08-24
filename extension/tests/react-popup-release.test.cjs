@@ -50,6 +50,23 @@ test('React settings requests exact origins and cancels the active browser-model
   assert.match(bridge, /permissions\.request\(\{ origins: \[`\$\{parsed\.origin\}\/\*`\] \}\)/u);
 });
 
+test('React popup requests exact current-site access before promising refresh restoration', () => {
+  const sourceRoot = path.resolve(extensionRoot, '..', 'extension-wxt', 'components');
+  const popup = fs.readFileSync(path.join(sourceRoot, 'PopupConsole.tsx'), 'utf8');
+  const runtime = fs.readFileSync(path.join(sourceRoot, 'RuntimePopup.tsx'), 'utf8');
+  const bridge = fs.readFileSync(path.join(sourceRoot, 'runtime-bridge.ts'), 'utf8');
+  assert.match(popup, /点此允许刷新后显示/u);
+  assert.match(popup, /model\.persistentSiteAccess === false[\s\S]*onRequestPersistentSiteAccess/u);
+  assert.match(runtime, /requestPageOrigin\(context\)/u);
+  assert.match(runtime, /之后刷新会自动显示悬浮播放器/u);
+  assert.match(bridge, /return `\$\{parsed\.origin\}\/\*`/u);
+  assert.match(bridge, /permissions\.contains\(\{ origins: \[this\.pageOrigin\(context\)\] \}\)/u);
+  assert.match(bridge, /permissions\.request\(\{ origins: \[origin\] \}\)/u);
+  assert.match(bridge, /type: 'reader:site-access:register', origin/u);
+  const bootstrap = fs.readFileSync(path.join(extensionRoot, 'content', 'reader-bootstrap.js'), 'utf8');
+  assert.match(bootstrap, /reader:auto-restore/u);
+});
+
 test('React popup renders the live word boundary from the reader snapshot instead of a hard-coded phrase', () => {
   const sourceRoot = path.resolve(extensionRoot, '..', 'extension-wxt', 'components');
   const popup = fs.readFileSync(path.join(sourceRoot, 'PopupConsole.tsx'), 'utf8');

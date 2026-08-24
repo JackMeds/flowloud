@@ -69,8 +69,14 @@ test('reader advances to the next speakable segment when a stream ends', () => {
   );
   assert.match(
     readerSource,
-    /function\s+finishStreamPlayback\(\)[\s\S]*?if\s*\(nextIndex\s*>=\s*0\)\s*\{\s*void\s+playIndex\(nextIndex\);/u,
+    /function\s+finishStreamPlayback\(reusableAudio\)[\s\S]*?if\s*\(nextIndex\s*>=\s*0\)[\s\S]*?playIndex\(nextIndex,\s*reusableAudio\s*\?\s*\{\s*reusableAudio\s*\}/u,
   );
+});
+
+test('reader reuses the user-unlocked media element when buffered browser-model audio advances', () => {
+  assert.match(readerSource, /finishStreamPlayback\(audio\)/u);
+  assert.match(readerSource, /playOptions\.reusableAudio\s*&&\s*playOptions\.reusableAudio\s*===\s*currentAudio/u);
+  assert.match(readerSource, /const\s+audio\s*=\s*reusableAudio\s*\|\|\s*new\s+Audio\(\)/u);
 });
 
 test('reader ignores duplicate stream-ended notifications for the same playback identity', () => {
@@ -99,8 +105,10 @@ test('reader waits at an incomplete forum queue tail and resumes when a later sc
   assert.match(readerSource, /if\s*\(nextIndex\s*<\s*0\)\s*return false;[\s\S]{0,180}clearProgressiveContinuation\(\);[\s\S]{0,100}playIndex\(nextIndex\)/u);
 });
 
-test('reader reflects a global takeover immediately without recursively cancelling the new session', () => {
+test('reader reflects a current global takeover without letting a stale revocation stop the successor sentence', () => {
   assert.match(readerSource, /case\s+"reader:playback:revoked"/u);
+  assert.match(readerSource, /revokedPlaybackId\s*&&\s*revokedPlaybackId\s*!==\s*String\(activeSession\s*\|\|\s*""\)/u);
+  assert.match(readerSource, /reason:\s*"stale_playback"/u);
   assert.match(readerSource, /stopPlayback\(\{\s*localOnly:\s*true\s*\}\)/u);
   assert.match(readerSource, /stopOptions\.localOnly\s*!==\s*true/u);
   assert.match(readerSource, /stopOptions\.localOnly\s*===\s*true[\s\S]*requestCache\.clearAll\(\)/u);
@@ -113,6 +121,6 @@ test('reader never prefetches a direct-playback system utterance that would inte
 test('reader refuses to finish a stream after stop or seek cleared the active session', () => {
   assert.match(
     readerSource,
-    /function\s+finishStreamPlayback\(\)\s*\{\s*if\s*\(!activeSession\)\s*return;/u,
+    /function\s+finishStreamPlayback\(reusableAudio\)\s*\{\s*if\s*\(!activeSession\)\s*return;/u,
   );
 });

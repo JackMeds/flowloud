@@ -38,6 +38,7 @@ if (typeof importScripts === 'function') {
   const POPUP_TARGET_KEY = 'qwenReaderPopupTarget';
   const POPUP_SNAPSHOTS_KEY = 'qwenReaderPopupSnapshots';
   const READER_ENABLED_TABS_KEY = 'qwenReaderEnabledTabsV1';
+  const READER_SITE_SCRIPT_ID = 'flowloud-reader-sites-v1';
   const PAGE_EDITOR_CONTEXTS_KEY = 'qwenReaderPageEditorContexts';
   const GLOBAL_PLAYBACK_KEY = 'flowloudGlobalPlaybackV1';
   const DOCUMENT_WORKSPACE_SEED_KEY = 'flowloudDocumentWorkspaceSeedV1';
@@ -395,6 +396,48 @@ if (typeof importScripts === 'function') {
       hasDocument,
       ensureDocument,
     };
+  }
+
+  function normalizeReaderSitePattern(value) {
+    const source = String(value || '').replace(/\/\*$/u, '');
+    let parsed;
+    try { parsed = new URL(source); } catch (_) {
+      const error = new Error('悬浮播放器站点权限不是有效网址。');
+      error.code = 'invalid_site_origin';
+      throw error;
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) {
+      const error = new Error('悬浮播放器只接受 HTTP 或 HTTPS 网站 origin。');
+      error.code = 'invalid_site_origin';
+      throw error;
+    }
+    return `${parsed.origin}/*`;
+  }
+
+  async function registerReaderSite(chromeApi, value) {
+    const pattern = normalizeReaderSitePattern(value);
+    if (chromeApi.permissions?.contains && !await chromeApi.permissions.contains({ origins: [pattern] })) {
+      const error = new Error('当前网站尚未授权。');
+      error.code = 'host_permission_missing';
+      throw error;
+    }
+    const scripting = chromeApi.scripting;
+    if (!scripting?.registerContentScripts || !scripting?.getRegisteredContentScripts) {
+      return { ok: true, pattern, registered: false };
+    }
+    const existing = await scripting.getRegisteredContentScripts({ ids: [READER_SITE_SCRIPT_ID] });
+    const current = Array.isArray(existing) ? existing[0] : null;
+    const matches = Array.from(new Set([...(Array.isArray(current?.matches) ? current.matches : []), pattern]));
+    const definition = {
+      id: READER_SITE_SCRIPT_ID,
+      matches,
+      js: ['content/reader-bootstrap.js'],
+      runAt: 'document_idle',
+      persistAcrossSessions: true,
+    };
+    if (current && scripting.updateContentScripts) await scripting.updateContentScripts([definition]);
+    else if (!current) await scripting.registerContentScripts([definition]);
+    return { ok: true, pattern, registered: true };
   }
 
   function createGlobalPlaybackCoordinator(options) {
@@ -1319,12 +1362,25 @@ if (typeof importScripts === 'function') {
       return true;
     }
 
+    async function hasPersistentTabAccess(tabId) {
+      if (!chromeApi.permissions?.contains || !chromeApi.storage?.local?.get) return false;
+      const tab = chromeApi.tabs?.get ? await chromeApi.tabs.get(tabId) : null;
+      if (!tab?.url || !/^https?:/i.test(tab.url)) return false;
+      const saved = await chromeApi.storage.local.get(SETTINGS_KEY);
+      const storedSettings = saved && saved[SETTINGS_KEY];
+      const settings = globalThis.FlowloudSettings?.migrate(storedSettings) || storedSettings || {};
+      if (settings.showFloatingPlayer === false) return false;
+      const origin = `${new URL(tab.url).origin}/*`;
+      return chromeApi.permissions.contains({ origins: [origin] });
+    }
+
     async function ensureInjected(tabId) {
       const tabs = await readEnabledTabs();
-      if (!tabs.has(Number(tabId))) return false;
+      if (!tabs.has(Number(tabId)) && !await hasPersistentTabAccess(tabId)) return false;
       try {
         return await injectContentScripts(tabId);
-      } catch (_) {
+      } catch (error) {
+        console.warn('[Flowloud] 无法在页面加载后恢复悬浮播放器。', error && error.message ? error.message : error);
         return false;
       }
     }
@@ -1970,6 +2026,17 @@ if (typeof importScripts === 'function') {
         respondWith(chromeApi.tabs.create({ url: `${chromeApi.runtime.getURL('page-guide.html')}?tabId=${tabId}` }).then(() => ({ ok: true })), sendResponse);
         return true;
       }
+      if (message && message.type === 'reader:site-access:register') {
+        respondWith(registerReaderSite(chromeApi, message.origin), sendResponse);
+        return true;
+      }
+      if (message && message.type === 'reader:auto-restore') {
+        const tabId = sender && sender.tab && sender.tab.id;
+        respondWith(tabId == null
+          ? { ok: false, error: { code: 'reader_tab_missing', message: '无法识别当前网页标签页。' } }
+          : popupBroker.ensureInjected(tabId).then((injected) => ({ ok: injected })), sendResponse);
+        return true;
+      }
       if (message && message.type === 'playback:source:focus') {
         respondWith((async () => {
           const playback = await playbackCoordinator.getSnapshot();
@@ -2113,6 +2180,9 @@ if (typeof importScripts === 'function') {
     REQUIRED_ORIGIN,
     SETTINGS_KEY,
     CLEANUP_QUEUE_KEY,
+    READER_SITE_SCRIPT_ID,
+    normalizeReaderSitePattern,
+    registerReaderSite,
     cancelPlaybackForTab,
     POPUP_TARGET_KEY,
     POPUP_SNAPSHOTS_KEY,

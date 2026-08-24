@@ -41,7 +41,10 @@ interface ChromeRuntimeLike {
 
 interface ChromeLike {
   runtime?: ChromeRuntimeLike;
-  permissions?: { request: (permissions: { origins: string[] }) => Promise<boolean> };
+  permissions?: {
+    contains: (permissions: { origins: string[] }) => Promise<boolean>;
+    request: (permissions: { origins: string[] }) => Promise<boolean>;
+  };
   tabs?: { create: (options: { url: string }) => Promise<unknown> };
 }
 
@@ -135,6 +138,7 @@ function popupModel(context: RuntimeContext, snapshot: Record<string, unknown>, 
 export class RuntimeBridge {
   readonly available: boolean;
   private readonly runtime: ChromeRuntimeLike | null;
+  private readonly registeredPageOrigins = new Set<string>();
 
   constructor() {
     const api = runtimeChrome();
@@ -161,11 +165,51 @@ export class RuntimeBridge {
     const settings = popupSettings(rawSettings);
     const snapshot = context.snapshot && typeof context.snapshot === 'object'
       ? context.snapshot : await this.send({ type: 'reader:snapshot:get', tabId: context.tabId });
+    const model = popupModel(context, snapshot as Record<string, unknown>, settings, rawSettings);
+    model.persistentSiteAccess = await this.hasPageOrigin(context);
+    if (model.persistentSiteAccess) await this.registerPageOrigin(context).catch(() => {});
     return {
       context,
       rawSettings,
-      model: popupModel(context, snapshot as Record<string, unknown>, settings, rawSettings),
+      model,
     };
+  }
+
+  private pageOrigin(context: RuntimeContext | null) {
+    const rawUrl = String(context?.currentTab?.url || '');
+    let parsed: URL;
+    try { parsed = new URL(rawUrl); }
+    catch (_) { throw new globalThis.Error('当前页面不支持持续显示悬浮播放器。'); }
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+      throw new globalThis.Error('当前页面不支持持续显示悬浮播放器。');
+    }
+    return `${parsed.origin}/*`;
+  }
+
+  async hasPageOrigin(context: RuntimeContext | null) {
+    const api = runtimeChrome();
+    if (!api?.permissions?.contains) return true;
+    try {
+      return await api.permissions.contains({ origins: [this.pageOrigin(context)] });
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async requestPageOrigin(context: RuntimeContext | null) {
+    const api = runtimeChrome();
+    if (!api?.permissions?.request) return true;
+    const origin = this.pageOrigin(context);
+    const granted = await api.permissions.request({ origins: [origin] });
+    if (granted) await this.registerPageOrigin(context);
+    return granted;
+  }
+
+  private async registerPageOrigin(context: RuntimeContext | null) {
+    const origin = this.pageOrigin(context);
+    if (this.registeredPageOrigins.has(origin)) return;
+    await this.send({ type: 'reader:site-access:register', origin });
+    this.registeredPageOrigins.add(origin);
   }
 
   async voices(providerId: string): Promise<PopupVoice[]> {

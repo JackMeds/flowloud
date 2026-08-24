@@ -25,5 +25,5 @@ Flowloud 会识别论坛、文章、小说和普通网页正文，保留段落�
 - `storage`：保存设置、音色与模型缓存元数据。
 - `unlimitedStorage`：保存用户主动下载的浏览器模型和本地音色。
 - `offscreen`：Popup 关闭后继续音频播放，并处理暂停、结束和进度事件。
-- `activeTab`、`scripting`：仅在用户点击扩展或快捷键后读取并高亮当前网页。
-- 可选主机权限：本机回环服务、Hugging Face 下载和用户配置的 TTS/OCR/翻译 API 精确 origin；均在相应用户操作时请求。
+- `activeTab`、`scripting`：用户点击扩展或快捷键后读取并高亮当前网页。
+- 可选主机权限：当前网站的悬浮播放器刷新恢复、本机回环服务、Hugging Face 下载和用户配置的 TTS/OCR/翻译 API 精确 origin；均在相应用户操作时请求。

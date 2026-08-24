@@ -34,6 +34,7 @@ interface PopupConsoleProps {
   model: PopupModel;
   onCommand?: (command: ReaderCommand) => void | Promise<void>;
   onSettingChange?: <Key extends keyof PopupSettings>(key: Key, value: PopupSettings[Key]) => void | Promise<void>;
+  onRequestPersistentSiteAccess?: () => void | Promise<void>;
   onOpenOptions?: () => void | Promise<void>;
   onOpenGuide?: () => void | Promise<void>;
   onReturnSource?: () => void | Promise<void>;
@@ -104,7 +105,7 @@ function NavRow({ icon: Icon, label, value, onPress }: { icon: ComponentType<{ '
   return <Button className="fl-popup-nav-row" onPress={onPress}><Icon aria-hidden={true} /><strong>{label}</strong><span>{value}</span><ChevronRight aria-hidden={true} /></Button>;
 }
 
-export function PopupConsole({ model, onCommand, onSettingChange, onOpenOptions, onOpenGuide, onReturnSource, onReadCurrentPage, onVoiceChange, onPageVoiceChange, onTestLocalService, onOpenDocuments }: PopupConsoleProps) {
+export function PopupConsole({ model, onCommand, onSettingChange, onRequestPersistentSiteAccess, onOpenOptions, onOpenGuide, onReturnSource, onReadCurrentPage, onVoiceChange, onPageVoiceChange, onTestLocalService, onOpenDocuments }: PopupConsoleProps) {
   const [moreView, setMoreView] = useState<'menu' | 'appearance' | 'shortcuts'>('menu');
   const progress = model.total ? Math.min(100, ((model.index + 1) / model.total) * 100) : 0;
   const playing = model.status === 'playing';
@@ -168,7 +169,18 @@ export function PopupConsole({ model, onCommand, onSettingChange, onOpenOptions,
 
         <div className="fl-quick-actions" role="group" aria-label="常用功能">
           <Button className={`fl-quick-action ${model.settings.clickToRead ? 'is-active' : ''}`} aria-pressed={model.settings.clickToRead} onPress={() => onSettingChange?.('clickToRead', !model.settings.clickToRead)}><MousePointerClick aria-hidden="true" /><span>点读<small>{model.settings.clickToRead ? '已开启' : '已关闭'}</small></span></Button>
-          <Button className={`fl-quick-action ${model.settings.showFloatingPlayer ? 'is-active' : ''}`} aria-pressed={model.settings.showFloatingPlayer} onPress={() => onSettingChange?.('showFloatingPlayer', !model.settings.showFloatingPlayer)}><SlidersHorizontal aria-hidden="true" /><span>悬浮播放器<small>{model.settings.showFloatingPlayer ? '已开启' : '已关闭'}</small></span></Button>
+          <Button
+            className={`fl-quick-action ${model.settings.showFloatingPlayer ? 'is-active' : ''}`}
+            aria-pressed={model.settings.showFloatingPlayer}
+            onPress={() => model.settings.showFloatingPlayer && model.persistentSiteAccess === false
+              ? onRequestPersistentSiteAccess?.()
+              : onSettingChange?.('showFloatingPlayer', !model.settings.showFloatingPlayer)}
+          >
+            <SlidersHorizontal aria-hidden="true" />
+            <span>悬浮播放器<small>{model.settings.showFloatingPlayer
+              ? model.persistentSiteAccess === false ? '点此允许刷新后显示' : '刷新后自动显示'
+              : '已关闭'}</small></span>
+          </Button>
           <Button className="fl-quick-action" onPress={() => onCommand?.('locate-current')}><FileText aria-hidden="true" /><span>回到正文</span></Button>
         </div>
 
