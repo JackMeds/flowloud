@@ -1318,7 +1318,16 @@
         await saveSettings();
         if (state.segments.length) {
           const assigned = assignSegments(state.segments.map(stripPlaybackFields));
-          state = Player.reduce(state, { type: "LOAD_SUCCESS", scanId: state.scanId, document: state.document, segments: assigned, index: state.index });
+          // Voice discovery completes asynchronously after the page queue is
+          // ready and can overlap the user's first click. Reassign the queue
+          // without turning an active utterance back into the ready state.
+          state = Player.reduce(state, {
+            type: "QUEUE_UPDATE",
+            scanId: state.scanId,
+            document: state.document,
+            segments: assigned,
+            index: state.index,
+          });
         }
       }
       // Voice discovery is not a health signal. Refresh the real provider
@@ -1581,7 +1590,7 @@
         ? Player.findSegmentByIdentity(nextSegments, currentIdentity)
         : -1;
       if (shouldMerge && preservedIndex !== state.index) void requestCache.cancelAll();
-      state = Player.reduce(state, progressiveReady ? {
+      state = Player.reduce(state, (progressiveReady || preserveDynamicQueue) ? {
         type: "QUEUE_UPDATE",
         scanId,
         document: partialDocument,
@@ -1645,19 +1654,22 @@
       const currentIdentity = state.current && typeof Player.segmentIdentity === "function"
         ? Player.segmentIdentity(state.current)
         : String(state.current && (state.current.sourceIdentity || state.current.id) || "");
-      const nextSegments = progressiveReady && typeof Player.mergeProgressiveSegments === "function"
+      const shouldMerge = (progressiveReady || preserveDynamicQueue) && state.segments.length > 0;
+      const nextSegments = shouldMerge && typeof Player.mergeProgressiveSegments === "function"
         ? Player.mergeProgressiveSegments(state.segments, assigned)
         : assigned;
       const preservedIndex = currentIdentity && typeof Player.findSegmentByIdentity === "function"
         ? Player.findSegmentByIdentity(nextSegments, currentIdentity)
         : -1;
-      if (progressiveReady && preservedIndex !== state.index) void requestCache.cancelAll();
+      if (shouldMerge && preservedIndex !== state.index) void requestCache.cancelAll();
       state = Player.reduce(state, {
-        type: progressiveReady ? "QUEUE_UPDATE" : "LOAD_SUCCESS",
+        type: (progressiveReady || preserveDynamicQueue) ? "QUEUE_UPDATE" : "LOAD_SUCCESS",
         scanId,
         document: normalized,
         segments: nextSegments,
-        index: progressiveReady && preservedIndex >= 0 ? preservedIndex : resumeIndex,
+        index: (progressiveReady || preserveDynamicQueue) && preservedIndex >= 0
+          ? preservedIndex
+          : resumeIndex,
       });
       invalidateSourceIndex();
       render();

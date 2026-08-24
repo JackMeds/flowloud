@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { createGlobalPlaybackCoordinator } = require('../background.js');
 
 function memorySession() {
@@ -54,6 +56,20 @@ test('late events from an older playback cannot clear or advance the active sess
   assert.equal(current.sourceTabId, 2);
 });
 
+test('a naturally ended sentence releases before its automatic successor is claimed', async () => {
+  const cancelled = [];
+  const coordinator = createGlobalPlaybackCoordinator({
+    session: memorySession(),
+    async cancel(playback, reason) { cancelled.push([playback.playbackId, reason]); },
+  });
+  await coordinator.claim({ sourceTabId: 1, pageKey: 'forum', playbackId: 'sentence-1', requestId: 'sentence-1' });
+  await coordinator.acceptStreamEvent({ sourceTabId: 1, pageKey: 'forum', playbackId: 'sentence-1', requestId: 'sentence-1', event: 'ended' });
+  await coordinator.claim({ sourceTabId: 1, pageKey: 'forum', playbackId: 'sentence-2', requestId: 'sentence-2' });
+
+  assert.deepEqual(cancelled, []);
+  assert.equal((await coordinator.getSnapshot()).playbackId, 'sentence-2');
+});
+
 test('source navigation stops and releases the matching session but ignores other tabs', async () => {
   const cancelled = [];
   const coordinator = createGlobalPlaybackCoordinator({ session: memorySession(), async cancel(playback, reason) { cancelled.push([playback.sourceTabId, reason]); } });
@@ -63,4 +79,13 @@ test('source navigation stops and releases the matching session but ignores othe
   await coordinator.stopForTab(3, 'source-document-navigation');
   assert.deepEqual(cancelled, [[3, 'source-document-navigation']]);
   assert.equal((await coordinator.getSnapshot()).active, false);
+});
+
+test('tab loading updates do not revoke playback because pagehide owns real navigation', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
+  const listener = source.match(/chromeApi\.tabs\.onUpdated\.addListener\(\(tabId, changeInfo\) => \{([\s\S]*?)\n\s*\}\);/);
+  assert.ok(listener, 'missing tabs.onUpdated listener');
+  const loadingBranch = listener[1].match(/if \(changeInfo\.status === 'loading'\) \{([\s\S]*?)\n\s*\}/);
+  assert.ok(loadingBranch, 'missing loading branch');
+  assert.doesNotMatch(loadingBranch[1], /stopForTab|cancelPlaybackForTab/);
 });

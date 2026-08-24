@@ -24,6 +24,33 @@
   "background": {
     "service_worker": "background.js"
   },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "css": ["content/page-highlight.css"],
+      "js": [
+        "shared/defaults.js",
+        "shared/settings-schema.js",
+        "shared/text.js",
+        "shared/forum-content.js",
+        "shared/generic-thread-detector.js",
+        "vendor/readability/Readability.js",
+        "shared/normalized-document.js",
+        "shared/extractors.js",
+        "shared/sentence-range.js",
+        "shared/marker-placement.js",
+        "shared/source-locator.js",
+        "shared/follow-controller.js",
+        "shared/voice-assignment.js",
+        "shared/player-state.js",
+        "shared/word-timeline.js",
+        "shared/semantic-guide.js",
+        "content/page-guide-content.js",
+        "content/reader.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
   "commands": {
     "toggle-reader": {
       "suggested_key": {

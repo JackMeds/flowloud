@@ -2868,9 +2868,16 @@ button {
 }
 
 .qr-mini-quick-button.is-primary {
-  border-color: #dbe4f0;
-  color: #334155;
-  background: #fff;
+  border-color: #2563eb;
+  color: #fff;
+  background: #2563eb;
+  box-shadow: 0 4px 12px rgba(37,99,235,.28);
+}
+
+.qr-mini-quick-button.is-primary:hover:not(:disabled) {
+  border-color: #1d4ed8;
+  color: #fff;
+  background: #1d4ed8;
 }
 
 .qr-mini-quick-button.is-primary .qr-mini-icon {

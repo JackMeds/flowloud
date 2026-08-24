@@ -141,7 +141,10 @@ test('stop, stream errors, and audio errors share idempotent word-motion cleanup
 
 test('page highlight styles are extension-declared instead of CSP-sensitive inline style', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'manifest.json'), 'utf8'));
-  assert.equal(manifest.content_scripts, undefined);
+  const readerContent = manifest.content_scripts.find((entry) => entry.js?.includes('content/reader.js'));
+  assert.ok(readerContent);
+  assert.deepEqual(readerContent.matches, ['http://*/*', 'https://*/*']);
+  assert.ok(readerContent.css.includes('content/page-highlight.css'));
   const background = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
   assert.match(background, /insertCSS\(\{ target: \{ tabId \}, files: \['content\/page-highlight\.css'\]/);
   assert.match(pageCss, /::highlight\(qwen-reader-current-word\)/);

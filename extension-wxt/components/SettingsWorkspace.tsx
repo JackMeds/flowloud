@@ -284,7 +284,7 @@ export function SettingsWorkspace({ defaultSection = 'reader' }: { defaultSectio
               </SettingsCard>
               <SettingsCard icon={SlidersHorizontal} title="网页中的常用功能" description="这两个开关也会固定显示在 Popup 播放器下方。">
                 <SettingSwitch title="点击正文朗读" description="点击任意句子，从精确位置开始朗读。" isSelected={settings.clickToRead} onChange={(value) => change('clickToRead', value)} />
-                <SettingSwitch title="显示悬浮播放器" description="在网页边缘保留入口；在 Popup 为当前网站授权后，刷新也会自动显示。" isSelected={settings.showFloatingPlayer} onChange={(value) => change('showFloatingPlayer', value)} />
+                <SettingSwitch title="显示悬浮播放器" description="在普通网页边缘自动显示入口；无需为每个网站重复授权。" isSelected={settings.showFloatingPlayer} onChange={(value) => change('showFloatingPlayer', value)} />
               </SettingsCard>
             </div>
           </TabPanel>

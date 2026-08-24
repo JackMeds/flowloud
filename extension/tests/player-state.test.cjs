@@ -47,6 +47,32 @@ test("dynamic load can preserve a requested queue position", () => {
   assert.equal(state.current.id, "p4");
 });
 
+test("dynamic rescan start preserves an active playback session", () => {
+  let state = Player.reduce(Player.createInitialState(), {
+    type: "LOAD_SUCCESS",
+    segments: sampleSegments(),
+    index: 1,
+  });
+  state = Player.reduce(state, {
+    type: "AUDIO_PLAYING",
+    sessionId: "play-forum-2",
+  });
+  state = Object.assign({}, state, { prefetchedIndex: 2 });
+
+  const rescanning = Player.reduce(state, {
+    type: "LOAD_START",
+    scanId: 3,
+    pageKey: "https://forum.example/topic/2",
+    preserveSegments: true,
+  });
+
+  assert.equal(rescanning.status, "playing");
+  assert.equal(rescanning.sessionId, "play-forum-2");
+  assert.equal(rescanning.prefetchedIndex, 2);
+  assert.equal(rescanning.index, 1);
+  assert.equal(rescanning.current.id, "p2");
+});
+
 test("scan state stores the normalized document and rejects a stale scan result", () => {
   const firstDocument = {
     pageKey: "https://example.com/t/one",

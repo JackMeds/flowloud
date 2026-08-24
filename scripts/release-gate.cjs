@@ -41,7 +41,7 @@ function runReleaseGate() {
     throw new Error('在线 TTS 的运行时精确 origin 请求必须有通用可选 HTTPS 范围作为上限。');
   }
   if (!manifest.optional_host_permissions.includes('http://*/*')) {
-    throw new Error('普通 HTTP 网站的悬浮播放器恢复必须有通用可选 HTTP 范围作为授权上限。');
+    throw new Error('用户配置的 HTTP 本地 Provider 必须有通用可选范围作为授权上限。');
   }
   if (!manifest.optional_host_permissions.some((pattern) => pattern.includes('localhost'))) throw new Error('Manifest 缺少 localhost 可选权限。');
   const extensionCsp = String(manifest.content_security_policy?.extension_pages || '');
@@ -57,6 +57,15 @@ function runReleaseGate() {
   for (const resourceGroup of manifest.web_accessible_resources || []) {
     for (const resource of resourceGroup.resources || []) assertFile(resource, 'web_accessible_resources');
   }
+  const readerContent = (manifest.content_scripts || []).find((entry) => entry.js?.includes('content/reader.js'));
+  if (!readerContent || !readerContent.matches?.includes('http://*/*') || !readerContent.matches?.includes('https://*/*')) {
+    throw new Error('悬浮播放器必须作为全站内容脚本自动运行。');
+  }
+  if (readerContent.run_at !== 'document_idle' || !readerContent.css?.includes('content/page-highlight.css')) {
+    throw new Error('全站阅读器缺少 document_idle 启动或页面高亮样式。');
+  }
+  for (const script of readerContent.js || []) assertFile(script, 'content_scripts.js');
+  for (const stylesheet of readerContent.css || []) assertFile(stylesheet, 'content_scripts.css');
   for (const required of [
     'shared/provider-core.js', 'shared/provider-v4.js', 'shared/document-provider-v1.js', 'shared/settings-schema.js', 'offscreen.html',
     'content/reader-bootstrap.js',

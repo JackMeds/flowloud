@@ -1,8 +1,8 @@
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { loadPlaywright } from './playwright-runtime.mjs';
 
 function parseArgs(argv) {
   const values = {};
@@ -93,22 +93,7 @@ const instrumentedManifest = JSON.parse(await fs.readFile(instrumentedManifestPa
 instrumentedManifest.host_permissions = ['<all_urls>'];
 await fs.writeFile(instrumentedManifestPath, `${JSON.stringify(instrumentedManifest, null, 2)}\n`, 'utf8');
 
-const nodeRoot = path.resolve(process.execPath, '..', '..');
-const bundledPlaywright = path.join(nodeRoot, 'node_modules', 'playwright', 'index.js');
-const fallbackPlaywright = path.join(
-  process.env.LOCALAPPDATA || '',
-  'Programs',
-  'nodejs',
-  'node_modules',
-  'playwright',
-  'index.js',
-);
-const playwrightEntry = await fs.access(bundledPlaywright).then(() => bundledPlaywright).catch(async () => {
-  await fs.access(fallbackPlaywright);
-  return fallbackPlaywright;
-});
-const require = createRequire(import.meta.url);
-const { chromium } = require(playwrightEntry);
+const { chromium } = loadPlaywright();
 
 const siteServer = http.createServer((request, response) => {
   if (request.url === '/v1/chat/completions' && request.method === 'POST') {

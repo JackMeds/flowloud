@@ -627,6 +627,7 @@ if (typeof importScripts === 'function') {
     const tts = chromeApi && chromeApi.tts;
     let active = null;
     let tokenSequence = 0;
+    let eventObserver = null;
     function voices() {
       return new Promise((resolve, reject) => {
         if (!tts || typeof tts.getVoices !== 'function') return reject(Object.assign(new Error('浏览器系统语音不可用。'), { code: 'system_voice_unavailable' }));
@@ -642,15 +643,30 @@ if (typeof importScripts === 'function') {
       return true;
     }
     function clearWatchdog(session) {
-      if (!session || !session.watchdog) return;
-      clearTimeout(session.watchdog);
+      if (!session) return;
+      if (session.watchdog) clearTimeout(session.watchdog);
+      if (session.retryTimer) clearTimeout(session.retryTimer);
       session.watchdog = null;
+      session.retryTimer = null;
     }
     function emit(event, extra, session) {
       const current = session || active;
       if (!current || current.sourceTabId == null || !chromeApi.tabs?.sendMessage) return;
       const payload = Object.assign({ target: STREAM_EVENT_TARGET, event, type: 'tts:stream:event', streamEventType: `tts:stream:${event}`, requestId: current.requestId, playbackId: current.playbackId, sessionId: current.sessionId, clientId: current.clientId, sourceTabId: current.sourceTabId, providerId: 'browser-system', utteranceToken: current.token, capabilityMode: current.capabilityMode, directPlayback: true, transportStreaming: false, progressivePlayback: true }, extra || {});
-      try { const sent = chromeApi.tabs.sendMessage(current.sourceTabId, payload); sent?.catch?.(() => {}); } catch (_) {}
+      const deliver = () => {
+        try { const sent = chromeApi.tabs.sendMessage(current.sourceTabId, payload); sent?.catch?.(() => {}); } catch (_) {}
+      };
+      let observed;
+      try { observed = eventObserver && eventObserver(payload); } catch (_) {}
+      // A terminal system-voice event must release the old global playback
+      // before the content script is told to start the next sentence. Without
+      // this ordering Edge can treat normal continuation as a takeover and
+      // revoke the successor it has just created.
+      if (['ended', 'error', 'cancelled'].includes(String(event)) && observed && typeof observed.then === 'function') {
+        Promise.resolve(observed).then(deliver, deliver);
+      } else {
+        deliver();
+      }
     }
     function terminal(session, event, extra) {
       if (!session || active !== session) return;
@@ -666,12 +682,14 @@ if (typeof importScripts === 'function') {
       const generation = session.generation;
       session.offset = Math.max(0, Math.min(session.input.length, Number(offset) || 0));
       session.lastActivityAt = Date.now();
+      session.startedAt = 0;
       session.state = 'starting';
       const options = Object.assign({}, session.options, { onEvent(event) {
         if (active !== session || session.generation !== generation) return;
         const type = String(event && event.type || '');
         session.lastActivityAt = Date.now();
         if (type === 'start') {
+          session.startedAt = Date.now();
           session.state = session.desiredPaused ? 'paused' : 'playing';
           emit('started', { charIndex: session.offset, restartedFromBoundary: Boolean(restartedFromBoundary) }, session);
         } else if (type === 'word' || type === 'sentence' || type === 'marker') {
@@ -689,7 +707,21 @@ if (typeof importScripts === 'function') {
         } else if (type === 'cancelled' || type === 'interrupted') {
           if (!session.restarting) terminal(session, 'cancelled');
         } else if (type === 'error') {
-          terminal(session, 'error', { error: { code: 'system_voice_error', message: event.errorMessage || '系统语音播放失败。' } });
+          const message = String(event && (event.errorMessage || event.error) || '').trim() || '系统语音播放失败。';
+          const noProgress = Number(session.lastBoundary || 0) <= Number(session.offset || 0);
+          const earlyFailure = !session.startedAt || Date.now() - session.startedAt < 800;
+          if (!session.desiredPaused && noProgress && earlyFailure && Number(session.retryCount || 0) < 1) {
+            session.retryCount = Number(session.retryCount || 0) + 1;
+            session.generation += 1;
+            session.state = 'retrying';
+            emit('retrying', { retryAttempt: session.retryCount, error: { code: 'system_voice_transient', message } }, session);
+            session.retryTimer = setTimeout(() => {
+              session.retryTimer = null;
+              if (active === session && !session.desiredPaused) speakSession(session, session.offset, true);
+            }, 120);
+          } else {
+            terminal(session, 'error', { error: { code: 'system_voice_error', message } });
+          }
         }
       } });
       try {
@@ -723,7 +755,7 @@ if (typeof importScripts === 'function') {
       const catalog = await voices().catch(() => []);
       const selectedMetadata = catalog.find((voice) => voice.voiceId === selectedVoice) || {};
       const eventTypes = Array.isArray(selectedMetadata.eventTypes) ? selectedMetadata.eventTypes : [];
-      active = { requestId: String(body.requestId || ''), playbackId: String(body.playbackId || ''), sessionId: String(body.sessionId || ''), clientId: String(body.clientId || ''), sourceTabId: Number.isInteger(sourceTabId) && sourceTabId >= 0 ? sourceTabId : null, token: `system-${Date.now().toString(36)}-${++tokenSequence}`, generation: 0, boundarySequence: 0, state: 'idle', desiredPaused: false, restarting: false, watchdog: null, input, offset: 0, sentenceOffset: 0, lastBoundary: 0, capabilityMode: eventTypes.includes('word') ? 'word' : eventTypes.includes('sentence') ? 'sentence' : 'sentence-restart' };
+      active = { requestId: String(body.requestId || ''), playbackId: String(body.playbackId || ''), sessionId: String(body.sessionId || ''), clientId: String(body.clientId || ''), sourceTabId: Number.isInteger(sourceTabId) && sourceTabId >= 0 ? sourceTabId : null, token: `system-${Date.now().toString(36)}-${++tokenSequence}`, generation: 0, boundarySequence: 0, state: 'idle', desiredPaused: false, restarting: false, watchdog: null, retryTimer: null, retryCount: 0, startedAt: 0, input, offset: 0, sentenceOffset: 0, lastBoundary: 0, capabilityMode: eventTypes.includes('word') ? 'word' : eventTypes.includes('sentence') ? 'sentence' : 'sentence-restart' };
       const acceptedRequestId = active.requestId;
       active.options = { enqueue: false, rate: Math.max(.75, Math.min(2, Number(speech.rate || body.playbackRate) || 1)), pitch: Math.max(0, Math.min(2, Number(speech.pitch) || 1)), volume: Math.max(0, Math.min(1, speech.volume == null ? 1 : Number(speech.volume))) };
       if (selectedVoice) active.options.voiceName = selectedVoice; if (speech.lang) active.options.lang = String(speech.lang);
@@ -759,7 +791,15 @@ if (typeof importScripts === 'function') {
       if (message.type === 'tts:cancel') { const session = active; try { tts.stop(); } catch (_) {} terminal(session, 'cancelled'); return { ok: true, cancelled: true, count: 1 }; }
       return { ok: true, count: 0 };
     }
-    return { request, control, voices, active: () => active };
+    return {
+      request,
+      control,
+      voices,
+      active: () => active,
+      setEventObserver(observer) {
+        eventObserver = typeof observer === 'function' ? observer : null;
+      },
+    };
   }
 
   function createMessageRouter({ api, storage, session, openVoiceStudio, openDocumentWorkspace, captureVisibleTab, offscreen, systemTts, testProvider, playbackCoordinator }) {
@@ -1861,6 +1901,7 @@ if (typeof importScripts === 'function') {
         return { ok: true, cancelled: results.some((item) => item.status === 'fulfilled' && item.value && item.value.cancelled) };
       },
     });
+    systemTts?.setEventObserver?.((message) => playbackCoordinator.acceptStreamEvent(message));
     async function testProvider(providerId, request) {
       const schema = globalThis.FlowloudSettings;
       const providerApi = globalThis.FlowloudProviderV4 || globalThis.FlowloudProviderV3;
@@ -2152,9 +2193,13 @@ if (typeof importScripts === 'function') {
           return;
         }
         if (changeInfo.status === 'loading') {
+          // Flarum and other SPA forums emit repeated tab loading updates while
+          // they extend or reposition a discussion stream. Treating every one
+          // as a document teardown revokes the successor utterance during
+          // normal auto-continuation. The content script's pagehide handler is
+          // the authoritative cancellation path for an actual document exit;
+          // tab removal remains the crash/close safety net.
           void setToolbarPlaybackState({ tabId }, { status: 'idle' });
-          void playbackCoordinator.stopForTab(tabId, 'source-document-navigation');
-          void cancelPlaybackForTab(offscreen, tabId, 'source-document-navigation');
           void popupBroker.forgetTab(tabId, false);
           void pageEditorBroker.forgetTab(tabId);
         }

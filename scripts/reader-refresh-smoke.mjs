@@ -1,8 +1,8 @@
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { loadPlaywright } from './playwright-runtime.mjs';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDirectory, '..');
@@ -28,11 +28,7 @@ for (const candidate of browserCandidates) {
 }
 if (!browserPath) throw new Error('未找到 Edge 或 Chrome。');
 
-const nodeRoot = path.resolve(process.execPath, '..', '..');
-const playwrightEntry = path.join(nodeRoot, 'node_modules', 'playwright', 'index.js');
-await fs.access(playwrightEntry);
-const require = createRequire(import.meta.url);
-const { chromium } = require(playwrightEntry);
+const { chromium } = loadPlaywright();
 
 const server = http.createServer((_request, response) => {
   response.setHeader('content-type', 'text/html; charset=utf-8');

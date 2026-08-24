@@ -14,6 +14,11 @@
     "typecheck": "tsc --noEmit",
     "storybook": "storybook dev -p 6006 --no-open",
     "build-storybook": "storybook build",
+    "dev:browser": "node e2e/dev-browser.mjs",
+    "e2e:target": "node e2e/cli.mjs target",
+    "e2e:real": "playwright test real-sites.spec.ts",
+    "e2e:browser": "playwright test",
+    "e2e:release": "node e2e/cli.mjs release",
     "postinstall": "wxt prepare"
   },
   "dependencies": {
@@ -25,6 +30,7 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@storybook/addon-a11y": "^10.5.9",
     "@storybook/react-vite": "^10.5.10",
     "@types/react": "^19.2.18",

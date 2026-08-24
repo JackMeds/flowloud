@@ -59,6 +59,21 @@ test('active floating orb has a small circular hit target and no panel chrome', 
   assert.doesNotMatch(readerSource, /qr-mini-window-button is-close|data-role="mini-reopen"/);
 });
 
+test('floating quick play keeps its white transport glyph on a contrasting primary surface', () => {
+  const playIcon = fs.readFileSync(path.join(extensionRoot, 'assets', 'icons', 'play.svg'), 'utf8');
+  const pauseIcon = fs.readFileSync(path.join(extensionRoot, 'assets', 'icons', 'pause.svg'), 'utf8');
+  assert.match(playIcon, /stroke="#ffffff"/i);
+  assert.match(pauseIcon, /stroke="#ffffff"/i);
+  assert.match(
+    readerCss,
+    /\.qr-mini-quick-button\.is-primary\s*\{[\s\S]*?border-color:\s*#2563eb[\s\S]*?color:\s*#fff[\s\S]*?background:\s*#2563eb/,
+  );
+  assert.doesNotMatch(
+    readerCss,
+    /\.qr-mini-quick-button\.is-primary\s*\{[\s\S]*?background:\s*#fff[\s\S]*?\}/,
+  );
+});
+
 test('floating player exposes lifecycle status, minimization, and basic accessibility', () => {
   assert.match(readerSource, /role="region"[^>]*aria-labelledby="qr-mini-title"/);
   assert.match(readerSource, /data-role="mini-status"[^>]*role="status"[^>]*aria-live="polite"/);
@@ -165,6 +180,24 @@ test('manual rescans await playback cancellation and only rebuild document state
   assert.doesNotMatch(refresh[1], /playIndex\(|togglePlayback\(|seek\(/);
 });
 
+test('dynamic rescans extend the queue without resetting active playback', () => {
+  assert.match(
+    readerSource,
+    /Player\.reduce\(state,\s*\(progressiveReady \|\| preserveDynamicQueue\) \? \{[\s\S]*?type:\s*"QUEUE_UPDATE"/,
+  );
+  assert.match(
+    readerSource,
+    /type:\s*\(progressiveReady \|\| preserveDynamicQueue\) \? "QUEUE_UPDATE" : "LOAD_SUCCESS"/,
+  );
+});
+
+test('late voice discovery preserves a playback session that already started', () => {
+  const loadVoices = readerSource.match(/async function loadVoices\(\)\s*\{([\s\S]*?)\n\s*async function reconcilePlaybackControl/);
+  assert.ok(loadVoices, 'missing voice discovery handler');
+  assert.match(loadVoices[1], /type:\s*"QUEUE_UPDATE"/);
+  assert.doesNotMatch(loadVoices[1], /type:\s*"LOAD_SUCCESS"/);
+});
+
 test('long-thread source locations remain indexed on demand', () => {
   assert.match(readerSource, /function\s+ensureSourceIndex\(requestedIndex\)/);
   assert.match(readerSource, /sourceElements\s*=\s*new\s+Array\(state\.segments\.length\)/);
@@ -190,7 +223,10 @@ test('active sentence remains a restrained translucent native highlight', () => 
   assert.ok(rule, 'Missing page highlight rule');
   assert.match(rule[1], /background-color:\s*rgba\(37,\s*99,\s*235,\s*\.075\)/);
   assert.doesNotMatch(rule[1], /animation\s*:/);
-  assert.equal(manifest.content_scripts, undefined);
+  const readerContent = manifest.content_scripts.find((entry) => entry.js?.includes('content/reader.js'));
+  assert.ok(readerContent);
+  assert.equal(readerContent.run_at, 'document_idle');
+  assert.ok(readerContent.css.includes('content/page-highlight.css'));
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8'), /insertCSS\(\{ target: \{ tabId \}, files: \['content\/page-highlight\.css'\]/);
 });
 

@@ -11,6 +11,9 @@ build/
 
 # Browser automation profiles, crash dumps, caches, and temporary E2E runs.
 .tmp-*/
+playwright-report/
+test-results/
+**/.flowloud-e2e-profile/
 **/Cache/
 **/Code Cache/
 **/GPUCache/

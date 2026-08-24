@@ -1,28 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { loadPlaywright } from './playwright-runtime.mjs';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDirectory, '..');
 const harnessPath = path.join(repoRoot, 'extension', 'tests', 'browser', 'ui-harness.html');
-const nodeRoot = path.resolve(process.execPath, '..', '..');
-const bundledPlaywright = path.join(nodeRoot, 'node_modules', 'playwright', 'index.js');
-const fallbackPlaywright = path.join(
-  process.env.LOCALAPPDATA || '',
-  'Programs',
-  'nodejs',
-  'node_modules',
-  'playwright',
-  'index.js',
-);
-const playwrightEntry = await fs.access(bundledPlaywright).then(
-  () => bundledPlaywright,
-  async () => {
-    await fs.access(fallbackPlaywright);
-    return fallbackPlaywright;
-  },
-);
 const browserCandidates = [
   process.env.FLOWLOUD_BROWSER,
   process.env.ProgramFiles && path.join(process.env.ProgramFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
@@ -39,8 +22,7 @@ for (const candidate of browserCandidates) {
 }
 if (!executablePath) throw new Error('没有找到可用于朗读连续性测试的 Edge。');
 
-const require = createRequire(import.meta.url);
-const { chromium } = require(playwrightEntry);
+const { chromium } = loadPlaywright();
 const browser = await chromium.launch({
   headless: true,
   executablePath,

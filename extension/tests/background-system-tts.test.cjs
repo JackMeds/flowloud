@@ -84,3 +84,53 @@ test('system speech resume immediately restarts at the last safe boundary after 
   assert.equal(spoken[1].input, '丁戊');
   assert.ok(events.some((event) => event.event === 'resumed' && event.restartedFromBoundary === true && event.charIndex === 3));
 });
+
+test('system speech retries one early Edge voice failure without requiring another click', async () => {
+  const spoken = [];
+  const events = [];
+  const manager = createChromeTtsManager({
+    tts: {
+      getVoices(callback) { callback([{ voiceName: 'Edge Voice', eventTypes: ['start', 'end'] }]); },
+      speak(input, options) {
+        spoken.push(input);
+        options.onEvent({ type: 'start' });
+        if (spoken.length === 1) options.onEvent({ type: 'error', errorMessage: 'voice engine busy' });
+        else options.onEvent({ type: 'end' });
+      },
+      stop() {}, pause() {}, resume() {},
+    },
+    tabs: { sendMessage(_tabId, payload) { events.push(payload); return Promise.resolve(); } },
+  });
+
+  await manager.request({ type: 'tts:synthesize', sourceTabId: 9, requestId: 'edge-retry', playbackId: 'edge-retry', request: { input: '第二句话。' } });
+  await new Promise((resolve) => setTimeout(resolve, 180));
+
+  assert.equal(spoken.length, 2);
+  assert.ok(events.some((event) => event.event === 'retrying' && event.retryAttempt === 1));
+  assert.ok(events.some((event) => event.event === 'ended'));
+  assert.equal(manager.active(), null);
+});
+
+test('terminal system speech is observed before the content script advances', async () => {
+  let options;
+  const order = [];
+  const manager = createChromeTtsManager({
+    tts: {
+      getVoices(callback) { callback([]); },
+      speak(_input, nextOptions) { options = nextOptions; nextOptions.onEvent({ type: 'start' }); },
+      stop() {}, pause() {}, resume() {},
+    },
+    tabs: { sendMessage(_tabId, payload) { if (payload.event === 'ended') order.push('delivered'); return Promise.resolve(); } },
+  });
+  manager.setEventObserver(async (payload) => {
+    if (payload.event !== 'ended') return;
+    await Promise.resolve();
+    order.push('released');
+  });
+
+  await manager.request({ type: 'tts:synthesize', sourceTabId: 3, requestId: 'ordered-end', playbackId: 'ordered-end', request: { input: '第一句。' } });
+  options.onEvent({ type: 'end' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(order, ['released', 'delivered']);
+});

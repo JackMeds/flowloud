@@ -178,7 +178,7 @@ export function PopupConsole({ model, onCommand, onSettingChange, onRequestPersi
           >
             <SlidersHorizontal aria-hidden="true" />
             <span>悬浮播放器<small>{model.settings.showFloatingPlayer
-              ? model.persistentSiteAccess === false ? '点此允许刷新后显示' : '刷新后自动显示'
+              ? model.persistentSiteAccess === false ? '浏览器已限制本页' : '刷新后自动显示'
               : '已关闭'}</small></span>
           </Button>
           <Button className="fl-quick-action" onPress={() => onCommand?.('locate-current')}><FileText aria-hidden="true" /><span>回到正文</span></Button>

@@ -209,21 +209,25 @@
         return Object.assign({}, currentState, { panelOpen: false });
       case "TAB_SELECT":
         return Object.assign({}, currentState, { tab: event.tab || "now" });
-      case "LOAD_START":
+      case "LOAD_START": {
+        const preserveSegments = event.preserveSegments === true;
         return Object.assign({}, currentState, {
-          status: "extracting",
-          document: event.preserveSegments ? currentState.document : null,
+          // A forum can append posts while an utterance is playing. That
+          // background refresh must not demote or detach the active session.
+          status: preserveSegments ? currentState.status : "extracting",
+          document: preserveSegments ? currentState.document : null,
           pageKey:
             event.pageKey == null ? currentState.pageKey : String(event.pageKey),
           scanId:
             event.scanId == null ? currentState.scanId : Number(event.scanId),
-          segments: event.preserveSegments ? currentState.segments : [],
-          index: event.preserveSegments ? currentState.index : 0,
-          current: event.preserveSegments ? currentState.current : null,
-          sessionId: null,
-          prefetchedIndex: null,
+          segments: preserveSegments ? currentState.segments : [],
+          index: preserveSegments ? currentState.index : 0,
+          current: preserveSegments ? currentState.current : null,
+          sessionId: preserveSegments ? currentState.sessionId : null,
+          prefetchedIndex: preserveSegments ? currentState.prefetchedIndex : null,
           error: null,
         });
+      }
       case "LOAD_SUCCESS": {
         if (
           event.scanId != null &&

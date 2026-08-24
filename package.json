@@ -1,0 +1,12 @@
+{
+  "name": "flowloud-workspace",
+  "private": true,
+  "version": "0.10.0-alpha.1",
+  "scripts": {
+    "dev:browser": "pnpm --dir extension-wxt dev:browser",
+    "e2e:target": "pnpm --dir extension-wxt e2e:target",
+    "e2e:real": "pnpm --dir extension-wxt e2e:real",
+    "e2e:browser": "pnpm --dir extension-wxt e2e:browser",
+    "e2e:release": "pnpm --dir extension-wxt e2e:release"
+  }
+}

@@ -31,14 +31,13 @@ pnpm storybook
 
 打开 `http://127.0.0.1:6006`。Storybook 保存后热更新，不需要重新打包扩展，也不会因为后台轮询把滚动位置和表单状态重置。所有故事均属于 Mock 视觉状态，不能替代扩展真机功能验收。
 
-### 调试真实扩展 Popup
+### 调试真实扩展
 
 ```powershell
-cd extension-wxt
-pnpm dev
+pnpm dev:browser
 ```
 
-首次在 `chrome://extensions/` 或 `edge://extensions/` 加载 `.output/chrome-mv3-dev`。之后 WXT 持续构建；只有修改 Manifest、后台或内容脚本边界时才需要按扩展平台要求重新加载。
+该命令使用独立持久 Profile 启动项目固定的 Playwright Chromium，并自动加载发布源 `extension/`，不需要进入 `chrome://extensions/`。WXT 的 `pnpm dev` 只用于 React 页面开发，当前不能替代完整扩展运行时。
 
 ### 构建两种浏览器
 
@@ -65,13 +64,13 @@ pnpm build:release-ui
 
 发布脚本会重新执行 React/WXT 类型检查、Chrome 与 Edge 构建、生产资源同步、两组测试和商店闸门，并检查 ZIP 内所有 Manifest/React 引用都存在。不要手工复制旧的 WXT 产物进发布目录。
 
-需要复核真实扩展页、Popup 和正文悬浮播放器时运行：
+需要复核真实扩展页、Popup 和正文悬浮播放器时优先运行：
 
 ```powershell
-node scripts/preview-extension.mjs
+pnpm e2e:browser
 ```
 
-脚本会自动查找常见安装位置中的 Edge 或 Chrome；也可用 `--edge <浏览器路径>` 显式指定。原生工具栏锚点与失焦关闭仍需最后人工确认。
+失败时会自动保留 trace、截图和分类诊断。旧的 `preview-extension.mjs` 仅保留给商店截图与 Edge 补充检查，不再作为日常调试入口。
 
 ## 两个发布检查点
 
@@ -93,7 +92,8 @@ node scripts/preview-extension.mjs
 ## 真站回归
 
 ```powershell
-node scripts/real-site-smoke.cjs
+pnpm e2e:target --url https://bbs.viva-la-vita.org/d/47653/3 --scenario continuation
+pnpm e2e:real
 ```
 
-脚本会请求并解析真实 Flarum 主题，验证作者、来源定位、控件清理和稳定播放身份。带 `--require-all` 时，任何被站点防护阻止的目标也会让脚本失败；LINUX DO 当前需要在浏览器会话内执行 DOM 降级检查。
+Playwright 会在真实 Chromium 页面中加载完整扩展，验证悬浮球注入、正文提取、动态队列与自动续播。站点防护和第三方页面噪声会与扩展错误分开报告，详细说明见 `docs/automated-browser-testing.md`。

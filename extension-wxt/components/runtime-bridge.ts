@@ -187,29 +187,20 @@ export class RuntimeBridge {
   }
 
   async hasPageOrigin(context: RuntimeContext | null) {
-    const api = runtimeChrome();
-    if (!api?.permissions?.contains) return true;
-    try {
-      return await api.permissions.contains({ origins: [this.pageOrigin(context)] });
-    } catch (_) {
-      return false;
-    }
+    // The release manifest installs the reader as a static content script on
+    // ordinary web pages. Validate the target, but do not ask for a second,
+    // per-site permission after the user has installed the extension.
+    this.pageOrigin(context);
+    return true;
   }
 
   async requestPageOrigin(context: RuntimeContext | null) {
-    const api = runtimeChrome();
-    if (!api?.permissions?.request) return true;
-    const origin = this.pageOrigin(context);
-    const granted = await api.permissions.request({ origins: [origin] });
-    if (granted) await this.registerPageOrigin(context);
-    return granted;
+    this.pageOrigin(context);
+    return true;
   }
 
   private async registerPageOrigin(context: RuntimeContext | null) {
-    const origin = this.pageOrigin(context);
-    if (this.registeredPageOrigins.has(origin)) return;
-    await this.send({ type: 'reader:site-access:register', origin });
-    this.registeredPageOrigins.add(origin);
+    this.registeredPageOrigins.add(this.pageOrigin(context));
   }
 
   async voices(providerId: string): Promise<PopupVoice[]> {

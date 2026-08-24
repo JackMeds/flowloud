@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { loadPlaywright } from './playwright-runtime.mjs';
 
 function parseArgs(argv) {
   const values = {};
@@ -72,15 +72,7 @@ for (const candidate of browserCandidates) {
 }
 if (!executablePath) throw new Error(`Edge/Chrome not found. Checked: ${browserCandidates.join(', ')}`);
 
-const nodeRoot = path.resolve(process.execPath, '..', '..');
-const bundledPlaywright = path.join(nodeRoot, 'node_modules', 'playwright', 'index.js');
-const fallbackPlaywright = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'nodejs', 'node_modules', 'playwright', 'index.js');
-const playwrightEntry = await fs.access(bundledPlaywright).then(() => bundledPlaywright).catch(async () => {
-  await fs.access(fallbackPlaywright);
-  return fallbackPlaywright;
-});
-const require = createRequire(import.meta.url);
-const { chromium } = require(playwrightEntry);
+const { chromium } = loadPlaywright();
 const report = {
   generatedAt: new Date().toISOString(),
   browser: executablePath,
