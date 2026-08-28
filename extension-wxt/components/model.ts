@@ -1,11 +1,48 @@
 export type ReaderStatus = 'idle' | 'ready' | 'loading' | 'playing' | 'paused' | 'error';
 
+export type SettingsSection = 'reader' | 'ai' | 'voice' | 'appearance' | 'shortcuts' | 'advanced';
+
+export type ProviderConnectionState = 'unconfigured' | 'connecting' | 'connected' | 'failed' | 'unavailable';
+
+export interface ProviderStatus {
+  providerId: string;
+  connectionState: ProviderConnectionState;
+  configured: boolean;
+  usable: boolean;
+  message: string;
+  stage?: 'configuration' | 'permission' | 'health' | 'voices' | 'synthesize' | 'model';
+  verifiedAt?: string;
+  voiceCount?: number;
+  modelCount?: number;
+  sourceLabel?: string;
+  capabilities?: Record<string, boolean>;
+}
+
+export interface VoiceCatalogEntry extends PopupVoice {
+  providerId: string;
+  languageLabel: string;
+  characteristic?: string;
+  availability: 'available' | 'download-required' | 'configuration-required' | 'unavailable';
+  isDefault?: boolean;
+}
+
+export interface ProviderVoiceCatalogState {
+  providerId: string;
+  status: 'idle' | 'loading' | 'ready' | 'empty' | 'error';
+  voices: VoiceCatalogEntry[];
+  error?: string;
+}
+
 export interface PopupSettings {
   activeProviderId: string;
   playbackRate: number;
   readingMode: 'content' | 'guide';
+  readingFocus: 'off' | 'sentence' | 'line';
   readingFocusStyle: 'soft-glow' | 'edge-glow' | 'paper-wash' | 'underline-guide';
   wordHighlightStyle: 'edge-dissolve' | 'classic-glow' | 'aurora-tide' | 'custom';
+  wordHighlightColor: string;
+  wordHighlightGlow: number;
+  wordHighlightSpeed: number;
   showFloatingPlayer: boolean;
   clickToRead: boolean;
   preset: 'everyone-one' | 'op-plus-one' | 'op-stable-random' | 'op-round-robin' | 'op-exclusive' | 'stable-author' | 'round-robin';
@@ -24,6 +61,14 @@ export interface PopupVoice {
   id: string;
   label: string;
   lang?: string;
+  language?: string;
+  gender?: string;
+  characteristic?: string;
+  description?: string;
+  style?: string;
+  cached?: boolean | null;
+  source?: string;
+  sizeBytes?: number;
   eventTypes?: string[];
 }
 
@@ -61,14 +106,13 @@ export interface PopupModel {
     pageKey?: string;
     sourceIsCurrentTab?: boolean;
   };
+  providerStates?: ProviderState[];
+  modelState?: ModelDownloadState;
 }
 
-export interface ProviderState {
-  providerId: string;
+export interface ProviderState extends ProviderStatus {
   ready: boolean;
   status: 'ready' | 'unconfigured' | 'permission-required' | 'unavailable' | 'error';
-  message: string;
-  capabilities?: Record<string, boolean>;
 }
 
 export interface ModelDownloadState {
@@ -80,7 +124,36 @@ export interface ModelDownloadState {
   fallbackReason?: string;
   verifiedAt?: string;
   message?: string;
+  source?: string;
+  sourceLabel?: string;
+  variant?: string;
+  variantLabel?: string;
+  estimatedBytes?: number;
+  concurrency?: number;
+  voiceCount?: number;
+  starterVoiceIds?: string[];
+  voiceCacheRegistry?: Record<string, Record<string, unknown>>;
 }
+
+/**
+ * Safe UI defaults used before the extension runtime responds.  These are
+ * settings defaults only; they intentionally contain no titles, authors,
+ * voice IDs, provider catalogs, or playback claims.
+ */
+export const runtimeDefaultSettings: PopupSettings = {
+  activeProviderId: 'browser-system',
+  playbackRate: 1,
+  readingMode: 'content',
+  readingFocus: 'sentence',
+  readingFocusStyle: 'soft-glow',
+  wordHighlightStyle: 'edge-dissolve',
+  wordHighlightColor: '#2563eb',
+  wordHighlightGlow: 48,
+  wordHighlightSpeed: 1,
+  showFloatingPlayer: false,
+  clickToRead: false,
+  preset: 'everyone-one',
+};
 
 export const demoPopupModel: PopupModel = {
   title: '如何让浏览器朗读真正融入阅读？',
@@ -101,8 +174,12 @@ export const demoPopupModel: PopupModel = {
     activeProviderId: 'browser-system',
     playbackRate: 1,
     readingMode: 'content',
+    readingFocus: 'sentence',
     readingFocusStyle: 'paper-wash',
     wordHighlightStyle: 'edge-dissolve',
+    wordHighlightColor: '#2563eb',
+    wordHighlightGlow: 48,
+    wordHighlightSpeed: 1,
     showFloatingPlayer: true,
     clickToRead: true,
     preset: 'everyone-one',

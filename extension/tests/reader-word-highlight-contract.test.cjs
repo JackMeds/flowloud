@@ -75,7 +75,11 @@ test('fixed glyph light sweeps are isolated from page layout and follow the high
   assert.match(source, /function\s+ensureWordMotionCursor\s*\(/);
   assert.match(source, /function\s+moveWordMotionCursor\s*\(/);
   assert.doesNotMatch(source, /overshoot|rebound|cursor\.animate/);
-  assert.match(source, /cursor\.classList\.add\("is-running"\)/);
+  assert.match(source, /cursor\.classList\.toggle\("is-running-a"/);
+  assert.match(source, /cursor\.classList\.toggle\("is-running-b"/);
+  assert.doesNotMatch(source, /void\s+cursor\.offsetWidth/);
+  assert.match(source, /cursor\.style\.transform\s*=\s*`translate3d/);
+  assert.match(css, /\.qr-word-motion-layer\.is-tracking-scroll[\s\S]*?transition:\s*none/);
   assert.match(source, /function\s+styleWordMotionInk\s*\(/);
   assert.match(source, /ink\.textContent\s*=\s*range\.toString\(\)/);
   assert.match(css, /\.qr-word-motion-ink::after\s*\{[\s\S]*?radial-gradient[\s\S]*?background-clip:\s*text/);

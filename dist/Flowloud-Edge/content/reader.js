@@ -84,7 +84,7 @@
   });
   const shell = document.createElement("div");
   shell.innerHTML = `
-    <section class="qr-mini-player qr-mini-orb" data-role="mini-player" data-mini-ui-version="edge-peek-v5" role="region" aria-labelledby="qr-mini-title" aria-describedby="qr-mini-status" aria-hidden="true">
+    <section class="qr-mini-player qr-mini-orb" data-role="mini-player" data-mini-ui-version="visible-orb-v6" role="region" aria-labelledby="qr-mini-title" aria-describedby="qr-mini-status" aria-hidden="true">
       <span class="qr-sr-only" id="qr-mini-title">Flowloud / 流声网页悬浮球</span>
       <button class="qr-mini-launcher" type="button" data-action="expand-mini-player" aria-label="展开网页悬浮播放器">
         <span class="qr-mini-signal" aria-hidden="true">
@@ -117,6 +117,7 @@
         <button class="qr-mini-button is-primary" type="button" data-action="play-toggle" aria-label="暂停朗读"><img class="qr-mini-icon" data-role="mini-play-icon" src="${iconUrls.pause}" alt=""></button>
         <button class="qr-mini-button" type="button" data-action="next" aria-label="下一句"><img class="qr-mini-icon" src="${iconUrls.next}" alt=""></button>
         <button class="qr-mini-button is-follow" type="button" data-action="resume-follow" aria-label="回到当前朗读位置" title="回到朗读位置"><svg class="qr-mini-follow-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
+        <button class="qr-mini-button is-click-to-read" type="button" data-action="toggle-click-to-read" aria-label="开启网页点读" aria-pressed="false" title="网页点读"><svg class="qr-mini-follow-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3l11 9-5 1.5L9 19z"/><path d="M14 16l3 5"/></svg></button>
         <button class="qr-mini-button is-collapse" type="button" data-action="toggle-mini-size" aria-label="收起网页悬浮播放器" title="收起"><img class="qr-mini-icon" src="${iconUrls.minimize}" alt=""></button>
       </div>
       <div class="qr-mini-controls qr-mini-compact-controls" data-role="mini-compact-controls" aria-label="最小化朗读控制">
@@ -149,6 +150,7 @@
     settings.opVoice,
     ...(settings.replyVoices || []),
   ]).filter(Boolean);
+  let knownVoiceLabels = new Map();
   let currentAudio = null;
   let activeSession = "";
   let activeStreamRequest = "";
@@ -191,6 +193,11 @@
   let hoverHideTimer = null;
   let pointerFrame = null;
   let overlayFrame = null;
+  let overlayNeedsMarkerRefresh = false;
+  let overlayScrollTimer = null;
+  let markerPlacementCache = null;
+  let markerSizeCache = null;
+  let wordMotionSequence = 0;
   let sourceElements = [];
   let sourceIndicesByKey = new Map();
   let sourceIndicesByElement = new WeakMap();
@@ -548,6 +555,16 @@
         lastScrolledLocatorKey = "";
         highlightCurrent({ forceFollow: true });
         renderNow();
+      } else if (action === "toggle-click-to-read") {
+        settings.clickToRead = !settings.clickToRead;
+        if (!settings.clickToRead) {
+          clearTimeout(hoverHideTimer);
+          hoveredSegmentIndex = -1;
+          if (!isPlaybackActive()) renderReadingMarker();
+        }
+        await saveSettings();
+        renderNow();
+        showToast(settings.clickToRead ? "网页点读已开启：点击正文即可从该句朗读。" : "网页点读已关闭。");
       } else if (action === "retry-system-once") {
         await playIndex(state.index, { providerId: "browser-system" });
       } else if (button.dataset.index != null) {
@@ -687,9 +704,11 @@
     window.addEventListener("touchmove", markManualScroll, { capture: true, passive: true });
     window.addEventListener("keydown", markManualScroll, true);
     window.addEventListener("pointerdown", markManualScroll, true);
-    window.addEventListener("scroll", scheduleOverlayUpdate, { capture: true, passive: true });
+    window.addEventListener("scroll", () => scheduleOverlayUpdate(true), { capture: true, passive: true });
     window.addEventListener("resize", () => {
-      scheduleOverlayUpdate();
+      markerPlacementCache = null;
+      markerSizeCache = null;
+      scheduleOverlayUpdate(false, true);
       positionFloatingPlayer();
     }, { passive: true });
     if (window.visualViewport && typeof window.visualViewport.addEventListener === "function") {
@@ -854,9 +873,6 @@
         replyVoiceIds: unique(settings.replyVoices || []),
         authorVoices: Object.assign({}, settings.voiceAssignmentsByProvider?.[providerId]?.authorVoices || {}),
       },
-    });
-    settings.providerVoices = Object.assign({}, settings.providerVoices || {}, {
-      [providerId]: String(settings.opVoice || ""),
     });
     await chrome.runtime.sendMessage({ type: "settings:set", settings });
   }
@@ -1305,8 +1321,18 @@
             "无法读取音色库",
         );
       }
+      const catalog = response.voices || [];
+      knownVoiceLabels = new Map();
+      for (const voice of catalog) {
+        const id = typeof voice === "string" ? voice : (voice.id || voice.voiceId || voice.name);
+        if (!id) continue;
+        const label = typeof voice === "string"
+          ? voice
+          : (voice.label || voice.name || voice.voiceName || voice.voiceId || voice.id);
+        knownVoiceLabels.set(String(id), String(label || id).replace(/^(?:browser-system|browser-model|local-service|openai-compatible|doubao-tts):/u, ""));
+      }
       knownVoices = unique([
-        ...(response.voices || []).map((voice) =>
+        ...catalog.map((voice) =>
           typeof voice === "string" ? voice : (voice.id || voice.voiceId || voice.name),
         ),
         settings.opVoice,
@@ -2993,8 +3019,7 @@
   }
 
   function setWordMotionCursorBox(cursor, target) {
-    cursor.style.left = `${target.left}px`;
-    cursor.style.top = `${target.top}px`;
+    cursor.style.transform = `translate3d(${target.left}px, ${target.top}px, 0)`;
     cursor.style.width = `${target.width}px`;
   }
 
@@ -3006,9 +3031,9 @@
     if (instant) return;
     // The word and underline stay fixed. Restart only the one-way light sweep
     // when speech advances, so there is no glyph bounce or positional recoil.
-    cursor.classList.remove("is-running");
-    void cursor.offsetWidth;
-    cursor.classList.add("is-running");
+    wordMotionSequence += 1;
+    cursor.classList.toggle("is-running-a", wordMotionSequence % 2 === 0);
+    cursor.classList.toggle("is-running-b", wordMotionSequence % 2 !== 0);
   }
 
   function positionWordMotion() {
@@ -3421,12 +3446,25 @@
     }
   }
 
-  function scheduleOverlayUpdate() {
+  function scheduleOverlayUpdate(fromScroll, refreshMarker) {
+    if (refreshMarker) overlayNeedsMarkerRefresh = true;
+    if (fromScroll) {
+      const layer = shadow.querySelector('[data-role="word-motion-layer"]');
+      if (layer) layer.classList.add("is-tracking-scroll");
+      clearTimeout(overlayScrollTimer);
+      overlayScrollTimer = setTimeout(() => {
+        overlayScrollTimer = null;
+        if (layer) layer.classList.remove("is-tracking-scroll");
+        scheduleOverlayUpdate(false, true);
+      }, 120);
+    }
     if (overlayFrame != null) return;
     overlayFrame = requestAnimationFrame(() => {
       overlayFrame = null;
+      const shouldRefreshMarker = overlayNeedsMarkerRefresh;
+      overlayNeedsMarkerRefresh = false;
       const displayIndex = isPlaybackActive() ? state.index : hoveredSegmentIndex;
-      if (displayIndex >= 0) positionReadingMarker(displayIndex);
+      if (displayIndex >= 0) positionReadingMarker(displayIndex, { refreshPlacement: shouldRefreshMarker });
       positionReadingFocus();
       positionWordMotion();
     });
@@ -3524,15 +3562,17 @@
     const authorLabel = segment.isOp
       ? "楼主"
       : (segment.authorName || "正文");
+    const voiceLabel = markerVoiceLabel(segment.voice);
     controller.innerHTML = `
       <button class="qr-marker-button" style="--qr-speaker-accent:${voiceColor}" type="button" data-action="marker-play" data-index="${displayIndex}" aria-label="${escapeAttribute(actionLabel)}">
         <span class="qr-marker-action" aria-hidden="true">${icon}</span>
-        <span class="qr-marker-voice">${escapeHtml(segment.voice || "默认音色")}</span>
-        <span class="qr-marker-separator" aria-hidden="true">·</span>
         <span class="qr-marker-context">${escapeHtml(authorLabel)}</span>
+        <span class="qr-marker-separator" aria-hidden="true">·</span>
+        <span class="qr-marker-voice">${escapeHtml(voiceLabel)}</span>
         <span class="qr-marker-progress" aria-label="第 ${displayIndex + 1} 句，共 ${state.segments.length} 句">${displayIndex + 1}/${state.segments.length}</span>
       </button>
     `;
+    markerSizeCache = null;
     controller.classList.add("is-visible");
     controller.classList.toggle("is-active", active);
     if (displayIndex !== lastMarkerIndex) {
@@ -3544,7 +3584,47 @@
     positionReadingMarker(displayIndex);
   }
 
-  function positionReadingMarker(index) {
+  function lightweightMarkerPlacement(rects, markerWidth, markerHeight, placement) {
+    if (!rects.length) return null;
+    const normalized = rects.map((rect) => ({
+      left: Number(rect.left),
+      top: Number(rect.top),
+      right: Number(rect.right ?? (rect.left + rect.width)),
+      bottom: Number(rect.bottom ?? (rect.top + rect.height)),
+    }));
+    const firstLine = normalized[0];
+    const lastLine = normalized.reduce((latest, rect) => (
+      rect.bottom > latest.bottom || (rect.bottom === latest.bottom && rect.left < latest.left) ? rect : latest
+    ), firstLine);
+    const leftEdge = Math.min(...normalized.map((rect) => rect.left));
+    const rightEdge = Math.max(...normalized.map((rect) => rect.right));
+    const topEdge = Math.min(...normalized.map((rect) => rect.top));
+    const bottomEdge = Math.max(...normalized.map((rect) => rect.bottom));
+    const padding = 8;
+    const gap = 7;
+    const clampLeft = (value) => Math.min(window.innerWidth - padding - markerWidth, Math.max(padding, value));
+    let left;
+    let top;
+    if (placement === "left") {
+      left = leftEdge - gap - markerWidth;
+      top = firstLine.top + ((firstLine.bottom - firstLine.top) - markerHeight) / 2;
+    } else if (placement === "right") {
+      left = rightEdge + gap;
+      top = firstLine.top + ((firstLine.bottom - firstLine.top) - markerHeight) / 2;
+    } else if (placement === "below") {
+      left = clampLeft(lastLine.left);
+      top = bottomEdge + gap;
+    } else {
+      left = clampLeft(firstLine.left);
+      top = topEdge - gap - markerHeight;
+    }
+    if (left < padding || top < padding || left + markerWidth > window.innerWidth - padding || top + markerHeight > window.innerHeight - padding) {
+      return null;
+    }
+    return { left, top, placement: placement || "above" };
+  }
+
+  function positionReadingMarker(index, options) {
     const controller = shadow.querySelector('[data-role="reading-marker"]');
     if (!controller || !controller.classList.contains("is-visible")) return;
     const rects = getSegmentRects(index).filter((rect) =>
@@ -3554,17 +3634,38 @@
       controller.classList.add("is-safe-hidden");
       return;
     }
-    const controlWidth = controller.offsetWidth || 150;
-    const controlHeight = controller.offsetHeight || 22;
-    const placement = MarkerPlacement.chooseMarkerPlacement({
-      sentenceRects: rects,
-      markerWidth: controlWidth,
-      markerHeight: controlHeight,
-      viewport: { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight },
-      occupiedRects: collectOccupiedTextRects(index),
-      gap: 7,
-      viewportPadding: 8,
-    });
+    const placementOptions = options || {};
+    const refreshPlacement = placementOptions.refreshPlacement === true
+      || !markerPlacementCache
+      || markerPlacementCache.index !== index;
+    if (!markerSizeCache || refreshPlacement) {
+      markerSizeCache = {
+        width: controller.offsetWidth || 150,
+        height: controller.offsetHeight || 22,
+      };
+    }
+    const controlWidth = markerSizeCache.width;
+    const controlHeight = markerSizeCache.height;
+    let placement = null;
+    if (!refreshPlacement) {
+      placement = lightweightMarkerPlacement(
+        rects,
+        controlWidth,
+        controlHeight,
+        markerPlacementCache.placement,
+      );
+    } else {
+      placement = MarkerPlacement.chooseMarkerPlacement({
+        sentenceRects: rects,
+        markerWidth: controlWidth,
+        markerHeight: controlHeight,
+        viewport: { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight },
+        occupiedRects: [...collectOccupiedTextRects(index), ...collectInteractiveRects(rects)],
+        gap: 7,
+        viewportPadding: 8,
+      });
+      markerPlacementCache = placement ? { index, placement: placement.placement } : null;
+    }
     controller.classList.toggle("is-safe-hidden", !placement);
     if (!placement) return;
     controller.dataset.placement = placement.placement;
@@ -3650,6 +3751,31 @@
 
   function renderShell() {
     syncWordMotionPlaybackState();
+  }
+
+  function markerVoiceLabel(voice) {
+    const voiceId = String(voice || "").trim();
+    if (!voiceId) return "默认音色";
+    const catalogLabel = knownVoiceLabels.get(voiceId);
+    if (catalogLabel) return catalogLabel;
+    const separator = voiceId.indexOf(":");
+    return separator >= 0 && separator < voiceId.length - 1
+      ? voiceId.slice(separator + 1)
+      : voiceId;
+  }
+
+  function collectInteractiveRects(sentenceRects) {
+    const top = Math.min(...sentenceRects.map((rect) => rect.top)) - 48;
+    const bottom = Math.max(...sentenceRects.map((rect) => rect.bottom)) + 48;
+    const rects = [];
+    const candidates = document.querySelectorAll("a[href], button, input, select, textarea, summary, [role='button'], [role='link'], [tabindex]");
+    for (const element of candidates) {
+      if (rects.length >= 500 || !element.getBoundingClientRect) break;
+      const rect = element.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0 || rect.bottom < top || rect.top > bottom) continue;
+      rects.push({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height });
+    }
+    return rects;
   }
 
   async function restoreMiniPlayerPosition() {
@@ -3978,6 +4104,7 @@
     const previous = player.querySelector('[data-action="previous"]');
     const next = player.querySelector('[data-action="next"]');
     const followButtons = player.querySelectorAll('[data-action="resume-follow"]');
+    const clickToReadButton = player.querySelector('[data-action="toggle-click-to-read"]');
     const providerFallback = player.querySelector('[data-action="retry-system-once"]');
     const total = state.segments.length;
     player.classList.toggle("is-visible", active);
@@ -4024,6 +4151,12 @@
       button.setAttribute("aria-label", followNeeded ? "回到当前朗读位置" : "已跟随当前朗读位置");
       button.title = followNeeded ? "回到朗读位置" : "正在跟随朗读位置";
     });
+    if (clickToReadButton) {
+      clickToReadButton.classList.toggle("is-selected", settings.clickToRead);
+      clickToReadButton.setAttribute("aria-pressed", String(settings.clickToRead));
+      clickToReadButton.setAttribute("aria-label", settings.clickToRead ? "关闭网页点读" : "开启网页点读");
+      clickToReadButton.title = settings.clickToRead ? "网页点读：已开启" : "网页点读：已关闭";
+    }
     player.querySelectorAll('[data-action="toggle-mini-size"]').forEach((button) => {
       button.setAttribute("aria-pressed", String(miniPlayerMinimized));
       button.setAttribute("aria-label", miniPlayerMinimized ? "展开网页悬浮球" : "最小化网页悬浮球");

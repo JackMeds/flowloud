@@ -80,6 +80,20 @@ test('voice studio exposes an accessible multi-file import and batch review flow
   assert.match(studioSource, /addEventListener\(\s*["']drop["']/);
 });
 
+test('voice studio records either microphone input or explicitly shared computer audio', () => {
+  const sourceButtons = openingTags('button').filter((tag) => /data-record-source=/iu.test(tag));
+  assert.equal(sourceButtons.length, 2);
+  assert.ok(sourceButtons.some((tag) => /data-record-source=["']microphone["']/iu.test(tag)));
+  assert.ok(sourceButtons.some((tag) => /data-record-source=["']system-audio["']/iu.test(tag)));
+  assert.match(studioSource, /mediaDevices\.getDisplayMedia\(/u);
+  assert.match(studioSource, /systemAudio:\s*["']include["']/u);
+  assert.match(studioSource, /stream\.getAudioTracks\(\)\.length/u);
+  assert.match(studioSource, /system_audio_missing/u);
+  assert.match(studioSource, /audioTrack\.addEventListener\(["']ended["']/u);
+  assert.match(studioSource, /state\.stream\.getTracks\(\)\.forEach\(\(track\)\s*=>\s*track\.stop\(\)\)/u);
+  assert.doesNotMatch(manifest.permissions.join(','), /desktopCapture|tabCapture/u);
+});
+
 test('every imported file is decoded, prepared, transcribed, profiled, and saved independently', () => {
   assert.match(studioSource, /(?:Array\.from\([^)]*\.files|\.files\b|dataTransfer\.files)/);
   assert.match(studioSource, /(?:for\s*\([^)]*\bfile\b[^)]*\)|\.map\(\s*(?:async\s*)?\(?\s*file\b)/);
@@ -191,6 +205,8 @@ test('successful saves release the File, PCM, WAV, Base64, and Object URL payloa
 });
 
 test('browser harness exercises the import lifecycle with delayed decode, transcription, and save failure', () => {
+  assert.match(studioHarness, /displayCaptureMode[\s\S]*getDisplayMedia[\s\S]*no-audio[\s\S]*reject/u);
+  assert.match(studioHarness, /feedRecordingSamples[\s\S]*电脑声音样本[\s\S]*lastDisplayStream\.audio\.end/u);
   assert.match(studioHarness, /holdDecode[\s\S]*maxDecodeActive/u);
   assert.match(studioHarness, /save-all-button[\s\S]*disabled[\s\S]*部分保存/u);
   assert.match(studioHarness, /planTranscription[\s\S]*用户手动填写的台词[\s\S]*迟到/u);

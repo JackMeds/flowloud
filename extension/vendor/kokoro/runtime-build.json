@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-24T15:29:24.691Z",
+  "generatedAt": "2026-08-28T00:52:40.862Z",
   "runtime": "kokoro-only",
   "kokoroJsVersion": "1.2.4",
   "transformersVersion": "4.2.0",
@@ -7,11 +7,14 @@
   "phonemizerVersion": "1.2.1",
   "pinyinProVersion": "3.29.3",
   "modelRepo": "onnx-community/Kokoro-82M-v1.1-zh-ONNX",
-  "modelRevision": "6cc0f0d2ebe369a68b0df87c2b65c1af8c0ac3e3",
+  "modelSource": "modelscope",
+  "modelRevision": "71bfd8ce077d1f8c70a183704da7c55c1c4cded6",
+  "modelScopeRevision": "71bfd8ce077d1f8c70a183704da7c55c1c4cded6",
+  "huggingFaceRevision": "6cc0f0d2ebe369a68b0df87c2b65c1af8c0ac3e3",
   "bundledVoices": [],
   "runtimeAssets": [
     "ort-wasm-simd-threaded.asyncify.mjs",
     "ort-wasm-simd-threaded.asyncify.wasm"
   ],
-  "sha256": "549c5dee457fb783b135d65b7871d047b8f16f9110e5a86caf741f58779767c9"
+  "sha256": "a727e939b13ea85d39ff258ec0349c731b750ee238b51407b41ce37b08ae211e"
 }

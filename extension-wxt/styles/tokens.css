@@ -12,6 +12,11 @@
   --fl-blue-soft: #eff6ff;
   --fl-danger: #b4233a;
   --fl-success: #0f766e;
+  --fl-focus: #2563eb;
+  --fl-motion-fast: 120ms;
+  --fl-motion-base: 160ms;
+  --fl-motion-progress: 180ms;
+  --fl-ease-standard: cubic-bezier(.2, .8, .2, 1);
   --fl-radius-sm: 8px;
   --fl-radius: 12px;
   --fl-radius-lg: 16px;

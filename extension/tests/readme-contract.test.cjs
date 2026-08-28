@@ -23,9 +23,9 @@ test('project README explains purpose, capabilities, model access, and quick use
 test('extension README describes the popup-first floating-orb experience', () => {
   assert.match(extensionReadme, /网页悬浮球/);
   assert.match(extensionReadme, /拖动吸附/);
-  assert.match(extensionReadme, /40px 可见圆形/);
+  assert.match(extensionReadme, /40px 圆形/);
   assert.match(extensionReadme, /44×44px/);
-  assert.match(extensionReadme, /默认只露出一半/);
+  assert.match(extensionReadme, /约 32px 可见宽度/);
   assert.match(extensionReadme, /点击后展开/);
   assert.match(extensionReadme, /上一句、暂停\/继续、下一句和回到正文/);
   assert.match(extensionReadme, /网页点读默认关闭/);

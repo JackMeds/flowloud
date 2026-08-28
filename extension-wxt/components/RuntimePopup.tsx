@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { PopupConsole, type ReaderCommand } from './PopupConsole';
-import { demoPopupModel, type PopupModel, type PopupSettings } from './model';
+import { runtimeDefaultSettings, type PopupModel, type PopupSettings, type SettingsSection } from './model';
 import { createRuntimeBridge, type RuntimeContext } from './runtime-bridge';
 
 function messageFrom(error: unknown, fallback: string) {
@@ -27,11 +27,34 @@ function preserveRuntimeDetails(current: PopupModel, next: PopupModel): PopupMod
   };
 }
 
+function initialRuntimeModel(available: boolean): PopupModel {
+  return {
+    title: '当前网页',
+    sourceLabel: '',
+    status: available ? 'loading' : 'error',
+    index: 0,
+    total: 0,
+    currentText: '',
+    currentSpeaker: '',
+    authors: [],
+    settings: { ...runtimeDefaultSettings },
+    availableVoices: [],
+    selectedVoiceId: '',
+    pageVoiceAssignments: {},
+    pageVoiceLoadState: 'idle',
+    voiceLoadState: 'idle',
+    persistentSiteAccess: false,
+    isMock: false,
+    currentTabId: null,
+    sourceTabId: null,
+    globalPlayback: { active: false, state: 'idle' },
+    message: available ? '正在连接当前网页…' : '扩展运行时不可用，请从已安装的扩展页面打开。',
+  };
+}
+
 export function RuntimePopup() {
   const [bridge] = useState(() => createRuntimeBridge());
-  const [model, setModel] = useState<PopupModel>(() => bridge.available
-    ? { ...demoPopupModel, status: 'loading', isMock: false, message: '正在连接当前网页…' }
-    : { ...demoPopupModel, isMock: true, message: 'Mock 界面预览：未连接扩展运行时。' });
+  const [model, setModel] = useState<PopupModel>(() => initialRuntimeModel(bridge.available));
   const [context, setContext] = useState<RuntimeContext | null>(null);
   const savedSettings = useRef<Record<string, unknown>>({});
   const controlNoticeTimer = useRef<number | null>(null);
@@ -79,24 +102,38 @@ export function RuntimePopup() {
     setModel((current) => ({ ...current, voiceLoadState: 'loading', providerNotice: undefined }));
     void bridge.voices(providerId).then((voices) => {
       if (disposed) return;
+      const playableVoices = providerId === 'browser-model'
+        ? voices.filter((voice) => voice.cached === true)
+        : voices;
+      const assignments = savedSettings.current.voiceAssignmentsByProvider as Record<string, Record<string, unknown>> | undefined;
+      const configuredVoiceId = String(assignments?.[providerId]?.narratorVoiceId || '');
+      const selected = playableVoices.find((voice) => voice.id === configuredVoiceId) || playableVoices[0];
       setModel((current) => {
-        const selected = voices.find((voice) => voice.id === current.selectedVoiceId) || voices[0];
         let providerNotice: string | undefined;
         if (providerId === 'browser-system') {
           providerNotice = selected?.eventTypes?.includes('word')
             ? '当前系统音色支持逐词边界。'
             : '当前系统音色未声明逐词边界，将保留句子高亮。';
         } else if (providerId === 'browser-model') {
-          providerNotice = `当前浏览器模型只有固定音色，不支持声音克隆${current.providerDevice ? ` · ${current.providerDevice.toUpperCase()}` : ''}`;
+          providerNotice = playableVoices.length
+            ? `已下载 ${playableVoices.length} / ${voices.length} 个音色；这里只显示现在可播放的音色${current.providerDevice ? ` · ${current.providerDevice.toUpperCase()}` : ''}`
+            : '当前没有已下载且可播放的模型音色，请先到“声音库”下载。';
         }
         return {
           ...current,
-          availableVoices: voices,
+          availableVoices: playableVoices,
           selectedVoiceId: selected?.id || current.selectedVoiceId,
           voiceLoadState: 'ready',
           providerNotice,
         };
       });
+      if (providerId === 'browser-model' && selected && configuredVoiceId !== selected.id) {
+        void bridge.assignVoices(providerId, { narratorVoiceId: selected.id }).then((response) => {
+          savedSettings.current = response.settings || savedSettings.current;
+        }).catch((error) => {
+          if (!disposed) setModel((current) => ({ ...current, message: messageFrom(error, '无法切换到已下载音色。') }));
+        });
+      }
     }).catch((error) => {
       if (!disposed) setModel((current) => ({
         ...current,
@@ -215,21 +252,8 @@ export function RuntimePopup() {
     setModel((current) => ({ ...current, selectedVoiceId: voiceId, message: undefined }));
     if (!bridge.available) return;
     try {
-      const providerVoices = {
-        ...(savedSettings.current.providerVoices as Record<string, unknown> || {}),
-        [providerId]: voiceId,
-      };
-      const assignments = savedSettings.current.voiceAssignmentsByProvider as Record<string, Record<string, unknown>> | undefined;
-      const voiceAssignmentsByProvider = {
-        ...(assignments || {}),
-        [providerId]: {
-          ...(assignments?.[providerId] || {}),
-          narratorVoiceId: voiceId,
-        },
-      };
-      const merged = { ...savedSettings.current, providerVoices, voiceAssignmentsByProvider };
-      const response = await bridge.saveSettings(merged);
-      savedSettings.current = response.settings || merged;
+      const response = await bridge.assignVoices(providerId, { narratorVoiceId: voiceId });
+      savedSettings.current = response.settings || savedSettings.current;
     } catch (error) {
       setModel((current) => ({
         ...current,
@@ -264,22 +288,6 @@ export function RuntimePopup() {
     }
   };
 
-  const testLocalService = async () => {
-    const baseUrl = model.providerBaseUrl || 'http://127.0.0.1:7811';
-    setModel((current) => ({ ...current, providerNotice: `正在检查 ${baseUrl}…` }));
-    try {
-      const granted = await bridge.requestLocalOrigin(baseUrl);
-      if (!granted) throw new globalThis.Error('未授予本地服务连接权限。');
-      const response = await bridge.testLocalService();
-      const capabilities = response.capabilities && typeof response.capabilities === 'object'
-        ? response.capabilities as Record<string, unknown> : {};
-      const streamLabel = capabilities.incrementalGeneration === true ? '增量生成' : capabilities.transportStreaming === true ? '分块传输' : '整段音频';
-      setModel((current) => ({ ...current, providerNotice: `连接成功 · ${baseUrl} · ${streamLabel}` }));
-    } catch (error) {
-      setModel((current) => ({ ...current, providerNotice: messageFrom(error, `无法连接 ${baseUrl}。`) }));
-    }
-  };
-
   const openGuide = async () => {
     if (!bridge.available) return;
     await bridge.send({ type: 'guide:open', tabId: context?.tabId });
@@ -292,10 +300,26 @@ export function RuntimePopup() {
     window.close();
   };
 
+  const openVoiceStudio = async () => {
+    if (!bridge.available) return;
+    await bridge.openVoiceStudio();
+    window.close();
+  };
+
   const focusSource = async () => {
     if (!bridge.available) return;
     try { await bridge.focusSource(); } catch (error) {
       setModel((current) => ({ ...current, message: messageFrom(error, '无法返回朗读来源页。') }));
+    }
+  };
+
+  const openSettings = async (section: SettingsSection, providerId = '') => {
+    if (!bridge.available) return;
+    try {
+      await bridge.openSettingsTab(section, providerId);
+      window.close();
+    } catch (error) {
+      setModel((current) => ({ ...current, message: messageFrom(error, '无法打开完整设置。') }));
     }
   };
 
@@ -305,14 +329,14 @@ export function RuntimePopup() {
       onCommand={sendCommand}
       onSettingChange={changeSetting}
       onRequestPersistentSiteAccess={requestPersistentSiteAccess}
-      onOpenOptions={() => bridge.openOptions()}
+      onOpenSettings={(section, providerId) => { void openSettings(section, providerId); }}
       onOpenGuide={openGuide}
       onReturnSource={focusSource}
       onReadCurrentPage={readCurrentPage}
       onVoiceChange={changeVoice}
       onPageVoiceChange={changePageVoice}
-      onTestLocalService={testLocalService}
       onOpenDocuments={openDocuments}
+      onOpenVoiceStudio={openVoiceStudio}
     />
   );
 }

@@ -52,7 +52,8 @@ function runReleaseGate() {
 
   assertFile(manifest.background?.service_worker, 'background.service_worker');
   assertFile(manifest.action?.default_popup, 'action.default_popup');
-  assertFile(manifest.options_page || manifest.options_ui?.page, 'options');
+  const optionsPage = manifest.options_page || manifest.options_ui?.page;
+  if (optionsPage) assertFile(optionsPage, 'options');
   for (const icon of Object.values(manifest.icons || {})) assertFile(icon, 'icon');
   for (const resourceGroup of manifest.web_accessible_resources || []) {
     for (const resource of resourceGroup.resources || []) assertFile(resource, 'web_accessible_resources');
@@ -68,6 +69,7 @@ function runReleaseGate() {
   for (const stylesheet of readerContent.css || []) assertFile(stylesheet, 'content_scripts.css');
   for (const required of [
     'shared/provider-core.js', 'shared/provider-v4.js', 'shared/document-provider-v1.js', 'shared/settings-schema.js', 'offscreen.html',
+    'shared/browser-model-manifest.js',
     'content/reader-bootstrap.js',
     'document-workbench.html', 'vendor/transformers/runtime-build.json',
     'vendor/transformers/LICENSE', 'vendor/transformers/ONNXRUNTIME-LICENSE',

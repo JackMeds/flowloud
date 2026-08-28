@@ -169,7 +169,7 @@ async function selectSystemProvider() {
     const saved = await chrome.storage.local.get(key);
     const current = saved[key] || {};
     const assignments = { ...(current.voiceAssignmentsByProvider || {}), 'browser-system': { narratorVoiceId: '', replyVoiceIds: [], authorVoices: {} } };
-    await chrome.storage.local.set({ [key]: { ...current, schemaVersion: 6, providerVersion: 4, activeProviderId: 'browser-system', providerId: 'browser-system', providerVoices: { ...(current.providerVoices || {}), 'browser-system': '' }, voiceAssignmentsByProvider: assignments } });
+    await chrome.storage.local.set({ [key]: { ...current, schemaVersion: 7, providerVersion: 4, activeProviderId: 'browser-system', providerId: 'browser-system', providerVoices: { ...(current.providerVoices || {}), 'browser-system': '' }, voiceAssignmentsByProvider: assignments } });
   });
 }
 await selectSystemProvider();
@@ -292,7 +292,7 @@ await worker.evaluate(async ({ baseUrl }) => {
     capabilities: { visionOcr: true, textTranslation: true, structuredOutput: true, pdfInput: false, streaming: false },
   };
   await chrome.storage.local.set({ [key]: {
-    ...(saved[key] || {}), schemaVersion: 6, aiProfiles: [profile],
+    ...(saved[key] || {}), schemaVersion: 7, aiProfiles: [profile],
     aiProfileSelections: { ocr: profile.id, translation: profile.id },
   } });
 }, { baseUrl: siteOrigin });

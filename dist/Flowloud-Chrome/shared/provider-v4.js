@@ -414,7 +414,8 @@
     const apiKey = text(config.apiKey);
     const resourceId = text(config.resourceId) || 'seed-tts-2.0';
     const appId = text(config.appId);
-    const configuredVoice = text(config.voice);
+    const configuredVoices = (Array.isArray(config.voiceIds) ? config.voiceIds : [config.voice]).map(text).filter(Boolean);
+    const configuredVoice = configuredVoices[0] || '';
     let parsed;
     try { parsed = new URL(text(config.baseUrl) || 'https://openspeech.bytedance.com'); }
     catch (_) { throw new ProviderError('invalid_base_url', '豆包语音 Base URL 无效。', { providerId: 'doubao-tts', stage: 'configure', retryable: false }); }
@@ -489,7 +490,7 @@
       id: 'doubao-tts', version: PROVIDER_VERSION,
       capabilities: { health: true, voices: true, synthesize: true, stream: false, cancel: false, safeRate: true },
       health: async (operation) => success('doubao-tts', {}, operation, { ok: Boolean(apiKey && configuredVoice), ready: Boolean(apiKey && configuredVoice), resourceId }),
-      voices: async () => configuredVoice ? [{ id: voiceId('doubao-tts', configuredVoice), voiceId: configuredVoice, name: configuredVoice, label: configuredVoice, providerId: 'doubao-tts' }] : [],
+      voices: async () => configuredVoices.map((voice) => ({ id: voiceId('doubao-tts', voice), voiceId: voice, name: voice, label: voice, providerId: 'doubao-tts' })),
       synthesize,
     });
   }

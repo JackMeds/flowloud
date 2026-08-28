@@ -266,10 +266,20 @@ export function DocumentWorkbench() {
 
   const translatedById = new Map((translation?.blocks || []).map((block) => [block.id, block]));
   const readAllText = (document?.blocks || []).map((block) => translatedById.get(block.id)?.translatedText || block.text).filter(Boolean).join('\n');
+  const selectedPdfPages = pdfPages.filter((page) => page.selected);
+  const needsOcr = sourceKind === 'image' || sourceKind === 'screenshot'
+    || (sourceKind === 'pdf' && selectedPdfPages.some((page) => !page.text));
+  const needsTranslation = workflow !== 'ocr';
+  const missingServices = [needsOcr && !ocrProfile ? 'OCR' : '', needsTranslation && !translationProfile ? '翻译' : ''].filter(Boolean);
+  const inputReady = sourceKind === 'page' ? sourceTabId != null
+    : sourceKind === 'text' ? Boolean(inputText.trim())
+      : sourceKind === 'image' || sourceKind === 'screenshot' ? Boolean(imageDataUrl)
+        : selectedPdfPages.length > 0;
+  const openAiSettings = () => void bridge.openSettingsTab('ai').catch((error: unknown) => setStatus(errorMessage(error)));
 
   return (
     <main className="fl-document-workbench" aria-label="文档与翻译工作台">
-      <header className="fl-document-header"><div className="fl-workspace-brand"><img src="/assets/flowloud-mark.svg" alt="" /><div><strong>文档与翻译工作台</strong><span>网页、截图、图片和 PDF · 识别、翻译并朗读</span></div></div><Button className="fl-secondary-button" onPress={() => bridge.openOptions()}><Settings2 aria-hidden="true" />配置 AI 服务</Button></header>
+      <header className="fl-document-header"><div className="fl-workspace-brand"><img src="/assets/flowloud-mark.svg" alt="" /><div><strong>文档与翻译工作台</strong><span>网页、截图、图片和 PDF · 识别、翻译并朗读</span></div></div><Button className="fl-secondary-button" onPress={openAiSettings}><Settings2 aria-hidden="true" />配置 AI 服务</Button></header>
       <div className="fl-document-layout">
         <aside className="fl-document-inputs">
           <section><h2>1. 选择输入</h2><div className="fl-source-buttons">
@@ -286,7 +296,8 @@ export function DocumentWorkbench() {
           {sourceKind === 'pdf' ? <><label className="fl-upload-drop"><FileText aria-hidden="true" /><strong>选择 PDF</strong><span>文字层在浏览器本地提取；仅扫描页需要 OCR。</span><input type="file" accept="application/pdf,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void loadPdf(file).catch((error) => setStatus(errorMessage(error))); }} /></label>{pdfPages.length ? <div className="fl-pdf-pages"><div><strong>{pdfTitle}</strong><span>选择本次处理页码</span></div>{pdfPages.map((page) => <label key={page.page}><input type="checkbox" checked={page.selected} onChange={(event) => setPdfPages((current) => current.map((item) => item.page === page.page ? { ...item, selected: event.target.checked } : item))} /><span>第 {page.page} 页</span><em>{page.text ? '本地文字层' : '需要 OCR'}</em></label>)}</div> : null}</> : null}
           <section><h2>2. 选择流程</h2><div className="fl-workflow-buttons"><Button className={workflow === 'ocr' ? 'is-active' : ''} onPress={() => setWorkflow('ocr')}><ScanText aria-hidden="true" />仅识别</Button><Button className={workflow === 'translate' ? 'is-active' : ''} onPress={() => setWorkflow('translate')}><Languages aria-hidden="true" />仅翻译</Button><Button className={workflow === 'ocr-translate' ? 'is-active' : ''} onPress={() => setWorkflow('ocr-translate')}><Check aria-hidden="true" />识别并翻译</Button></div></section>
           <div className="fl-document-profile-grid"><label><span>OCR 服务</span><select value={ocrProfileId} onChange={(event) => setOcrProfileId(event.target.value)}><option value="">未选择</option>{profiles.filter((profile) => profile.capabilities.visionOcr).map((profile) => <option key={profile.id} value={profile.id}>{profile.label}</option>)}</select></label><label><span>翻译服务</span><select value={translationProfileId} onChange={(event) => setTranslationProfileId(event.target.value)}><option value="">未选择</option>{profiles.filter((profile) => profile.capabilities.textTranslation).map((profile) => <option key={profile.id} value={profile.id}>{profile.label}</option>)}</select></label><label><span>源语言</span><input value={sourceLanguage} onChange={(event) => setSourceLanguage(event.target.value)} /></label><label><span>目标语言</span><input value={targetLanguage} onChange={(event) => setTargetLanguage(event.target.value)} /></label></div>
-          <div className="fl-document-run"><Button isDisabled={busy} className="fl-primary-button" onPress={run}>{busy ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Play aria-hidden="true" />}{busy ? '处理中…' : '开始处理'}</Button>{busy ? <Button className="fl-danger-button" onPress={cancel}><X aria-hidden="true" />取消</Button> : null}</div>
+          {missingServices.length ? <div className="fl-document-prerequisite"><Settings2 aria-hidden="true" /><span><h3>先完成服务配置</h3><small>还需要配置{missingServices.join('和')}服务；配置完成后再开始，避免进入可预见的失败。</small></span><Button onPress={openAiSettings}>去配置</Button></div> : null}
+          <div className="fl-document-run">{missingServices.length ? <Button className="fl-primary-button" onPress={openAiSettings}><Settings2 aria-hidden="true" />配置{missingServices.join('和')}服务</Button> : <Button isDisabled={busy || !inputReady} className="fl-primary-button" onPress={run}>{busy ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Play aria-hidden="true" />}{busy ? '处理中…' : inputReady ? '开始处理' : '请先选择输入'}</Button>}{busy ? <Button className="fl-danger-button" onPress={cancel}><X aria-hidden="true" />取消</Button> : null}</div>
           <div className="fl-document-status" role="status" aria-live="polite"><span>{status}</span>{progress.total ? <progress max={progress.total} value={progress.current} /> : null}</div>
         </aside>
 

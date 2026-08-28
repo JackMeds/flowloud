@@ -52,19 +52,25 @@ const result = await esbuild.build({
   stdin: {
     contents: `
       import { KokoroTTS } from './dist/kokoro.js';
-      import { AutoTokenizer, StyleTextToSpeech2Model, env } from '@huggingface/transformers';
+      import { AutoTokenizer, StyleTextToSpeech2Model, env, LogLevel } from '@huggingface/transformers';
       export async function flowloudCreateKokoro(repoId, options = {}) {
         const offline = options.flowloudOffline === true;
+        // The bundled model has a known Transformers.js architecture lookup
+        // warning even though the explicitly selected StyleTextToSpeech2Model
+        // loads correctly. Keep real errors visible while avoiding a noisy
+        // warning on every model start.
+        env.logLevel = LogLevel.ERROR;
         env.allowRemoteModels = true;
         env.allowLocalModels = false;
         env.useBrowserCache = false;
         env.useCustomCache = true;
         const modelCache = await caches.open(options.cacheKey);
         env.customCache = modelCache;
-        env.remoteHost = 'https://huggingface.co/';
+        env.remoteHost = options.remoteHost || 'https://huggingface.co/';
+        env.remotePathTemplate = options.remotePathTemplate || '{model}/resolve/{revision}/';
         env.fetch = offline
           ? async () => { throw Object.assign(new Error('Kokoro 离线校验期间禁止访问远程模型。'), { code: 'offline_cache_miss' }); }
-          : globalThis.fetch.bind(globalThis);
+          : (options.fetch || globalThis.fetch.bind(globalThis));
         if (env.backends?.onnx?.wasm) env.backends.onnx.wasm.wasmPaths = options.wasmPaths;
         const shared = {
           revision: options.revision,
@@ -79,8 +85,10 @@ const result = await esbuild.build({
         // Transformers.js 4.2 probes tokenizer metadata without forwarding the
         // requested revision. Persist a main-key alias containing the pinned
         // revision response so a cold offline restart can resolve that probe.
-        const pinnedTokenizerConfig = 'https://huggingface.co/' + repoId + '/resolve/' + encodeURIComponent(options.revision) + '/tokenizer_config.json';
-        const mainTokenizerConfig = 'https://huggingface.co/' + repoId + '/resolve/main/tokenizer_config.json';
+        const remoteBase = String(options.remoteHost || env.remoteHost).replace(/\\/$/, '');
+        const remotePath = String(options.remotePathTemplate || env.remotePathTemplate).replace('{model}', repoId).replace('{revision}', encodeURIComponent(options.revision));
+        const pinnedTokenizerConfig = remoteBase + '/' + remotePath.replace(/\\/$/, '') + '/tokenizer_config.json';
+        const mainTokenizerConfig = remoteBase + '/' + repoId + '/resolve/main/tokenizer_config.json';
         if (!(await modelCache.match(mainTokenizerConfig))) {
           const pinnedResponse = await modelCache.match(pinnedTokenizerConfig);
           if (pinnedResponse) await modelCache.put(mainTokenizerConfig, pinnedResponse);
@@ -89,16 +97,22 @@ const result = await esbuild.build({
         const callable = async (input, runOptions = {}) => {
           const voice = String(runOptions.speaker_embeddings || runOptions.voice || 'zf_001');
           const speed = Number(runOptions.speed || 1);
-          const originalFetch = globalThis.fetch;
+          const originalFetch = options.fetch || globalThis.fetch.bind(globalThis);
           globalThis.fetch = async (resource, init) => {
             const url = new URL(typeof resource === 'string' ? resource : resource.url, globalThis.location?.href);
             if (url.pathname.startsWith('/kokoro/voices/')) {
               const name = url.pathname.split('/').at(-1);
               const remoteVoiceUrl = options.voicePath + '/' + name;
-              const cachedVoice = await (await caches.open('kokoro-voices')).match(remoteVoiceUrl);
+              const cachedVoice = await (await caches.open(options.voiceCacheName || 'kokoro-voices')).match(remoteVoiceUrl);
               if (cachedVoice) return cachedVoice;
               if (offline) throw Object.assign(new Error('Kokoro 音色缓存缺失。'), { code: 'offline_cache_miss' });
-              return originalFetch(remoteVoiceUrl, init);
+              const downloadedVoice = await originalFetch(remoteVoiceUrl, init);
+              if (downloadedVoice?.ok && downloadedVoice.clone) {
+                try {
+                  await (await caches.open(options.voiceCacheName || 'kokoro-voices')).put(remoteVoiceUrl, downloadedVoice.clone());
+                } catch (_) { /* Cache quota or opaque responses must not block playback. */ }
+              }
+              return downloadedVoice;
             }
             return originalFetch(resource, init);
           };
@@ -161,7 +175,10 @@ const metadata = {
   transformersVersion: transformersPackage.version, onnxRuntimeVersion: onnxPackage.version,
   phonemizerVersion: phonemizerPackage.version, pinyinProVersion: pinyinPackage.version,
   modelRepo: 'onnx-community/Kokoro-82M-v1.1-zh-ONNX',
-  modelRevision: '6cc0f0d2ebe369a68b0df87c2b65c1af8c0ac3e3',
+  modelSource: 'modelscope',
+  modelRevision: '71bfd8ce077d1f8c70a183704da7c55c1c4cded6',
+  modelScopeRevision: '71bfd8ce077d1f8c70a183704da7c55c1c4cded6',
+  huggingFaceRevision: '6cc0f0d2ebe369a68b0df87c2b65c1af8c0ac3e3',
   bundledVoices: [], runtimeAssets, sha256: digest,
 };
 await fs.writeFile(path.join(vendorRoot, 'runtime-build.json'), `${JSON.stringify(metadata, null, 2)}\n`, 'utf8');

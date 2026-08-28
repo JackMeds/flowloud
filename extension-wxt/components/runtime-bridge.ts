@@ -1,4 +1,4 @@
-import { demoPopupModel, type ModelDownloadState, type PopupAuthor, type PopupModel, type PopupSettings, type PopupVoice, type ProviderState, type ReaderStatus } from './model';
+import { runtimeDefaultSettings, type ModelDownloadState, type PopupAuthor, type PopupModel, type PopupSettings, type PopupVoice, type ProviderState, type ReaderStatus, type SettingsSection } from './model';
 import type { DocumentArtifact, TranslationArtifact } from './document-model';
 
 export interface RuntimeError {
@@ -16,6 +16,7 @@ export interface RuntimeEnvelope {
   playback?: Record<string, unknown>;
   result?: Record<string, unknown>;
   secrets?: Record<string, { present?: boolean; remembered?: boolean }>;
+  statuses?: Array<Record<string, unknown>>;
   [key: string]: unknown;
 }
 
@@ -32,7 +33,7 @@ export interface RuntimeContext extends RuntimeEnvelope {
 
 interface ChromeRuntimeLike {
   sendMessage: (message: Record<string, unknown>) => Promise<RuntimeEnvelope>;
-  openOptionsPage: () => Promise<void>;
+  getURL?: (path: string) => string;
   onMessage?: {
     addListener: (listener: (message: Record<string, unknown>) => void) => void;
     removeListener: (listener: (message: Record<string, unknown>) => void) => void;
@@ -46,6 +47,14 @@ interface ChromeLike {
     request: (permissions: { origins: string[] }) => Promise<boolean>;
   };
   tabs?: { create: (options: { url: string }) => Promise<unknown> };
+  action?: { openPopup?: () => Promise<void> };
+  storage?: {
+    session?: {
+      get: (key: string) => Promise<Record<string, unknown>>;
+      set: (value: Record<string, unknown>) => Promise<void>;
+      remove: (key: string) => Promise<void>;
+    };
+  };
 }
 
 declare const chrome: ChromeLike;
@@ -69,7 +78,7 @@ function readerStatus(value: unknown): ReaderStatus {
 }
 
 function popupSettings(raw: Record<string, unknown>): PopupSettings {
-  return { ...demoPopupModel.settings, ...raw } as PopupSettings;
+  return { ...runtimeDefaultSettings, ...raw } as PopupSettings;
 }
 
 function popupAuthors(raw: unknown): PopupAuthor[] {
@@ -87,6 +96,10 @@ function popupAuthors(raw: unknown): PopupAuthor[] {
   }).filter((author) => author.id);
 }
 
+function displayVoiceLabel(value: unknown) {
+  return String(value || '').trim().replace(/^(?:browser-system|browser-model|local-service|openai-compatible|doubao-tts):/u, '');
+}
+
 function popupModel(context: RuntimeContext, snapshot: Record<string, unknown>, settings: PopupSettings, rawSettings: Record<string, unknown>): PopupModel {
   const current = snapshot.current && typeof snapshot.current === 'object'
     ? snapshot.current as Record<string, unknown> : {};
@@ -97,8 +110,8 @@ function popupModel(context: RuntimeContext, snapshot: Record<string, unknown>, 
   const global = context.globalPlayback && typeof context.globalPlayback === 'object'
     ? context.globalPlayback : {};
   const providerId = settings.activeProviderId;
-  const providerVoices = rawSettings.providerVoices && typeof rawSettings.providerVoices === 'object'
-    ? rawSettings.providerVoices as Record<string, unknown> : {};
+  const assignments = rawSettings.voiceAssignmentsByProvider && typeof rawSettings.voiceAssignmentsByProvider === 'object'
+    ? rawSettings.voiceAssignmentsByProvider as Record<string, Record<string, unknown>> : {};
   const providerSettings = rawSettings.providerSettings && typeof rawSettings.providerSettings === 'object'
     ? rawSettings.providerSettings as Record<string, Record<string, unknown>> : {};
   const providerConfig = providerSettings[providerId] || {};
@@ -117,7 +130,7 @@ function popupModel(context: RuntimeContext, snapshot: Record<string, unknown>, 
     message: String(snapshot.error || ''),
     authors: popupAuthors(context.authors),
     settings,
-    selectedVoiceId: String(providerVoices[providerId] || ''),
+    selectedVoiceId: String(assignments[providerId]?.narratorVoiceId || ''),
     voiceLoadState: 'idle',
     providerBaseUrl: providerId === 'local-service' ? String(providerConfig.baseUrl || 'http://127.0.0.1:7811') : '',
     providerDevice: providerId === 'browser-model' ? String(cacheMetadata.device || providerConfig.device || '') : '',
@@ -166,6 +179,11 @@ export class RuntimeBridge {
     const snapshot = context.snapshot && typeof context.snapshot === 'object'
       ? context.snapshot : await this.send({ type: 'reader:snapshot:get', tabId: context.tabId });
     const model = popupModel(context, snapshot as Record<string, unknown>, settings, rawSettings);
+    const readiness = await this.providerStates(rawSettings).catch(() => null);
+    if (readiness) {
+      model.providerStates = readiness.providers;
+      model.modelState = readiness.model;
+    }
     model.persistentSiteAccess = await this.hasPageOrigin(context);
     if (model.persistentSiteAccess) await this.registerPageOrigin(context).catch(() => {});
     return {
@@ -212,9 +230,17 @@ export class RuntimeBridge {
       const id = rawId.includes(':') ? rawId : `${providerId}:${rawId}`;
       return {
         id,
-        label: String(source.label || source.name || source.voiceId || id.replace(/^[^:]+:/, '')),
+        label: displayVoiceLabel(source.label || source.name || source.voiceId || id.replace(/^[^:]+:/, '')) || id.replace(/^[^:]+:/, ''),
         lang: String(source.lang || ''),
         eventTypes: Array.isArray(source.eventTypes) ? source.eventTypes.map(String) : [],
+        language: String(source.language || source.lang || ''),
+        gender: String(source.gender || ''),
+        characteristic: String(source.characteristic || source.style || source.description || ''),
+        description: String(source.description || ''),
+        style: String(source.style || ''),
+        cached: source.cached == null ? null : Boolean(source.cached),
+        source: String(source.source || ''),
+        sizeBytes: Number(source.sizeBytes) || undefined,
       };
     }).filter((voice) => voice.id && voice.label);
   }
@@ -268,7 +294,11 @@ export class RuntimeBridge {
   }
 
   async saveSettings(settings: Record<string, unknown>) {
-    return this.send({ type: 'settings:set', settings: { ...settings, schemaVersion: 6, providerVersion: 4, interactionVersion: 3 } });
+    return this.send({ type: 'settings:set', settings: { ...settings, schemaVersion: 8, providerVersion: 4, interactionVersion: 3 } });
+  }
+
+  async assignVoices(providerId: string, assignment: { narratorVoiceId?: string; replyVoiceIds?: string[]; authorVoices?: Record<string, string> }) {
+    return this.send({ type: 'settings:voice:assign', providerId, assignment });
   }
 
   async resetSettings() {
@@ -288,23 +318,37 @@ export class RuntimeBridge {
     return this.send({ type: 'settings:secret:set', secretId: `ai:${profileId}`, secret, remember });
   }
 
-  async testLocalService() {
-    return this.send({ type: 'provider:test', providerId: 'local-service', requestId: `local-health-${Date.now()}` });
+  async testProvider(providerId: string, voiceId = '', previewText = '你好，这是 Flowloud 语音连接测试。') {
+    return this.send({ type: 'provider:test', providerId, voiceId, previewText, requestId: `provider-test-${providerId}-${Date.now()}` });
   }
 
-  async auditionOnline(previewText: string) {
+  async auditionVoice(providerId: string, voiceId: string, previewText: string) {
+    if (providerId === 'browser-system') {
+      return this.send({
+        type: 'tts:synthesize', providerId, requestId: `browser-system-audition-${Date.now()}`,
+        clientId: 'settings-audition', request: { input: previewText, voice: voiceId },
+      });
+    }
+    if (providerId === 'local-service' || providerId === 'openai-compatible' || providerId === 'doubao-tts') {
+      return this.testProvider(providerId, voiceId, previewText);
+    }
+    const requestId = `browser-model-audition-${Date.now()}`;
     return this.send({
-      type: 'provider:test', providerId: 'openai-compatible', previewText,
-      requestId: `online-audition-${Date.now()}`,
+      type: 'tts:synthesize', providerId, requestId,
+      clientId: 'browser-model-audition', playbackId: requestId,
+      // An audition is materialized for this settings page and must not claim
+      // or replace the reader's global playback session.
+      prefetch: true,
+      request: { input: previewText, voice: voiceId, requestId, playbackId: requestId },
     });
   }
 
-  async auditionDoubao(previewText: string) {
-    return this.send({ type: 'provider:test', providerId: 'doubao-tts', previewText, requestId: `doubao-audition-${Date.now()}` });
-  }
-
-  async modelAction(action: 'info' | 'download' | 'verify' | 'cancel' | 'delete', requestId?: string) {
-    return this.send({ type: `provider:model:${action}`, requestId: requestId || `model-${action}-${Date.now()}` });
+  async modelAction(
+    action: 'info' | 'download' | 'verify' | 'cancel' | 'delete' | 'voice-list' | 'voice-info' | 'voice-download' | 'voice-repair' | 'voice-delete',
+    requestId?: string,
+    details: Record<string, unknown> = {},
+  ) {
+    return this.send({ ...details, type: `provider:model:${action}`, requestId: requestId || `model-${action}-${Date.now()}` });
   }
 
   onModelProgress(listener: (progress: Record<string, unknown>, requestId: string) => void) {
@@ -339,8 +383,8 @@ export class RuntimeBridge {
     return { generatedAt: new Date().toISOString(), settings: settings.settings || {}, playback: playback.playback || {}, audio };
   }
 
-  async openVoiceStudio() {
-    return this.send({ type: 'voice:studio:open' });
+  async openVoiceStudio(providerId = 'local-service') {
+    return this.send({ type: 'voice:studio:open', providerId });
   }
 
   async openShortcuts() {
@@ -429,19 +473,34 @@ export class RuntimeBridge {
     return response;
   }
 
-  async requestModelOrigins() {
+  async requestModelOrigins(source: string = 'modelscope') {
     const api = runtimeChrome();
     if (!api?.permissions) return true;
-    return api.permissions.request({ origins: [
-      'https://huggingface.co/*', 'https://*.huggingface.co/*', 'https://*.hf.co/*',
-    ] });
+    const origins = String(source).toLowerCase() === 'huggingface'
+      ? ['https://huggingface.co/*', 'https://*.huggingface.co/*', 'https://*.hf.co/*']
+      // ModelScope redirects large LFS artifacts to cdn-lfs-*.modelscope.cn.
+      // Request the provider's subdomains together so a user-authorized model
+      // download is not interrupted by the redirect target.
+      : ['https://www.modelscope.cn/*', 'https://modelscope.cn/*', 'https://*.modelscope.cn/*'];
+    return api.permissions.request({ origins });
   }
 
   async focusSource() {
     return this.send({ type: 'playback:source:focus' });
   }
 
+  async openSettingsTab(section: SettingsSection = 'voice', providerId = '') {
+    const api = runtimeChrome();
+    if (!api?.tabs?.create) throw new globalThis.Error('当前浏览器无法打开独立设置页。');
+    const path = api.runtime?.getURL?.('options-react.html') || 'options-react.html';
+    const query = new URLSearchParams({ section });
+    if (providerId) query.set('provider', providerId);
+    await api.tabs.create({ url: `${path}${path.includes('?') ? '&' : '?'}${query.toString()}` });
+  }
+
   async providerStates(settings: Record<string, unknown>): Promise<{ providers: ProviderState[]; model: ModelDownloadState }> {
+    const statusResponse: RuntimeEnvelope = await this.send({ type: 'provider:status:list' }).catch(() => ({}));
+    const persistedStatuses = Array.isArray(statusResponse.statuses) ? statusResponse.statuses as Array<Record<string, unknown>> : [];
     const browserModel = settings.providerSettings && typeof settings.providerSettings === 'object'
       ? (settings.providerSettings as Record<string, Record<string, unknown>>)['browser-model'] || {} : {};
     const local = settings.providerSettings && typeof settings.providerSettings === 'object'
@@ -453,25 +512,59 @@ export class RuntimeBridge {
     const infoResponse: RuntimeEnvelope = await this.send({ type: 'provider:model:info' }).catch(() => ({}));
     const info = (infoResponse.result && typeof infoResponse.result === 'object' ? infoResponse.result : infoResponse) as Record<string, unknown>;
     const state = String(info.state || (info.ready ? 'ready' : info.cached ? 'available-unverified' : 'missing')) as ModelDownloadState['state'];
+    const infoError = info.error && typeof info.error === 'object' ? info.error as Record<string, unknown> : {};
     const model: ModelDownloadState = {
       state, ready: info.ready === true, cached: info.cached === true,
       cacheId: String(info.cacheId || ''), device: String(info.device || ''), fallbackReason: String(info.fallbackReason || ''), verifiedAt: String(info.verifiedAt || ''),
+      source: String(info.source || browserModel.source || 'modelscope'),
+      sourceLabel: String(info.sourceLabel || (String(info.source || browserModel.source || 'modelscope') === 'huggingface' ? 'Hugging Face（手动备用）' : '魔搭社区')),
+      variant: String(info.variant || browserModel.variant || 'auto'),
+      variantLabel: String(info.variantLabel || ''),
+      estimatedBytes: Number(info.estimatedBytes) || undefined,
+      concurrency: Number(info.concurrency) || Number(browserModel.downloadConcurrency) || 4,
+      voiceCount: Number(info.voiceCount) || 0,
+      starterVoiceIds: Array.isArray(info.starterVoiceIds) ? info.starterVoiceIds.map(String) : [],
+      voiceCacheRegistry: browserModel.voiceCacheRegistry && typeof browserModel.voiceCacheRegistry === 'object'
+        ? browserModel.voiceCacheRegistry as Record<string, Record<string, unknown>> : {},
+      message: String(infoError.message || info.message || ''),
     };
+    const activeProviderId = String(settings.activeProviderId || settings.providerId || 'browser-system');
+    const localConfigured = Boolean(local.configured === true || local.lastTestedAt
+      || (String(local.baseUrl || '') && String(local.baseUrl) !== 'http://127.0.0.1:7811')
+      || String(local.adapterId || '') !== 'flowloud-qwen');
+    const onlineConfigured = online.configured === true || Boolean(online.lastTestedAt)
+      || Boolean(online.baseUrl && online.model && online.voice);
+    const doubaoConfigured = doubao.configured === true || Boolean(doubao.lastTestedAt)
+      || Boolean(doubao.appId && doubao.voice);
+    const browserModelConfigured = model.ready || model.cached || model.state === 'corrupt' || activeProviderId === 'browser-model';
+    const fallbackProviders: ProviderState[] = [
+      { providerId: 'browser-system', ready: true, configured: true, usable: true, status: 'ready', connectionState: 'connected', message: '浏览器提供 · 正文不离开设备' },
+      { providerId: 'browser-model', ready: model.ready, configured: browserModelConfigured, usable: model.ready, sourceLabel: model.sourceLabel, status: model.ready ? 'ready' : model.state === 'corrupt' ? 'error' : browserModelConfigured ? 'unavailable' : 'unconfigured', connectionState: model.ready ? 'connected' : model.state === 'corrupt' ? 'failed' : browserModelConfigured ? 'unavailable' : 'unconfigured', stage: 'model', message: model.ready ? `离线校验通过 · ${model.sourceLabel || '魔搭社区'} · ${(model.device || 'wasm').toUpperCase()}${model.fallbackReason ? ` · WebGPU 回退：${model.fallbackReason}` : ''}` : model.state === 'corrupt' ? `缓存损坏（${model.sourceLabel || '魔搭社区'}），需要重新下载或修复` : browserModelConfigured ? '尚未通过离线校验' : '尚未下载浏览器模型' },
+      { providerId: 'local-service', ready: false, configured: localConfigured, usable: false, status: localConfigured ? 'permission-required' : 'unconfigured', connectionState: localConfigured ? 'unavailable' : 'unconfigured', stage: 'configuration', message: localConfigured ? `${String(local.adapterId || 'flowloud-qwen')} · 待授权与连接检测` : '尚未配置本地地址' },
+      { providerId: 'openai-compatible', ready: false, configured: onlineConfigured, usable: false, status: onlineConfigured ? 'permission-required' : 'unconfigured', connectionState: onlineConfigured ? 'unavailable' : 'unconfigured', stage: 'configuration', message: onlineConfigured ? '已配置 · 待用户主动验证' : '需要 API 地址、模型、音色与密钥' },
+      { providerId: 'doubao-tts', ready: false, configured: doubaoConfigured, usable: false, status: doubaoConfigured ? 'permission-required' : 'unconfigured', connectionState: doubaoConfigured ? 'unavailable' : 'unconfigured', stage: 'configuration', message: doubaoConfigured ? '已配置 · 待用户主动验证' : '需要 App ID、音色与 API Key' },
+    ];
+    const providers = fallbackProviders.map((fallback) => {
+      const persisted = persistedStatuses.find((item) => String(item.providerId) === fallback.providerId);
+      if (!persisted) return fallback;
+      const connected = persisted.connectionState === 'connected';
+      const failed = persisted.connectionState === 'failed';
+      return {
+        ...fallback,
+        ...persisted,
+        ready: connected,
+        usable: connected || fallback.usable,
+        status: connected ? 'ready' : failed ? 'error' : fallback.status,
+        connectionState: String(persisted.connectionState || fallback.connectionState) as ProviderState['connectionState'],
+        message: String(persisted.message || fallback.message),
+      } as ProviderState;
+    });
     return {
       model,
-      providers: [
-        { providerId: 'browser-system', ready: true, status: 'ready', message: '浏览器提供 · 正文不离开设备' },
-        { providerId: 'browser-model', ready: model.ready, status: model.ready ? 'ready' : model.state === 'corrupt' ? 'error' : 'unavailable', message: model.ready ? `离线校验通过 · ${(model.device || 'wasm').toUpperCase()}${model.fallbackReason ? ` · WebGPU 回退：${model.fallbackReason}` : ''}` : model.state === 'corrupt' ? '缓存损坏，需要重新下载' : '尚未通过离线校验' },
-        { providerId: 'local-service', ready: Boolean(local.baseUrl), status: local.baseUrl ? 'permission-required' : 'unconfigured', message: local.baseUrl ? `${String(local.adapterId || 'flowloud-qwen')} · 使用时检查权限` : '尚未配置本地地址' },
-        { providerId: 'openai-compatible', ready: Boolean(online.baseUrl && online.model), status: online.baseUrl && online.model ? 'permission-required' : 'unconfigured', message: online.baseUrl && online.model ? '已配置 · 试听时请求权限' : '需要 API 地址、模型与密钥' },
-        { providerId: 'doubao-tts', ready: Boolean(doubao.appId && doubao.voice), status: doubao.appId && doubao.voice ? 'permission-required' : 'unconfigured', message: doubao.appId && doubao.voice ? '豆包原生协议已配置 · 试听时请求权限' : '需要 App ID、音色与 API Key' },
-      ],
+      providers,
     };
   }
 
-  openOptions() {
-    return this.runtime?.openOptionsPage();
-  }
 }
 
 export function createRuntimeBridge() {

@@ -1,19 +1,19 @@
 {
-  "generatedAt": "2026-08-24T15:29:26.703Z",
+  "generatedAt": "2026-08-28T00:52:42.793Z",
   "files": [
     "popup-react.html",
     "options-react.html",
     "document-workbench.html",
-    "chunks/components-7dfKkQqV.js",
-    "chunks/document-model-Cc277Wn2.js",
-    "chunks/document-workbench-DH36LZ9g.js",
-    "chunks/FormControls-COAhTQfG.js",
-    "chunks/options-UxvEglqy.js",
-    "chunks/pdf-DPu73BFV.js",
-    "chunks/play-RdGD7EWA.js",
-    "chunks/popup-YsgbAHw2.js",
+    "chunks/components-DRRmXjYb.js",
+    "chunks/document-model-zLLC8j2h.js",
+    "chunks/document-workbench-DMM7jpdX.js",
+    "chunks/file-text-D9LapgPk.js",
+    "chunks/options-Dc5_eUyQ.js",
+    "chunks/pdf-3ms13LCm.js",
+    "chunks/popup-OjBpg5Z-.js",
+    "chunks/provider-registry-dp8eVdA8.js",
     "chunks/rolldown-runtime-CbXtAM7H.js",
-    "assets/components-B47jorSM.css",
+    "assets/components-CPmqpHcS.css",
     "assets/pdf.worker-Dg_VPFYK.mjs"
   ]
 }

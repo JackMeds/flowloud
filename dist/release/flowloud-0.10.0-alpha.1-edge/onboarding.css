@@ -11,6 +11,13 @@ h2 { margin: 2px 0 7px; font-size: 17px; }
 .steps p { margin: 0; color: var(--flow-muted); line-height: 23px; }
 .steps strong { color: var(--flow-ink); }
 footer { display: flex; flex-wrap: wrap; gap: 10px; padding-top: 25px; }
+.orb-guide { display: flex; align-items: center; gap: 14px; margin-top: 24px; padding: 14px 16px; border: 1px solid #bfdbfe; border-radius: 14px; background: #eff6ff; }
+.orb-guide img { width: 44px; height: 44px; border-radius: 50%; animation: onboarding-orb 900ms ease-in-out 2 alternate; }
+.orb-guide span { display: grid; gap: 3px; }
+.orb-guide strong { font-size: 14px; }
+.orb-guide small { color: var(--flow-muted); font-size: 12px; }
+@keyframes onboarding-orb { to { transform: translateY(-2px) scale(1.04); box-shadow: 0 8px 20px rgba(37,99,235,.22); } }
+@media (prefers-reduced-motion: reduce) { .orb-guide img { animation: none; } }
 button { min-height: 44px; padding: 0 17px; border: 1px solid var(--flow-line); border-radius: var(--flow-radius); color: var(--flow-ink); background: var(--flow-paper-raised); }
 #start { border-color: var(--flow-accent); color: #fff; background: var(--flow-accent); }
 @media (max-width: 520px) { main { width: min(100% - 28px, 780px); } .steps li { grid-template-columns: 34px 1fr; gap: 11px; } footer button { width: 100%; } }

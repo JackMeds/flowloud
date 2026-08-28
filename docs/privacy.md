@@ -9,7 +9,7 @@ Flowloud 不含遥测、广告或后台数据收集。为使悬浮播放器在�
 
 文档与翻译工作台只在当前页面会话中保留输入和结果，不建立历史数据库，也不上传 OpenAI Files。数字 PDF 的文字层在浏览器本地解析。图片、网页截图和扫描 PDF 页只有在用户选择 OCR Profile、获得该 API 的精确 origin 权限并确认本次上传类型后才会发送；翻译只发送所选文本块。原始图片、PDF、正文、参考音频和完整 API 响应不会写入日志、诊断包或设置导出。
 
-浏览器模型仅在明确确认后从固定 revision 的 Hugging Face 仓库下载 Kokoro 权重与预设音色；下载不包含网页正文。在线 API Key 与本地服务令牌默认保存在 `chrome.storage.session`，浏览器会话结束即清除；只有用户分别勾选“记住”才保存在本机扩展存储，绝不写入日志、同步存储、错误详情或设置导出。非敏感自定义 Header 会过滤 Authorization、Cookie、API Key、token 和 secret 类名称。
+浏览器模型仅在明确确认后从固定 revision 的魔搭社区（ModelScope）下载 Kokoro 权重与按需预设音色；Hugging Face 只有在用户手动选择备用来源时才会请求。下载不包含网页正文。在线 API Key 与本地服务令牌默认保存在 `chrome.storage.session`，浏览器会话结束即清除；只有用户分别勾选“记住”才保存在本机扩展存储，绝不写入日志、同步存储、错误详情或设置导出。非敏感自定义 Header 会过滤 Authorization、Cookie、API Key、token 和 secret 类名称。
 
 音频导入默认跳过在线识别。用户明确允许后，提取的 5–15 秒片段才会发送给 Microsoft Edge 在线语音服务识别台词。用户可以始终手动填写或留空。
 

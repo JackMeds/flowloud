@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Flowloud / 流声设置</title>
+  <title>Flowloud / 声音工作室</title>
   <link rel="stylesheet" href="design-system.css">
   <link rel="stylesheet" href="voice-studio.css?v=0.9.4">
 </head>
@@ -14,178 +14,17 @@
         <img class="brand-logo" src="assets/flowloud-48.png" alt="">
         <div>
           <strong>Flowloud / 流声</strong>
-          <span>设置中心</span>
+          <span>声音工作室</span>
         </div>
       </div>
       <div class="app-bar-actions">
-        <nav class="settings-nav" aria-label="设置分类">
-          <button class="settings-nav-button is-active" type="button" data-settings-section="reader" aria-current="page">阅读与显示</button>
-          <button class="settings-nav-button" type="button" data-settings-section="engine">朗读引擎</button>
-          <button class="settings-nav-button" type="button" data-settings-section="voices">音色与克隆</button>
-          <button class="settings-nav-button" type="button" data-settings-section="storage">存储与数据</button>
-          <label class="settings-section-select-label">设置栏目<select id="settings-section-select"><option value="reader">阅读体验</option><option value="engine">朗读引擎</option><option value="voices">音色与克隆</option><option value="storage">存储与数据</option></select></label>
-        </nav>
-        <p id="status" class="status" role="status" aria-live="polite">设置会自动同步到所有网页</p>
+        <a class="secondary-button" href="options-react.html?section=voice&amp;provider=local-service">返回语音与音色设置</a>
+        <p id="status" class="status" role="status" aria-live="polite">声音资产保存在本机</p>
       </div>
     </div>
   </header>
 
-  <main id="storage-settings-pane" class="settings-shell settings-pane" data-settings-pane="storage" hidden>
-    <header class="studio-intro settings-intro">
-      <div><p class="kicker">STORAGE &amp; DATA</p><h1>存储与数据</h1><p>查看浏览器模型缓存和已隔离的旧 Qwen 音色。任何删除都需要你明确确认，不会在升级时静默清理。</p></div>
-    </header>
-    <section class="settings-card storage-card" aria-labelledby="model-cache-heading">
-      <div><h2 id="model-cache-heading">浏览器模型缓存</h2><p id="storage-model-summary">正在检查缓存…</p></div>
-      <ul id="storage-model-list" class="storage-list"></ul>
-    </section>
-    <section class="settings-card storage-card" aria-labelledby="legacy-data-heading">
-      <div><h2 id="legacy-data-heading">旧版数据</h2><p id="legacy-data-summary">正在检查旧版音色与音频…</p></div>
-      <div class="storage-actions"><button id="delete-legacy-voices" class="secondary-button" type="button">清理旧 Qwen 音色</button><button id="delete-all-legacy" class="danger-button" type="button">清理全部旧版数据</button></div>
-      <p id="storage-action-status" class="status" role="status" aria-live="polite"></p>
-    </section>
-  </main>
-
-  <main id="engine-settings-pane" class="settings-shell settings-pane" data-settings-pane="engine" hidden>
-    <header class="studio-intro settings-intro">
-      <div><p class="kicker">READING ENGINE</p><h1>朗读引擎</h1><p>全局只启用一个来源。系统语音无需下载；浏览器模型只在确认后下载；网页正文仅会发送给你主动选择的在线服务。</p></div>
-    </header>
-    <form id="provider-settings-form" class="settings-grid">
-      <section class="settings-card">
-        <header class="settings-card-header"><div><p class="settings-eyebrow">PROVIDER</p><h2>语音来源</h2></div></header>
-        <label class="settings-field settings-field-stack"><span><strong>当前引擎</strong><small>切换后会恢复该引擎上次使用的音色。</small></span>
-          <select name="activeProviderId">
-            <option value="browser-system">浏览器系统语音（默认）</option><option value="browser-model">浏览器下载模型</option>
-            <option value="local-service">本地服务</option><option value="openai-compatible">OpenAI 兼容在线 TTS</option><option value="doubao-tts">豆包原生 TTS（请在设置中心配置）</option>
-          </select>
-        </label>
-        <label class="settings-field settings-field-stack"><span><strong>统一速度</strong><small>支持 0.75×–2.0×；必要时自动使用完整音频安全变速。</small></span>
-          <select name="playbackRate"><option value="0.75">0.75×</option><option value="1">1.0×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2.0×</option></select>
-        </label>
-        <p id="provider-save-status" class="status" role="status" aria-live="polite">已同步</p>
-      </section>
-
-      <section class="settings-card" data-provider-panel="browser-model">
-        <header class="settings-card-header"><div><p class="settings-eyebrow">BROWSER MODEL</p><h2>浏览器模型</h2></div></header>
-        <p>浏览器端只支持固定 revision 的 Kokoro v1.1 中英模型与预设音色。权重按需缓存，不允许远程 JavaScript、<code>trust_remote_code</code> 或自定义加载代码。</p>
-        <label class="settings-field settings-field-stack"><span><strong>模型</strong></span><select name="browserModelId"><option value="kokoro-zh">Kokoro v1.1 中英</option></select></label>
-        <label class="settings-field settings-field-stack"><span><strong>Hugging Face Repo ID</strong></span><input name="browserRepoId" value="onnx-community/Kokoro-82M-v1.1-zh-ONNX" readonly></label>
-        <label class="settings-field settings-field-stack"><span><strong>Revision</strong></span><input name="browserRevision" value="6cc0f0d2ebe369a68b0df87c2b65c1af8c0ac3e3" readonly></label>
-        <label class="settings-field settings-field-stack"><span><strong>执行设备</strong></span><select name="browserDevice"><option value="webgpu">WebGPU 优先，WASM 回退</option><option value="wasm">仅 WASM</option></select></label>
-        <div class="action-row"><button id="model-download" class="dark-button" type="button">确认并下载</button><button id="model-cancel" class="text-button" type="button" hidden>取消下载</button><button id="model-delete" class="text-button" type="button">删除缓存</button></div>
-        <progress id="model-progress" max="100" value="0" hidden></progress><p id="model-status" role="status" aria-live="polite">尚未下载模型。</p>
-      </section>
-
-      <section class="settings-card" data-provider-panel="local-service">
-        <header class="settings-card-header"><div><p class="settings-eyebrow">LOCAL SERVICE</p><h2>本地语音服务</h2></div></header>
-        <p>仅允许连接本机回环地址。选择适配器后，只显示该服务明确声明的流式、取消和音色能力。</p>
-        <label class="settings-field settings-field-stack"><span><strong>适配器</strong></span><select name="localAdapter"><option value="flowloud-qwen">Flowloud Qwen</option><option value="gpt-sovits">GPT-SoVITS</option><option value="cosyvoice">CosyVoice</option><option value="openai-local">OpenAI 本地兼容</option></select></label>
-        <label class="settings-field settings-field-stack"><span><strong>Base URL</strong><small>支持 localhost、127.0.0.1、::1 的任意端口。</small></span><input name="localBaseUrl" type="url" placeholder="http://127.0.0.1:7811" autocomplete="url"></label>
-        <label class="settings-field settings-field-stack"><span><strong>访问令牌</strong><small>默认仅保留到浏览器会话结束。</small></span><input name="localClientToken" type="password" autocomplete="off"></label>
-        <label class="settings-field"><span><strong>记住令牌</strong><small>只保存在本机扩展存储中；不会进入导出与日志。</small></span><input name="rememberLocalToken" type="checkbox"></label>
-        <label class="settings-field settings-field-stack"><span><strong>模型</strong></span><input name="localModel" value="qwen3-tts-0.6b-q4" autocomplete="off"></label>
-        <div class="action-row"><button id="local-test" class="dark-button" type="button">授权并检查能力</button></div>
-        <p id="local-test-status" role="status" aria-live="polite"></p>
-      </section>
-
-      <section class="settings-card" data-provider-panel="openai-compatible">
-        <header class="settings-card-header"><div><p class="settings-eyebrow">ONLINE TTS</p><h2>OpenAI 兼容在线 TTS</h2></div></header>
-        <p>朗读文本会发送到你填写的服务。非回环地址必须使用 HTTPS，密钥默认只保留到浏览器会话结束。</p>
-        <label class="settings-field settings-field-stack"><span><strong>Base URL</strong></span><input name="onlineBaseUrl" type="url" placeholder="https://example.com" autocomplete="url"></label>
-        <label class="settings-field settings-field-stack"><span><strong>API Key</strong></span><input name="onlineApiKey" type="password" autocomplete="off"></label>
-        <label class="settings-field settings-field-stack"><span><strong>Model</strong></span><input name="onlineModel" autocomplete="off"></label>
-        <label class="settings-field settings-field-stack"><span><strong>Voice</strong></span><input name="onlineVoice" value="alloy" autocomplete="off"></label>
-        <label class="settings-field"><span><strong>记住密钥</strong><small>密钥会保存在本机扩展存储中；不要在共享设备启用。</small></span><input name="rememberApiKey" type="checkbox"></label>
-        <label class="settings-field settings-field-stack"><span><strong>试听短句</strong><small>点击试听会把这段文字发送给服务，并可能产生少量费用。</small></span><input name="onlinePreviewText" value="你好，这是 Flowloud 语音试听。" maxlength="120" autocomplete="off"></label>
-        <div class="action-row"><button id="online-test" class="dark-button" type="button">授权并试听</button></div>
-        <audio id="online-test-audio" controls hidden></audio>
-        <p id="online-test-status" role="status" aria-live="polite"></p>
-      </section>
-    </form>
-  </main>
-
-  <main id="reader-settings-pane" class="settings-shell settings-pane" data-settings-pane="reader">
-    <header class="studio-intro settings-intro">
-      <div>
-        <p class="kicker">READING EXPERIENCE</p>
-        <h1>阅读与显示</h1>
-        <p>这里集中管理正文聚焦、逐词动画和网页交互；Popup 只提供即时的快速调整入口。</p>
-      </div>
-      <button id="reset-reader-settings" class="text-button" type="button">恢复默认</button>
-    </header>
-
-    <form id="reader-settings-form" class="settings-grid">
-      <section class="settings-card" aria-labelledby="focus-title">
-        <header class="settings-card-header"><div><p class="settings-eyebrow">FOCUS</p><h2 id="focus-title">正文聚焦</h2></div></header>
-        <label class="settings-field settings-field-stack">
-          <span><strong>聚焦范围</strong><small>逐词动画始终独立，不受此项影响。</small></span>
-          <select name="readingFocus">
-            <option value="off">关闭聚焦</option>
-            <option value="line">当前行</option>
-            <option value="sentence">当前句</option>
-          </select>
-        </label>
-        <fieldset class="theme-options" data-setting-group="readingFocusStyle">
-          <legend>聚焦主题</legend>
-          <label class="theme-option"><input type="radio" name="readingFocusStyle" value="soft-glow"><span><i class="theme-swatch is-soft-glow"></i><strong>浅色光晕</strong><small>轻柔背景，适合长文</small></span></label>
-          <label class="theme-option"><input type="radio" name="readingFocusStyle" value="edge-glow"><span><i class="theme-swatch is-edge-glow"></i><strong>字体柔光</strong><small>强调字形边缘</small></span></label>
-          <label class="theme-option"><input type="radio" name="readingFocusStyle" value="paper-wash"><span><i class="theme-swatch is-paper-wash"></i><strong>淡色衬底</strong><small>类似纸张标记</small></span></label>
-          <label class="theme-option"><input type="radio" name="readingFocusStyle" value="underline-guide"><span><i class="theme-swatch is-underline-guide"></i><strong>细线导读</strong><small>最克制的提示</small></span></label>
-        </fieldset>
-      </section>
-
-      <section class="settings-card" aria-labelledby="word-title">
-        <header class="settings-card-header"><div><p class="settings-eyebrow">WORD MOTION</p><h2 id="word-title">逐词动画</h2></div></header>
-        <fieldset class="theme-options" data-setting-group="wordHighlightStyle">
-          <legend>动画主题</legend>
-          <label class="theme-option"><input type="radio" name="wordHighlightStyle" value="edge-dissolve"><span><i class="theme-swatch is-edge-dissolve"></i><strong>边缘消隐</strong><small>当前默认，清晰自然</small></span></label>
-          <label class="theme-option"><input type="radio" name="wordHighlightStyle" value="classic-glow"><span><i class="theme-swatch is-classic-glow"></i><strong>经典光晕</strong><small>稳定的发光强调</small></span></label>
-          <label class="theme-option"><input type="radio" name="wordHighlightStyle" value="aurora-tide"><span><i class="theme-swatch is-aurora-tide"></i><strong>极光底线</strong><small>颜色沿文字底部流动</small></span></label>
-          <label class="theme-option"><input type="radio" name="wordHighlightStyle" value="custom"><span><i class="theme-swatch is-custom"></i><strong>自定义</strong><small>调整颜色、光晕与速度</small></span></label>
-        </fieldset>
-        <div id="word-custom-settings" class="custom-theme-controls" hidden>
-          <label><span>主色</span><input type="color" name="wordHighlightColor"></label>
-          <label><span>光晕 <output data-output="wordHighlightGlow">48%</output></span><input type="range" name="wordHighlightGlow" min="0" max="100" step="1"></label>
-          <label><span>扫光速度 <output data-output="wordHighlightSpeed">1.0×</output></span><input type="range" name="wordHighlightSpeed" min="0.6" max="1.8" step="0.1"></label>
-        </div>
-      </section>
-
-      <section class="settings-card" aria-labelledby="interaction-title">
-        <header class="settings-card-header">
-          <div><p class="settings-eyebrow">WEB INTERACTION</p><h2 id="interaction-title">网页交互</h2></div>
-          <span class="settings-save-status">全局生效</span>
-        </header>
-        <label class="settings-field settings-row">
-          <span><strong>显示网页悬浮球</strong><small>在网页边缘保留小型播放球，可拖动吸附。</small></span>
-          <span class="settings-switch"><input type="checkbox" name="showFloatingPlayer"><span aria-hidden="true"></span></span>
-        </label>
-        <label class="settings-field settings-row">
-          <span><strong>点击正文朗读</strong><small>点击正文句子后从该处开始朗读。</small></span>
-          <span class="settings-switch"><input type="checkbox" name="clickToRead"><span aria-hidden="true"></span></span>
-        </label>
-        <label class="settings-field settings-row">
-          <span><strong>作者配音策略</strong><small>决定楼主与回复作者如何分配音色。</small></span>
-          <select name="preset">
-            <option value="op-exclusive">楼主专属</option>
-            <option value="stable-author">作者固定</option>
-            <option value="round-robin">按楼层轮换</option>
-          </select>
-        </label>
-      </section>
-
-      <section class="settings-card settings-card-wide" aria-labelledby="voices-title">
-        <header class="settings-card-header">
-          <div><p class="settings-eyebrow">VOICE ASSIGNMENT</p><h2 id="voices-title">默认音色分配</h2></div>
-          <button class="text-button" type="button" data-open-voice-studio>添加或管理音色</button>
-        </header>
-        <div class="voice-assignment-grid">
-          <label class="settings-field settings-field-stack"><span><strong>楼主 / 旁白音色</strong><small>文章正文和论坛楼主优先使用。</small></span><select name="opVoice" data-role="op-voice-select"></select></label>
-          <fieldset class="reply-voice-fieldset"><legend>回复音色池</legend><p id="reply-voice-help">未选择时使用旁白音色；不同 Provider 的分配互不混用。</p><div id="reply-voice-options" class="reply-voice-options"></div></fieldset>
-        </div>
-      </section>
-    </form>
-  </main>
-
-  <main id="voice-settings-pane" class="studio-shell settings-pane" data-settings-pane="voices" hidden>
+  <main id="voice-settings-pane" class="studio-shell" data-settings-pane="voices">
     <header class="studio-intro">
       <div>
         <p class="kicker">VOICE LIBRARY</p>
@@ -200,7 +39,7 @@
         <header class="section-bar">
           <div>
             <h2 id="create-title">创建音色</h2>
-            <p>选择麦克风录制，或一次导入多个已有音频。</p>
+            <p>选择麦克风、电脑声音录制，或一次导入多个已有音频。</p>
           </div>
           <div class="source-tabs" role="tablist" aria-label="音频来源">
             <button id="record-tab" class="source-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="record-pane" data-action="show-record" tabindex="0">麦克风</button>
@@ -209,6 +48,10 @@
         </header>
 
         <section id="record-pane" class="source-pane" role="tabpanel" aria-labelledby="record-tab">
+          <div class="record-source-options" role="group" aria-label="录音来源">
+            <button class="record-source-button is-active" type="button" data-record-source="microphone" aria-pressed="true">麦克风</button>
+            <button class="record-source-button" type="button" data-record-source="system-audio" aria-pressed="false">电脑声音</button>
+          </div>
           <div class="record-line">
             <div>
               <span class="field-caption">录音时长</span>
@@ -302,8 +145,6 @@
   <script src="shared/audio-import.js?v=0.4.5-final"></script>
   <script src="shared/transcription.js?v=0.4.5-final"></script>
   <script src="shared/voice-library.js?v=0.4.5-final"></script>
-  <script src="settings-center.js?v=0.9.4"></script>
-  <script src="provider-settings.js?v=0.9.0"></script>
   <script src="voice-studio.js?v=0.4.5-final"></script>
 </body>
 </html>

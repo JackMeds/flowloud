@@ -241,7 +241,7 @@
       const auditState = new URLSearchParams(location.search).get("audit");
       try {
         {
-        // Popup-first contract. The web control is a half-hidden 40px visual
+        // Popup-first contract. The web control keeps 32px of its 40px visual
         // orb inside a 44px active hit area;
         // the real action Popup remains the primary settings surface.
         const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -253,7 +253,7 @@
         if (!root) throw new Error("test-only Shadow DOM hook missing");
         const miniPlayer = root.querySelector('[data-role="mini-player"]');
         if (!miniPlayer) throw new Error("active-only mini player missing");
-        if (!miniPlayer.classList.contains("qr-mini-orb") || miniPlayer.dataset.miniUiVersion !== "edge-peek-v5") {
+        if (!miniPlayer.classList.contains("qr-mini-orb") || miniPlayer.dataset.miniUiVersion !== "visible-orb-v6") {
           throw new Error("floating control is not the compact orb contract");
         }
         if (!miniPlayer.classList.contains("is-visible") || miniPlayer.getAttribute("aria-hidden") !== "false" || !miniPlayer.classList.contains("is-minimized")) {
@@ -330,8 +330,8 @@
            throw new Error("floating orb is not the required 44px hit area");
          }
          const visibleOrbWidth = Math.min(window.innerWidth, minimizedRect.right) - Math.max(0, minimizedRect.left);
-         if (visibleOrbWidth < 18 * requestedZoom || visibleOrbWidth > 24 * requestedZoom || minimizedRect.top < 0 || minimizedRect.bottom > window.innerHeight) {
-           throw new Error("floating orb is not half hidden at the viewport edge");
+         if (visibleOrbWidth < 30 * requestedZoom || visibleOrbWidth > 34 * requestedZoom || minimizedRect.top < 0 || minimizedRect.bottom > window.innerHeight) {
+           throw new Error("floating orb does not retain the required visible width at the viewport edge");
          }
          if (getComputedStyle(miniPlayer.querySelector('[data-role="mini-full-controls"]')).display !== "none") {
            throw new Error("collapsed orb still exposes playback controls");

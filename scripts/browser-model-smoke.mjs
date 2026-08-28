@@ -18,7 +18,9 @@ function parseArgs(argv) {
 const MODELS = Object.freeze({
   'kokoro-zh': Object.freeze({
     repoId: 'onnx-community/Kokoro-82M-v1.1-zh-ONNX',
-    revision: '6cc0f0d2ebe369a68b0df87c2b65c1af8c0ac3e3',
+    source: 'modelscope',
+    revision: '71bfd8ce077d1f8c70a183704da7c55c1c4cded6',
+    hfRevision: '6cc0f0d2ebe369a68b0df87c2b65c1af8c0ac3e3',
     voice: 'zf_001',
     text: '你好，这是浏览器离线语音校验。',
   }),
@@ -39,7 +41,12 @@ const instrumentedRoot = path.join(profile, 'extension-e2e');
 const timeoutMs = Math.max(60_000, Number(args['timeout-minutes'] || 35) * 60_000);
 const dtype = String(args.dtype || 'fp32');
 const device = String(args.device || 'wasm');
+// Exercise the same safe default used by the extension.  Older smoke runs
+// implicitly selected q8 on WASM, which masked the fact that this model export
+// produces silent PCM for the q8/fp16 variants.
+const variant = String(args.variant || 'auto');
 if (!['wasm', 'webgpu'].includes(device)) throw new Error('Device must be wasm or webgpu.');
+if (!['auto', 'fp16', 'quantized', 'fp32'].includes(variant)) throw new Error('Variant must be auto, fp16, quantized, or fp32.');
 
 if (!args['reuse-profile']) await fs.rm(profile, { recursive: true, force: true });
 await fs.mkdir(output, { recursive: true });
@@ -50,9 +57,8 @@ const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
 // Test-only required origins avoid an unautomatable Chromium permission bubble.
 // The real release manifest retains optional origins and is checked separately.
 manifest.host_permissions = [
-  'https://huggingface.co/*',
-  'https://*.huggingface.co/*',
-  'https://*.hf.co/*',
+  'https://www.modelscope.cn/*',
+  'https://modelscope.cn/*',
 ];
 await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 
@@ -78,10 +84,12 @@ const report = {
   browser: executablePath,
   modelId,
   repoId: model.repoId,
+  source: model.source,
   revision: model.revision,
   mode,
   dtype,
   device,
+  variant,
   cancellation: null,
   download: null,
   offlineVerify: null,
@@ -119,7 +127,7 @@ async function launch() {
 }
 
 async function configure(page) {
-  const response = await page.evaluate(async ({ modelId: selectedId, selected, selectedDtype, selectedDevice }) => {
+  const response = await page.evaluate(async ({ modelId: selectedId, selected, selectedDtype, selectedDevice, selectedVariant }) => {
     const loaded = await chrome.runtime.sendMessage({ type: 'settings:get' });
     const settings = loaded.settings || {};
     settings.activeProviderId = 'browser-model';
@@ -129,14 +137,17 @@ async function configure(page) {
       ...(settings.providerSettings['browser-model'] || {}),
       modelId: selectedId,
       repoId: selected.repoId,
+      source: selected.source,
       revision: selected.revision,
+      hfRevision: selected.hfRevision,
       dtype: selectedDtype,
+      variant: selectedVariant,
       device: selectedDevice,
       allowWasmFallback: true,
       downloaded: false,
     };
     return chrome.runtime.sendMessage({ type: 'settings:set', settings });
-  }, { modelId, selected: model, selectedDtype: dtype, selectedDevice: device });
+  }, { modelId, selected: model, selectedDtype: dtype, selectedDevice: device, selectedVariant: variant });
   if (response?.ok === false) throw new Error(response.error?.message || 'Could not configure browser model.');
 }
 
@@ -194,6 +205,37 @@ async function cacheDiagnostics(page) {
 }
 
 let session = await launch();
+
+function wavSignalStats(audioBase64) {
+  const bytes = Buffer.from(String(audioBase64 || ''), 'base64');
+  let maxAbsPcm = 0;
+  let nonZeroSamples = 0;
+  let sum = 0;
+  let sumSquares = 0;
+  let clippedSamples = 0;
+  let alternatingHighSamples = 0;
+  let previous = 0;
+  let samples = 0;
+  for (let offset = 44; offset + 1 < bytes.length; offset += 2) {
+    const value = bytes.readInt16LE(offset) / 32768;
+    samples += 1;
+    if (value !== 0) nonZeroSamples += 1;
+    const abs = Math.abs(value);
+    maxAbsPcm = Math.max(maxAbsPcm, abs);
+    sum += value;
+    sumSquares += value * value;
+    if (abs >= 0.999) clippedSamples += 1;
+    if (samples > 1 && abs >= 0.5 && Math.abs(previous) >= 0.5 && Math.sign(previous) !== Math.sign(value)) alternatingHighSamples += 1;
+    previous = value;
+  }
+  const rms = samples ? Math.sqrt(sumSquares / samples) : 0;
+  const crestFactor = rms > 0 ? maxAbsPcm / rms : Infinity;
+  const likelyCorrupt = samples >= 1024 && (
+    clippedSamples > 0 || alternatingHighSamples >= 4 || (maxAbsPcm >= 0.5 && crestFactor >= 20)
+  );
+  return { maxAbsPcm, nonZeroSamples, samples, meanPcm: samples ? sum / samples : 0, rmsPcm: rms, crestFactor, clippedSamples, alternatingHighSamples, likelyCorrupt };
+}
+
 try {
   await configure(session.page);
 
@@ -246,9 +288,16 @@ try {
       ok: synthesis?.ok === true,
       mimeType: synthesis?.mimeType || '',
       audioBytes: synthesis?.audioBase64 ? Math.floor(synthesis.audioBase64.length * 0.75) : 0,
+      ...wavSignalStats(synthesis?.audioBase64),
       error: synthesis?.error || null,
     };
     if (synthesis?.ok === false || !synthesis?.audioBase64) throw new Error(synthesis?.error?.message || 'Offline synthesis returned no audio.');
+    if (report.offlineSynthesis.maxAbsPcm < 0.001 || report.offlineSynthesis.nonZeroSamples < 32) {
+      throw new Error(`Offline synthesis returned silent PCM (maxAbsPcm=${report.offlineSynthesis.maxAbsPcm}, nonZeroSamples=${report.offlineSynthesis.nonZeroSamples}).`);
+    }
+    if (report.offlineSynthesis.likelyCorrupt) {
+      throw new Error(`Offline synthesis returned malformed PCM (rms=${report.offlineSynthesis.rmsPcm}, clipped=${report.offlineSynthesis.clippedSamples}).`);
+    }
     await session.context.setOffline(false);
 
     if (!args['keep-cache']) {

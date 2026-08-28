@@ -8,16 +8,18 @@
     ? require('./shared/provider-v3.js') : null);
   const providerV4Module = root.FlowloudProviderV4 || (typeof require === 'function'
     ? require('./shared/provider-v4.js') : null);
+  const browserModelManifest = root.FlowloudBrowserModelManifest || (typeof require === 'function'
+    ? require('./shared/browser-model-manifest.js') : null);
   const documentProviderModule = root.FlowloudDocumentProviderV1 || (typeof require === 'function'
     ? require('./shared/document-provider-v1.js') : null);
-  const exported = factory(apiModule, providerModule, providerV3Module, providerV4Module, documentProviderModule);
+  const exported = factory(apiModule, providerModule, providerV3Module, providerV4Module, documentProviderModule, browserModelManifest);
   if (typeof module === 'object' && module.exports) module.exports = exported;
   root.QwenReaderOffscreen = exported;
 
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
     exported.install(chrome);
   }
-}(typeof globalThis !== 'undefined' ? globalThis : this, function makeOffscreen(apiModule, providerModule, providerV3Module, providerV4Module, documentProviderModule) {
+}(typeof globalThis !== 'undefined' ? globalThis : this, function makeOffscreen(apiModule, providerModule, providerV3Module, providerV4Module, documentProviderModule, browserModelManifest) {
   'use strict';
 
   const TARGET = 'qwen-reader-offscreen';
@@ -1114,7 +1116,7 @@
       const controller = new AbortController();
       const job = { identity, controller, timedOut: false, provider: provider || null };
       jobs.set(key, job);
-      const operationTimeoutMs = message.type === 'provider:model:download'
+      const operationTimeoutMs = message.type === 'provider:model:download' || /^provider:model:voice-(?:download|repair)$/u.test(String(message.type || ''))
         ? Number(config.modelDownloadTimeoutMs || MODEL_DOWNLOAD_TIMEOUT_MS)
         : message.type === 'provider:model:verify'
           ? Number(config.modelVerifyTimeoutMs || MODEL_VERIFY_TIMEOUT_MS)
@@ -1542,13 +1544,13 @@
         const operation = body.type.slice('provider:model:'.length);
         const manager = provider.modelManagement;
         if (!manager || typeof manager[operation] !== 'function') throw Object.assign(new Error('不支持此模型管理操作。'), { code: 'model_operation_unsupported' });
-        return runJob(body, async (signal) => ({ result: await manager[operation]({
+        return runJob(body, async (signal) => ({ result: await manager[operation](Object.assign({}, body, {
           signal,
           onProgress(progress) {
             if (signal.aborted) throw abortError();
             config.emit?.({ target: 'flowloud:model', type: 'provider:model:progress', requestId: body.requestId, progress });
           },
-        }) }), provider);
+        })) }), provider);
       }
 
       if (body.type === 'tts:synthesize') {
@@ -1651,29 +1653,124 @@
       resolvedProviderCache.set(providerId, { signature, provider });
       return provider;
     }
+    const voiceFetcherCache = new Map();
+    function modelSource(options) {
+      const manifest = browserModelManifest;
+      const sourceInfo = manifest?.source
+        ? manifest.source(options?.source || options?.sourceId || options?.modelSource)
+        : { id: 'modelscope', label: '魔搭社区', host: 'https://www.modelscope.cn/models/', revision: options?.revision, remotePathTemplate: '{model}/resolve/{revision}/' };
+      const revision = String(options?.revision || sourceInfo.revision || 'main');
+      const variant = manifest?.variant ? manifest.variant(options?.variant || options?.dtype || 'auto', options?.device) : { id: String(options?.variant || 'auto') };
+      return { sourceInfo, revision, variant, sourceId: sourceInfo.id, voiceCacheName: `kokoro-voices-${sourceInfo.id}-${revision}`, partialCacheName: `flowloud-model-parts-${sourceInfo.id}-${revision}-${variant.id}` };
+    }
+    async function createModelFetcher(options, meta) {
+      const info = modelSource(options);
+      const key = `${info.partialCacheName}:${Number(options?.concurrency) || 4}`;
+      let fetcher = voiceFetcherCache.get(key);
+      if (!fetcher) {
+        const partialCache = await caches.open(info.partialCacheName);
+        fetcher = browserModelManifest?.createResumableFetcher
+          ? browserModelManifest.createResumableFetcher({
+            fetchImpl: globalThis.fetch.bind(globalThis), partialCache,
+            concurrency: Number(options?.concurrency) || 4,
+            signal: options?.signal,
+          })
+          : globalThis.fetch.bind(globalThis);
+        voiceFetcherCache.set(key, fetcher);
+      }
+      return { fetcher, info };
+    }
+    async function ensureVoice(repoId, options, voiceId, controls = {}) {
+      const id = String(voiceId || 'zf_001').replace(/^browser-model:/u, '');
+      const { fetcher, info } = await createModelFetcher(options, { file: `voices/${id}.bin` });
+      const voiceCache = await caches.open(info.voiceCacheName);
+      const remoteVoiceUrl = browserModelManifest?.voiceUrl
+        ? browserModelManifest.voiceUrl({ repoId, source: info.sourceId, revision: info.revision }, id)
+        : `${String(info.sourceInfo.host).replace(/\/$/u, '')}/${repoId}/resolve/${encodeURIComponent(info.revision)}/voices/${id}.bin`;
+      if (await voiceCache.match(remoteVoiceUrl)) return { voiceId: id, cached: true, url: remoteVoiceUrl, source: info.sourceId };
+      if (options.flowloudOffline === true || controls.offline === true) throw Object.assign(new Error(`Kokoro 音色缓存缺失：${id}。`), { code: 'offline_cache_miss', voiceId: id });
+      const response = await fetcher(remoteVoiceUrl, {}, {
+        source: info.sourceId, file: `voices/${id}.bin`, signal: controls.signal || options.signal,
+        onProgress: controls.onProgress,
+      });
+      if (!response?.ok) throw Object.assign(new Error(`Kokoro 音色下载失败（HTTP ${response?.status || 0}）。`), { code: `http_${response?.status || 0}`, voiceId: id });
+      await voiceCache.put(remoteVoiceUrl, response.clone ? response.clone() : response);
+      return { voiceId: id, cached: true, downloaded: true, url: remoteVoiceUrl, source: info.sourceId };
+    }
     async function browserPipeline(task, repoId, options) {
       if (repoId === 'onnx-community/Kokoro-82M-v1.1-zh-ONNX') {
-        const voiceCache = await caches.open('kokoro-voices');
-        const remoteVoiceUrl = `https://huggingface.co/${repoId}/resolve/${encodeURIComponent(options.revision)}/voices/zf_001.bin`;
-        if (!(await voiceCache.match(remoteVoiceUrl))) {
-          if (options.flowloudOffline === true) throw Object.assign(new Error('Kokoro 默认音色缓存缺失。'), { code: 'offline_cache_miss' });
-          const response = await fetch(remoteVoiceUrl);
-          if (!response.ok) throw Object.assign(new Error(`Kokoro 默认音色下载失败（HTTP ${response.status}）。`), { code: `http_${response.status}` });
-          await voiceCache.put(remoteVoiceUrl, response);
-        }
+        const info = modelSource(options);
+        const configuredStarters = Array.isArray(options.starterVoiceIds)
+          ? options.starterVoiceIds.map((voice) => String(voice || '').replace(/^browser-model:/u, '')).filter((voice) => browserModelManifest?.VOICE_BY_ID?.[voice])
+          : [];
+        const starterVoiceIds = options.ensureStarterVoices === true
+          ? (configuredStarters.length ? configuredStarters : (browserModelManifest?.STARTER_VOICE_IDS || ['zf_001', 'zf_002', 'zm_009', 'zm_010']))
+          : ['zf_001'];
+        await Promise.all([...new Set(starterVoiceIds)].map((voiceId) => ensureVoice(repoId, options, voiceId, {
+          offline: options.flowloudOffline === true, onProgress: options.progress_callback,
+        })));
         if (!kokoroRuntimePromise) kokoroRuntimePromise = import(chromeApi.runtime.getURL('vendor/kokoro/kokoro.web.min.js'));
         const kokoroRuntime = await kokoroRuntimePromise;
+        const modelFetch = options.flowloudOffline === true
+          ? async () => { throw Object.assign(new Error('Kokoro 离线校验期间禁止访问远程模型。'), { code: 'offline_cache_miss' }); }
+          : (resource, init) => {
+            const resourceUrl = typeof resource === 'string'
+              ? resource
+              : resource && typeof resource === 'object' && 'url' in resource
+                ? String(resource.url)
+                : String(resource);
+            const resourceInit = resource && typeof resource === 'object' && 'url' in resource
+              ? Object.assign({}, resource, init || {}) : (init || {});
+            return createModelFetcher(options, { file: resourceUrl }).then(({ fetcher, info: sourceInfo }) => fetcher(resourceUrl, resourceInit, {
+              source: sourceInfo.sourceId, file: resourceUrl, signal: init?.signal || options.signal, onProgress: options.progress_callback,
+            }));
+          };
         return kokoroRuntime.flowloudCreateKokoro(repoId, Object.assign({}, options, {
-          cacheKey: `flowloud-model-${repoId}@${options.revision}`,
+          cacheKey: options.cacheKey || (browserModelManifest?.modelKey ? browserModelManifest.modelKey({ repoId, revision: info.revision, source: info.sourceId, variant: info.variant.id, device: options.device }) : `flowloud-model-${repoId}@${info.revision}`),
           wasmPaths: chromeApi.runtime.getURL('vendor/transformers/'),
-          voicePath: `https://huggingface.co/${repoId}/resolve/${encodeURIComponent(options.revision)}/voices`,
+          remoteHost: info.sourceInfo.host,
+          remotePathTemplate: info.sourceInfo.remotePathTemplate,
+          fetch: modelFetch,
+          voiceCacheName: info.voiceCacheName,
+          voicePath: `${String(info.sourceInfo.host).replace(/\/$/u, '')}/${repoId}/resolve/${encodeURIComponent(info.revision)}/voices`,
         }));
       }
       throw Object.assign(new Error('当前扩展只支持 Kokoro 中英浏览器模型。'), { code: 'unsupported_model' });
     }
-    browserPipeline.deleteCache = async (repoId) => {
+    browserPipeline.voiceInfo = async (repoId, options) => {
+      const info = modelSource(options);
+      const id = String(options?.voiceId || 'zf_001').replace(/^browser-model:/u, '');
+      const voiceCache = await caches.open(info.voiceCacheName);
+      const remoteVoiceUrl = browserModelManifest?.voiceUrl
+        ? browserModelManifest.voiceUrl({ repoId, source: info.sourceId, revision: info.revision }, id)
+        : `${String(info.sourceInfo.host).replace(/\/$/u, '')}/${repoId}/resolve/${encodeURIComponent(info.revision)}/voices/${id}.bin`;
+      return { cached: Boolean(await voiceCache.match(remoteVoiceUrl)), source: info.sourceId };
+    };
+    browserPipeline.downloadVoice = async (repoId, options) => ensureVoice(repoId, options, options.voiceId, options);
+    browserPipeline.deleteVoice = async (repoId, options) => {
+      const info = modelSource(options);
+      const id = String(options?.voiceId || '').replace(/^browser-model:/u, '');
+      const voiceCache = await caches.open(info.voiceCacheName);
+      const remoteVoiceUrl = browserModelManifest?.voiceUrl
+        ? browserModelManifest.voiceUrl({ repoId, source: info.sourceId, revision: info.revision }, id)
+        : `${String(info.sourceInfo.host).replace(/\/$/u, '')}/${repoId}/resolve/${encodeURIComponent(info.revision)}/voices/${id}.bin`;
+      return { voiceId: id, deleted: await voiceCache.delete(remoteVoiceUrl), cached: false, source: info.sourceId };
+    };
+    browserPipeline.repairVoice = async (repoId, options) => {
+      await browserPipeline.deleteVoice(repoId, options);
+      return browserPipeline.downloadVoice(repoId, options);
+    };
+    browserPipeline.deleteCache = async (repoId, revision, extra) => {
       if (repoId !== 'onnx-community/Kokoro-82M-v1.1-zh-ONNX') return false;
-      return caches.delete('kokoro-voices');
+      const info = modelSource(Object.assign({}, extra || {}, { revision, source: extra?.source || 'modelscope' }));
+      // The cache key includes the user-selected concurrency.  Remove every
+      // fetcher for this source/revision/variant so changing concurrency after
+      // a delete cannot keep a stale partial-cache handle alive.
+      for (const key of voiceFetcherCache.keys()) {
+        if (key.startsWith(`${info.partialCacheName}:`)) voiceFetcherCache.delete(key);
+      }
+      await caches.delete(info.partialCacheName);
+      return true;
     };
     const broker = createBroker({
       api,
@@ -1696,7 +1793,10 @@
         }, () => modern.createDoubaoTtsProvider(Object.assign({}, options, { fetchImpl: globalThis.fetch })));
         if (providerId === 'browser-model') return cachedProvider(providerId, {
           modelId: options.modelId, repoId: options.repoId, revision: options.revision,
-          dtype: options.dtype, device: options.device, allowWasmFallback: options.allowWasmFallback,
+          source: options.source || options.sourceId || options.modelSource, variant: options.variant,
+          dtype: options.dtype, device: options.device, downloadConcurrency: options.downloadConcurrency,
+          starterVoiceIds: options.starterVoiceIds,
+          allowWasmFallback: options.allowWasmFallback,
         }, () => modern.createBrowserModelProvider(Object.assign({}, options, { pipelineFactory: browserPipeline })));
         if (providerId === 'local-service' && providerV4Module) {
           return cachedProvider(providerId, {

@@ -370,6 +370,12 @@ button {
   background: var(--qr-purple-soft);
 }
 
+.qr-mini-button.is-click-to-read.is-selected:not(:disabled) {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
 .qr-mini-player.is-minimized {
   display: flex;
   width: auto;
@@ -786,6 +792,8 @@ button {
 .qr-word-motion-cursor {
   --qr-beam-x: -22%;
   position: absolute;
+  top: 0;
+  left: 0;
   display: block;
   height: 2px;
   border-radius: 999px;
@@ -794,13 +802,17 @@ button {
     radial-gradient(circle at var(--qr-beam-x) 50%, rgba(255,255,255,.99) 0 4%, rgba(219,234,254,.92) 8%, rgba(37,99,235,.28) 20%, transparent 32%),
     #2563eb;
   box-shadow: 0 1px 3px rgba(37, 99, 235, .18);
-  transform: none;
+  transform: translate3d(0, 0, 0);
   transition:
-    left 170ms cubic-bezier(.2,.72,.24,1),
-    top 170ms cubic-bezier(.2,.72,.24,1),
-    width 170ms cubic-bezier(.2,.72,.24,1),
-    opacity 150ms ease;
-  will-change: left, top, width;
+    transform 125ms cubic-bezier(.2,.72,.24,1),
+    width 125ms cubic-bezier(.2,.72,.24,1),
+    opacity 120ms ease;
+  will-change: transform, width;
+}
+
+.qr-word-motion-layer.is-tracking-scroll .qr-word-motion-cursor,
+.qr-word-motion-layer.is-tracking-scroll .qr-word-motion-ink {
+  transition: none;
 }
 
 .qr-word-motion-cursor::after {
@@ -823,14 +835,24 @@ button {
   animation: qr-word-edge-dissolve var(--qr-word-motion-duration, 1370ms) linear both;
 }
 
-.qr-word-motion-layer[data-style="edge-dissolve"] .qr-word-motion-cursor.is-running,
-.qr-word-motion-layer[data-style="custom"] .qr-word-motion-cursor.is-running {
+.qr-word-motion-layer[data-style="edge-dissolve"] .qr-word-motion-cursor.is-running-a,
+.qr-word-motion-layer[data-style="custom"] .qr-word-motion-cursor.is-running-a {
   animation: qr-word-edge-position var(--qr-word-motion-duration, 1370ms) linear both;
 }
 
-.qr-word-motion-layer[data-style="edge-dissolve"] .qr-word-motion-cursor.is-running::after,
-.qr-word-motion-layer[data-style="custom"] .qr-word-motion-cursor.is-running::after {
+.qr-word-motion-layer[data-style="edge-dissolve"] .qr-word-motion-cursor.is-running-b,
+.qr-word-motion-layer[data-style="custom"] .qr-word-motion-cursor.is-running-b {
+  animation: qr-word-edge-position-alt var(--qr-word-motion-duration, 1370ms) linear both;
+}
+
+.qr-word-motion-layer[data-style="edge-dissolve"] .qr-word-motion-cursor.is-running-a::after,
+.qr-word-motion-layer[data-style="custom"] .qr-word-motion-cursor.is-running-a::after {
   animation: qr-word-edge-halo var(--qr-word-motion-duration, 1370ms) linear both;
+}
+
+.qr-word-motion-layer[data-style="edge-dissolve"] .qr-word-motion-cursor.is-running-b::after,
+.qr-word-motion-layer[data-style="custom"] .qr-word-motion-cursor.is-running-b::after {
+  animation: qr-word-edge-halo-alt var(--qr-word-motion-duration, 1370ms) linear both;
 }
 
 .qr-word-motion-layer[data-style="aurora-tide"] .qr-word-motion-ink {
@@ -853,8 +875,12 @@ button {
   box-shadow: 0 1px 5px rgba(75, 72, 160, .25);
 }
 
-.qr-word-motion-layer[data-style="aurora-tide"] .qr-word-motion-cursor.is-running {
+.qr-word-motion-layer[data-style="aurora-tide"] .qr-word-motion-cursor.is-running-a {
   animation: qr-word-aurora-position var(--qr-word-motion-duration, 1370ms) cubic-bezier(.18,.62,.22,1) both;
+}
+
+.qr-word-motion-layer[data-style="aurora-tide"] .qr-word-motion-cursor.is-running-b {
+  animation: qr-word-aurora-position-alt var(--qr-word-motion-duration, 1370ms) cubic-bezier(.18,.62,.22,1) both;
 }
 
 .qr-word-motion-layer[data-style="aurora-tide"] .qr-word-motion-cursor::after {
@@ -925,6 +951,23 @@ button {
   from { --qr-beam-x: -18%; opacity: .22; }
   45% { opacity: .92; }
   to { --qr-beam-x: 112%; opacity: .18; }
+}
+
+@keyframes qr-word-edge-position-alt {
+  from { --qr-beam-x: -22%; }
+  to { --qr-beam-x: 112%; }
+}
+
+@keyframes qr-word-edge-halo-alt {
+  0% { opacity: 0; transform: translateX(-50%) scale(.72); }
+  16% { opacity: .54; }
+  76% { opacity: .54; }
+  100% { opacity: 0; transform: translateX(-50%) scale(1.18); }
+}
+
+@keyframes qr-word-aurora-position-alt {
+  from { --qr-beam-x: -18%; }
+  to { --qr-beam-x: 112%; }
 }
 
 @keyframes qr-word-aurora-text {
@@ -2473,7 +2516,7 @@ button {
 .qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] {
   position: static;
   display: grid;
-  grid-template-columns: repeat(4, 44px);
+  grid-template-columns: repeat(6, 44px);
   align-items: center;
   justify-content: start;
   gap: 6px;
@@ -2680,7 +2723,7 @@ button {
 }
 
 .qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] {
-  grid-template-columns: repeat(5, 40px);
+  grid-template-columns: repeat(6, 40px);
   justify-content: space-between;
   gap: 7px;
   margin-top: 7px;
@@ -2708,8 +2751,8 @@ button {
   .qr-mini-progress > span { transition: none; }
 }
 
-/* Edge-peek v5: a 40 px visual control lives inside a 44 px hit area. When
- * snapped, half the circle rests beyond the viewport edge; hover/focus slides
+/* Visible-orb v6: a 40 px visual control lives inside a 44 px hit area. When
+ * snapped, 32 px remain visible at the viewport edge; hover/focus slides
  * it fully into view and reveals the two non-expansion quick actions above it. */
 .qr-mini-player.qr-mini-orb.is-minimized {
   display: block;
@@ -2893,28 +2936,28 @@ button {
 }
 
 .qr-mini-player.qr-mini-orb.is-minimized.is-edge-snapped[data-edge="right"] {
-  transform: translateX(calc(50% + 12px));
+  transform: translateX(12px);
 }
 
 .qr-mini-player.qr-mini-orb.is-minimized.is-edge-snapped[data-edge="left"] {
-  transform: translateX(calc(-50% - 12px));
+  transform: translateX(-12px);
 }
 
 .qr-mini-player.qr-mini-orb.is-minimized.is-edge-snapped[data-edge="right"]:hover:not(.is-dragging),
 .qr-mini-player.qr-mini-orb.is-minimized.is-edge-snapped[data-edge="right"]:focus-within {
-  transform: translateX(12px);
+  transform: translateX(0);
 }
 
 .qr-mini-player.qr-mini-orb.is-minimized.is-edge-snapped[data-edge="left"]:hover:not(.is-dragging),
 .qr-mini-player.qr-mini-orb.is-minimized.is-edge-snapped[data-edge="left"]:focus-within {
-  transform: translateX(-12px);
+  transform: translateX(0);
 }
 
 .qr-mini-player.qr-mini-orb:not(.is-minimized) {
-  width: min(252px, calc(100vw - 24px));
-  min-width: min(252px, calc(100vw - 24px));
-  min-height: 112px;
-  padding: 5px 10px;
+  width: min(304px, calc(100vw - 24px));
+  min-width: min(304px, calc(100vw - 24px));
+  min-height: 126px;
+  padding: 7px 11px;
   border: 1px solid #dbe4f0;
   border-radius: 9px;
   box-shadow: 0 12px 28px rgba(15,31,61,.15);
@@ -2927,35 +2970,35 @@ button {
 .qr-mini-player.qr-mini-orb:not(.is-minimized).is-edge-snapped[data-edge="left"]:hover:not(.is-dragging) { transform: none; }
 
 .qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-speaker { font-size: 13px; }
-.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-meta { font-size: 10px; }
+.qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-meta { font-size: 11px; }
 .qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-text {
   margin-top: 3px;
-  font-size: 11px;
-  line-height: 17px;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-progress-row { margin-top: 3px; }
 .qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-progress-copy { line-height: 10px; }
 .qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] {
-  grid-template-columns: repeat(5, 32px);
-  gap: 8px;
-  margin-top: 5px;
+  grid-template-columns: repeat(6, 40px);
+  gap: 7px;
+  margin-top: 7px;
 }
 
 .qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button,
 .qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button:not(.is-primary),
 .qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-button.is-primary {
-  width: 32px;
-  min-width: 32px;
-  height: 32px;
-  min-height: 32px;
-  border-radius: 9px;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  border-radius: 10px;
 }
 
 .qr-mini-player.qr-mini-orb:not(.is-minimized) [data-role="mini-full-controls"] .qr-mini-icon,
 .qr-mini-player.qr-mini-orb:not(.is-minimized) .qr-mini-follow-icon {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
 }
 
 @keyframes qr-mini-signal-spin { to { transform: rotate(360deg); } }

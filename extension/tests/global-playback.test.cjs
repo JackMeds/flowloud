@@ -45,6 +45,20 @@ test('global controls without an identity resolve to the active immutable sessio
   });
 });
 
+test('controls with a matching playback identity inherit the active provider after a fallback', async () => {
+  const coordinator = createGlobalPlaybackCoordinator({ session: memorySession() });
+  await coordinator.claim({
+    sourceTabId: 7, sourceDocumentId: 'doc-7', pageKey: 'page-7', segmentId: 'seg-2',
+    playbackId: 'play-7', requestId: 'req-7', clientId: 'client-7', providerId: 'browser-system',
+  });
+  const control = await coordinator.resolve({
+    type: 'tts:pause', sourceTabId: 7, playbackId: 'play-7', requestId: 'req-7', clientId: 'client-7',
+  });
+  assert.equal(control.providerId, 'browser-system');
+  assert.equal(control.pageKey, 'page-7');
+  assert.equal(control.sessionId, 'play-7');
+});
+
 test('late events from an older playback cannot clear or advance the active session', async () => {
   const coordinator = createGlobalPlaybackCoordinator({ session: memorySession(), async cancel() {} });
   await coordinator.claim({ sourceTabId: 1, playbackId: 'old', requestId: 'old-request' });

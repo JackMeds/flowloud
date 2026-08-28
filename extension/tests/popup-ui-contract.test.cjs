@@ -58,7 +58,7 @@ test('popup renderer accepts a compact snapshot without the full segment queue o
 test('floating player, click-to-read, and author strategy are quick settings in the popup', () => {
   const view = read('popup-view.js');
   const controller = read('popup.js');
-  const settingsPage = read('voice-studio.html');
+  const voiceStudio = read('voice-studio.html');
   assert.match(view, /switchRow\('clickToRead'/);
   assert.match(view, /switchRow\('showFloatingPlayer'/);
   assert.match(view, /selectRow\(\s*'preset'/);
@@ -68,7 +68,8 @@ test('floating player, click-to-read, and author strategy are quick settings in 
   assert.match(view, /网页交互/);
   assert.match(controller, /api\.storage\.local\.set/);
   assert.match(controller, /qwenReaderSettings/);
-  assert.match(settingsPage, /name="(?:clickToRead|preset)"/);
+  assert.match(voiceStudio, /返回语音与音色设置/);
+  assert.doesNotMatch(voiceStudio, /name="(?:showFloatingPlayer|clickToRead|preset)"/);
 });
 
 test('rerendering cannot accumulate delegated control listeners', () => {
@@ -107,20 +108,17 @@ test('snapshot updates keep the popup shell stable and preserve its scroll conta
   assert.match(read('popup.css'), /overscroll-behavior: contain/);
 });
 
-test('global interaction settings expose one explicit scope across Popup and settings center', () => {
+test('global interaction settings stay in Popup quick controls and are absent from the asset studio', () => {
   const view = read('popup-view.js');
-  const settings = read('voice-studio.html');
-  const controller = read('settings-center.js');
+  const voiceStudio = read('voice-studio.html');
   assert.match(view, /全局设置/);
   assert.match(view, /网页交互/);
-  assert.match(settings, /name="showFloatingPlayer"/);
-  assert.match(settings, /name="clickToRead"/);
-  assert.match(settings, /name="preset"/);
-  assert.match(controller, /setControlValue\('showFloatingPlayer'/);
-  assert.match(controller, /setControlValue\('clickToRead'/);
-  assert.match(controller, /setControlValue\('preset'/);
+  assert.doesNotMatch(voiceStudio, /name="showFloatingPlayer"/);
+  assert.doesNotMatch(voiceStudio, /name="clickToRead"/);
+  assert.doesNotMatch(voiceStudio, /name="preset"/);
+  assert.doesNotMatch(voiceStudio, /settings-center\.js|provider-settings\.js/);
   assert.doesNotMatch(read('popup.html'), /popup-paper\.css/);
-  assert.doesNotMatch(settings, /settings-paper\.css/);
+  assert.doesNotMatch(voiceStudio, /settings-paper\.css/);
 });
 
 test('toolbar keeps one logo and uses state-color icons without overlay badge glyphs', () => {

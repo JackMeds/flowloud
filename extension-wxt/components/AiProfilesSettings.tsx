@@ -3,6 +3,7 @@ import { Button } from 'react-aria-components';
 import { Check, CloudCog, Plus, Save, ShieldCheck, Trash2 } from 'lucide-react';
 import { aiProfilePresets, profileFromPreset, type AiProfile } from './document-model';
 import { createRuntimeBridge } from './runtime-bridge';
+import type { RuntimeBridge } from './runtime-bridge';
 
 type SecretState = Record<string, { present?: boolean; remembered?: boolean }>;
 
@@ -10,8 +11,9 @@ function messageFrom(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function AiProfilesSettings() {
-  const [bridge] = useState(() => createRuntimeBridge());
+export function AiProfilesSettings({ bridge: providedBridge, compact = false, onSettingsSaved }: { bridge?: RuntimeBridge; compact?: boolean; onSettingsSaved?: (settings: Record<string, unknown>) => void } = {}) {
+  const [fallbackBridge] = useState(() => createRuntimeBridge());
+  const bridge = providedBridge || fallbackBridge;
   const [rawSettings, setRawSettings] = useState<Record<string, unknown>>({});
   const [profiles, setProfiles] = useState<AiProfile[]>([]);
   const [selectedId, setSelectedId] = useState('');
@@ -58,6 +60,7 @@ export function AiProfilesSettings() {
       const response = await bridge.saveSettings(nextSettings);
       const saved = response.settings || nextSettings;
       setRawSettings(saved);
+      onSettingsSaved?.(saved);
       if (secret) {
         await bridge.saveAiSecret(selected.id, secret, selected.rememberSecret);
         setSecret('');
@@ -91,14 +94,15 @@ export function AiProfilesSettings() {
     try {
       await bridge.saveAiSecret(selected.id, '', false);
       const response = await bridge.saveSettings(nextSettings);
-      setRawSettings(response.settings || nextSettings); setProfiles(next); setSelectedId(next[0]?.id || '');
+      const saved = response.settings || nextSettings;
+      setRawSettings(saved); onSettingsSaved?.(saved); setProfiles(next); setSelectedId(next[0]?.id || '');
       setOcrProfileId(nextOcr); setTranslationProfileId(nextTranslation); setSecrets(await bridge.secretStatus()); setStatus('AI Profile 已删除。');
     } catch (error) { setStatus(messageFrom(error)); }
     finally { setBusy(false); }
   };
 
   return (
-    <div className="fl-settings-stack">
+    <div className={`fl-settings-stack ${compact ? 'is-popup-compact' : ''}`}>
       <section className="fl-settings-card">
         <div className="fl-card-heading"><Plus aria-hidden="true" /><div><h2>添加服务配置</h2><p>厂商预设只负责填写协议和地址，模型名称与密钥始终由你控制。</p></div></div>
         <div className="fl-settings-form-grid">

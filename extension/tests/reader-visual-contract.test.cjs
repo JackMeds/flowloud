@@ -28,7 +28,7 @@ test('popup-first reader exposes a compact edge-snapping floating orb', () => {
   assert.match(readerSource, /data-role="mini-player"/);
   assert.doesNotMatch(readerSource, /<aside class="qr-panel"/);
   assert.match(readerSource, /class="qr-mini-player qr-mini-orb"/);
-  assert.match(readerSource, /data-mini-ui-version="edge-peek-v5"/);
+  assert.match(readerSource, /data-mini-ui-version="visible-orb-v6"/);
   assert.match(readerSource, /class="qr-mini-launcher"[^>]*data-action="expand-mini-player"/);
   assert.equal((readerSource.match(/class="qr-mini-quick-button/g) || []).length, 2);
   assert.match(readerSource, /data-role="mini-avatar"[^>]*src=/);
@@ -43,10 +43,10 @@ test('active floating orb has a small circular hit target and no panel chrome', 
   const primary = cssRule('.qr-mini-button.is-primary');
   assert.match(player, /position:\s*fixed/);
   assert.match(player, /visibility:\s*hidden/);
-  assert.match(readerCss, /Edge-peek v5[\s\S]*?\.qr-mini-player\.qr-mini-orb\.is-minimized\s*\{[\s\S]*?width:\s*44px[\s\S]*?height:\s*44px/);
+  assert.match(readerCss, /Visible-orb v6[\s\S]*?\.qr-mini-player\.qr-mini-orb\.is-minimized\s*\{[\s\S]*?width:\s*44px[\s\S]*?height:\s*44px/);
   assert.match(readerCss, /\.qr-mini-player\.qr-mini-orb\.is-minimized \.qr-mini-launcher\s*\{[\s\S]*?width:\s*40px[\s\S]*?height:\s*40px/);
-  assert.match(readerCss, /is-minimized\.is-edge-snapped\[data-edge="right"\][\s\S]*?translateX\(calc\(50% \+ 12px\)\)/);
-  assert.match(readerCss, /is-minimized\.is-edge-snapped\[data-edge="left"\][\s\S]*?translateX\(calc\(-50% - 12px\)\)/);
+  assert.match(readerCss, /is-minimized\.is-edge-snapped\[data-edge="right"\][\s\S]*?translateX\(12px\)/);
+  assert.match(readerCss, /is-minimized\.is-edge-snapped\[data-edge="left"\][\s\S]*?translateX\(-12px\)/);
   assert.match(readerCss, /\.qr-mini-player\.is-visible[\s\S]*?pointer-events:\s*auto/);
   assert.match(control, /width:\s*36px/);
   assert.match(control, /height:\s*36px/);
@@ -83,7 +83,7 @@ test('floating player exposes lifecycle status, minimization, and basic accessib
   assert.match(readerSource, /朗读失败/);
   assert.match(readerSource, /miniPlayerMinimized = !miniPlayerMinimized/);
   assert.match(readerSource, /settings\.showFloatingPlayer !== false/);
-  assert.match(readerSource, /data-mini-ui-version="edge-peek-v5"/);
+  assert.match(readerSource, /data-mini-ui-version="visible-orb-v6"/);
   assert.doesNotMatch(readerSource, /data-role="mini-size-icon"/);
   assert.equal((readerSource.match(/<button[^>]*data-action="toggle-mini-size"/g) || []).length, 1);
   assert.match(readerSource, /class="qr-mini-button is-collapse"[^>]*aria-label="收起网页悬浮播放器"/);
@@ -92,8 +92,8 @@ test('floating player exposes lifecycle status, minimization, and basic accessib
   assert.doesNotMatch(readerSource, /qr-mini-follow-glyph|>↗</);
   assert.match(readerSource, /player\.inert = !active/);
   assert.match(readerSource, /visualViewport\.addEventListener\("resize", positionFloatingPlayer/);
-  assert.match(readerCss, /Edge-peek v5[\s\S]*?\.qr-mini-player\.qr-mini-orb\.is-minimized \.qr-mini-launcher[\s\S]*?cursor:\s*grab/);
-  assert.match(readerCss, /\.qr-mini-player\.qr-mini-orb:not\(\.is-minimized\)[\s\S]*?min-height:\s*112px/);
+  assert.match(readerCss, /Visible-orb v6[\s\S]*?\.qr-mini-player\.qr-mini-orb\.is-minimized \.qr-mini-launcher[\s\S]*?cursor:\s*grab/);
+  assert.match(readerCss, /\.qr-mini-player\.qr-mini-orb:not\(\.is-minimized\)[\s\S]*?min-height:\s*126px/);
   assert.match(readerCss, /\[data-state="playing"\] \.qr-mini-signal-wave path[\s\S]*?qr-mini-signal-wave/);
   assert.match(readerCss, /\[data-state="paused"\] \.qr-mini-launcher[\s\S]*?#d97706/);
   assert.match(readerSource, /qr-mini-quick-actions is-above[\s\S]*?play-toggle[\s\S]*?resume-follow/);
@@ -127,6 +127,11 @@ test('content keeps its marker, author cue, in-player follow control, and word m
   assert.match(readerSource, /function renderReadingMarker/);
   assert.match(readerSource, /data-action="marker-play"/);
   assert.match(readerSource, /qr-marker-voice/);
+  assert.match(readerSource, /function markerVoiceLabel/);
+  assert.match(readerSource, /function collectInteractiveRects/);
+  assert.match(readerSource, /knownVoiceLabels\.get\(voiceId\)/);
+  assert.doesNotMatch(readerSource, /"local-service":\s*"本地声音"/);
+  assert.doesNotMatch(readerSource, /voice\.textContent\s*=\s*segment\.voice/);
   assert.match(readerSource, /qr-marker-context/);
   assert.match(readerSource, /qr-mini-button is-follow[^>]*data-action="resume-follow"/);
   assert.match(readerSource, /QwenReaderWordTimeline/);
@@ -238,6 +243,24 @@ test('click-to-read and manual follow behavior remain independent of the popup',
   assert.match(readerSource, /await seek\(matchingIndex\)/);
   assert.match(readerSource, /Follow\.isScrollIntent/);
   assert.match(readerSource, /followController\.resume\(\)/);
+  assert.match(readerSource, /data-action="toggle-click-to-read"/);
+  assert.match(readerSource, /clickToReadButton\.setAttribute\("aria-pressed"/);
+  assert.match(readerCss, /\.qr-mini-button\.is-click-to-read\.is-selected/);
+  assert.match(readerCss, /width:\s*min\(304px,\s*calc\(100vw - 24px\)\)/);
+  assert.match(readerCss, /grid-template-columns:\s*repeat\(6,\s*40px\)/);
+});
+
+test('scroll tracking keeps expensive collision discovery outside the animation-frame hot path', () => {
+  assert.match(readerSource, /scheduleOverlayUpdate\(true\)/);
+  assert.match(readerSource, /scheduleOverlayUpdate\(false, true\)/);
+  assert.match(readerSource, /function lightweightMarkerPlacement/);
+  const schedulerStart = readerSource.indexOf('function scheduleOverlayUpdate');
+  const schedulerEnd = readerSource.indexOf('function sourceLocatorKey', schedulerStart);
+  assert.ok(schedulerStart >= 0 && schedulerEnd > schedulerStart, 'missing overlay scheduler');
+  const scheduler = readerSource.slice(schedulerStart, schedulerEnd);
+  const frameBody = scheduler.match(/requestAnimationFrame\(\(\) => \{([\s\S]*?)\n\s*\}\);/u);
+  assert.ok(frameBody, 'missing overlay animation frame');
+  assert.doesNotMatch(frameBody[1], /collectOccupiedTextRects|collectInteractiveRects/);
 });
 
 test('motion remains restrained and respects reduced-motion preferences', () => {

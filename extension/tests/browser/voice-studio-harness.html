@@ -24,7 +24,7 @@
   <script>
     const harness = {
       messages: [],
-      storage: {},
+      storage: { qwenReaderSettings: { activeProviderId: 'local-service', providerId: 'local-service' } },
       decodeCalls: 0,
       decodeActive: 0,
       maxDecodeActive: 0,
@@ -35,6 +35,10 @@
       failSaveNames: new Map(),
       objectUrls: [],
       revokedUrls: [],
+      displayCaptureMode: 'valid',
+      displayCaptureCalls: 0,
+      lastDisplayStream: null,
+      lastProcessor: null,
       voices: [
         {
           name: '浏览器样本',
@@ -76,6 +80,33 @@
     }
 
     window.installVoiceStudioHarnessMocks = function installVoiceStudioHarnessMocks(target) {
+      class HarnessTrack {
+        constructor(kind) {
+          this.kind = kind;
+          this.listeners = new Map();
+          this.stopped = false;
+        }
+
+        addEventListener(type, callback) { this.listeners.set(type, callback); }
+        removeEventListener(type) { this.listeners.delete(type); }
+        stop() { this.stopped = true; }
+        end() {
+          this.stopped = true;
+          const callback = this.listeners.get('ended');
+          if (callback) callback();
+        }
+      }
+
+      class HarnessStream {
+        constructor(audio, video) {
+          this.audio = audio ? new HarnessTrack('audio') : null;
+          this.video = video ? new HarnessTrack('video') : null;
+        }
+
+        getAudioTracks() { return this.audio ? [this.audio] : []; }
+        getTracks() { return [this.audio, this.video].filter(Boolean); }
+      }
+
       class HarnessAudioContext {
         constructor() {
           this.state = 'running';
@@ -84,6 +115,14 @@
 
         async resume() {}
         async close() {}
+
+        createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+        createScriptProcessor() {
+          const processor = { onaudioprocess: null, connect() {}, disconnect() {} };
+          harness.lastProcessor = processor;
+          return processor;
+        }
+        createGain() { return { gain: { value: 1 }, connect() {}, disconnect() {} }; }
 
         async decodeAudioData(buffer) {
           const marker = new Uint8Array(buffer)[0] || 0;
@@ -110,6 +149,36 @@
 
       target.AudioContext = HarnessAudioContext;
       target.webkitAudioContext = HarnessAudioContext;
+      HarnessAudioContext.prototype.destination = {};
+      let recordingClockOffset = 0;
+      const realDateNow = target.Date.now.bind(target.Date);
+      target.Date.now = () => realDateNow() + recordingClockOffset;
+      harness.advanceRecordingClock = (milliseconds) => { recordingClockOffset += milliseconds; };
+      harness.feedRecordingSamples = (length = 6000) => {
+        if (!harness.lastProcessor || typeof harness.lastProcessor.onaudioprocess !== 'function') {
+          throw new Error('录音处理器尚未就绪');
+        }
+        const samples = new Float32Array(length);
+        for (let index = 0; index < samples.length; index += 1) samples[index] = .2 * Math.sin(index * Math.PI / 8);
+        harness.lastProcessor.onaudioprocess({ inputBuffer: { getChannelData() { return samples; } } });
+      };
+      Object.defineProperty(target.navigator, 'mediaDevices', {
+        configurable: true,
+        value: {
+          async getUserMedia() { return new HarnessStream(true, false); },
+          async getDisplayMedia() {
+            harness.displayCaptureCalls += 1;
+            if (harness.displayCaptureMode === 'reject') {
+              const error = new Error('permission denied');
+              error.name = 'NotAllowedError';
+              throw error;
+            }
+            const stream = new HarnessStream(harness.displayCaptureMode !== 'no-audio', true);
+            harness.lastDisplayStream = stream;
+            return stream;
+          },
+        },
+      });
       target.confirm = () => true;
       target.requestAnimationFrame = (callback) => target.setTimeout(callback, 0);
       let objectUrlSequence = 0;
@@ -155,7 +224,8 @@
             } else if (message.type === 'voice:delete') {
               harness.voices = harness.voices.filter((item) => item.name !== message.name);
             }
-            target.setTimeout(() => callback(response), 0);
+            if (typeof callback === 'function') target.setTimeout(() => callback(response), 0);
+            return Promise.resolve(response);
           },
           onMessage: { addListener() {} },
         },
@@ -252,11 +322,58 @@
         if (!child[moduleName]) throw new Error('未加载真实模块：' + moduleName);
       }
 
+      const computerSource = doc.querySelector('[data-record-source="system-audio"]');
+      const recordButton = doc.querySelector('#record-button');
+      if (!computerSource || !recordButton) throw new Error('电脑声音录制入口缺失');
+      computerSource.click();
+      if (computerSource.getAttribute('aria-pressed') !== 'true') throw new Error('电脑声音来源没有进入选中状态');
+
+      // A valid shared system-audio track uses the real PCM/preview/save flow.
+      harness.displayCaptureMode = 'valid';
+      const recordName = doc.querySelector('#voice-name');
+      recordName.value = '电脑声音样本';
+      recordName.dispatchEvent(new child.Event('input', { bubbles: true }));
+      recordButton.click();
+      await waitFor(() => recordButton.classList.contains('is-recording'));
+      harness.feedRecordingSamples(7000);
+      harness.advanceRecordingClock(6000);
+      recordButton.click();
+      await waitFor(() => !doc.querySelector('#preview').hidden && !doc.querySelector('#save-button').disabled);
+      doc.querySelector('#save-button').click();
+      await waitFor(() => harness.messages.some((message) => (
+        message.type === 'voice:save' && message.profile?.name === '电脑声音样本'
+      )));
+      await waitFor(() => [...doc.querySelectorAll('#voice-list .voice-name')]
+        .some((node) => node.textContent === '电脑声音样本'));
+
+      // Missing audio, permission rejection, and a user-ended share all settle
+      // without leaving tracks or the recorder gate active.
+      harness.displayCaptureMode = 'no-audio';
+      recordButton.click();
+      await waitFor(() => doc.querySelector('#status').textContent.includes('没有检测到电脑声音'));
+      if (harness.lastDisplayStream.getTracks().some((track) => !track.stopped)) throw new Error('无音轨共享没有释放视频轨道');
+
+      harness.displayCaptureMode = 'reject';
+      recordButton.click();
+      await waitFor(() => doc.querySelector('#status').textContent.includes('已取消或拒绝共享电脑声音'));
+
+      harness.displayCaptureMode = 'valid';
+      recordButton.click();
+      await waitFor(() => recordButton.classList.contains('is-recording'));
+      harness.feedRecordingSamples(7000);
+      harness.advanceRecordingClock(6000);
+      harness.lastDisplayStream.audio.end();
+      await waitFor(() => !recordButton.classList.contains('is-recording') && !doc.querySelector('#preview').hidden);
+      if (harness.lastDisplayStream.getTracks().some((track) => !track.stopped)) throw new Error('共享结束后没有释放全部轨道');
+
       const importTab = doc.querySelector('[data-action="show-import"]');
       const importPane = doc.querySelector('#import-pane');
       if (!importTab || !importPane) throw new Error('导入页签或面板缺失');
       importTab.click();
       await waitFor(() => !importPane.hidden);
+      const transcriptionConsent = doc.querySelector('#transcription-consent');
+      transcriptionConsent.checked = true;
+      transcriptionConsent.dispatchEvent(new child.Event('change', { bubbles: true }));
       if (doc.querySelector('#record-pane')?.hidden !== true) throw new Error('导入页签没有切换真实面板');
 
       const localRow = [...doc.querySelectorAll('#voice-list .voice-row')]

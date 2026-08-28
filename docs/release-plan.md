@@ -10,7 +10,7 @@ title: Flowloud 1.0 发布实施与放行清单
 
 - Provider V4 只声明能力和创建合成工作；全局播放协调器统一生命周期、来源标签页、文档身份、暂停、恢复、取消和迟到事件；`ModelManager` 独立负责下载、配额、校验、缓存与删除。
 - 系统语音走 `chrome.tts`，精确边界是按 voice 能力提供的增强项，不作强保证。
-- 浏览器只打包一套 Kokoro v1.1 中英运行时和实际需要的 ONNX Runtime Web 资产。固定 revision 的模型权重与预设音色按需进入 Cache Storage，不进入 ZIP；禁止远程 JS、`trust_remote_code`、自定义加载器和非 Hugging Face 模型主机。
+- 浏览器只打包一套 Kokoro v1.1 中英运行时和实际需要的 ONNX Runtime Web 资产。模型默认从固定 revision 的 ModelScope 下载，Hugging Face 只作为用户主动选择的备用来源；权重与预设音色按需进入 Cache Storage，不进入 ZIP；禁止远程 JS、`trust_remote_code`、自定义加载器和未列入清单的模型主机。
 - 本地服务仅允许 `localhost`、`127.0.0.1` 或 `::1` 的任意端口。通用 OpenAI 兼容层与 Flowloud Qwen、GPT-SoVITS、CosyVoice 原生适配器分别声明健康检查、流式、取消和克隆能力；未声明的能力不得出现在界面。可选客户端令牌只发送给用户配置的回环服务。
 - 在线密钥默认只存 `storage.session`；本地持久化必须由用户明确选择。所有秘密存储限制为 `TRUSTED_CONTEXTS`，不得进入设置导出、日志或错误详情。
 
@@ -19,7 +19,7 @@ title: Flowloud 1.0 发布实施与放行清单
 ### `0.10.0-alpha.1`
 
 - Chrome Private / Trusted Testers；Edge Hidden 仅用于降低可发现性，不视为访问控制。
-- 验证系统语音首次即用、正文朗读、页面导览、五种 TTS 来源、文档工作台、Schema V6 迁移和权限撤销。
+- 验证系统语音首次即用、正文朗读、页面导览、五种 TTS 来源、文档工作台、Schema V7 迁移和权限撤销。
 - 浏览器模型只开放固定 revision 的 Kokoro v1.1 中英模型；大模型通过本地服务接入。
 - Windows 便携包不捆绑模型，下载器执行断点续传与 SHA-256 校验。
 
@@ -40,7 +40,7 @@ title: Flowloud 1.0 发布实施与放行清单
 - 安装后系统语音不创建模型运行时，也不下载任何内容。
 - Popup 的常用操作在正常机器上不等待模型扫描；长任务必须显示进度且可取消。
 - 页面语义快照不依赖当前 viewport，忽略未渲染内容；无名称控件保留并使用“未命名按钮/输入框”等安全回退名称。
-- 浏览器模型下载前显示预计大小、许可、设备支持和真实存储估算；下载任务使用独立 30 分钟上限且可按原 requestId 取消。WebGPU 失败时按设置回退 WASM。
+- 浏览器模型下载前显示预计大小、许可、设备支持和真实存储估算；下载任务使用独立 30 分钟上限且可按原 requestId 取消。默认使用 WASM 兼容模式；手动启用 WebGPU 时，初始化或音频质量失败按设置回退 WASM。
 - 来源标签页关闭时清理该页会话；Popup 关闭不终止仍有效的朗读。
 
 ## 发布前必须人工完成

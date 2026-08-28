@@ -250,6 +250,40 @@ h1 {
   padding: 24px 22px 27px;
 }
 
+.record-source-options {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(112px, 1fr));
+  gap: 4px;
+  margin-bottom: 15px;
+  padding: 4px;
+  border: 1px solid var(--qr-line);
+  border-radius: 7px;
+  background: var(--qr-surface);
+}
+
+.record-source-button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--qr-muted);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.record-source-button:hover:not(:disabled),
+.record-source-button.is-active {
+  color: var(--qr-purple-deep);
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(31, 28, 47, .1);
+}
+
+.record-source-button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
 .record-line {
   display: flex;
   min-height: 70px;

@@ -1,0 +1,1209 @@
+{
+  "capturedAt": "2026-08-25T00:44:55.296Z",
+  "browser": "Playwright Chromium",
+  "runtimeSource": "extension/",
+  "realSite": "https://zh.wikipedia.org/wiki/语音合成",
+  "screenshots": [
+    {
+      "name": "01-onboarding",
+      "file": "docs/audits/2026-08-25-product-experience-audit/assets/01-onboarding.png",
+      "url": "chrome-extension://pnhplmenepakomhgaiieienhnaeicbeh/onboarding.html",
+      "viewport": {
+        "width": 1280,
+        "height": 860
+      }
+    },
+    {
+      "name": "02-onboarding-keyboard-focus",
+      "file": "docs/audits/2026-08-25-product-experience-audit/assets/02-onboarding-keyboard-focus.png",
+      "url": "chrome-extension://pnhplmenepakomhgaiieienhnaeicbeh/onboarding.html",
+      "viewport": {
+        "width": 1280,
+        "height": 860
+      }
+    },
+    {
+      "name": "03-reader-collapsed-real-site",
+      "file": "docs/audits/2026-08-25-product-experience-audit/assets/03-reader-collapsed-real-site.png",
+      "url": "https://zh.wikipedia.org/wiki/%E8%AF%AD%E9%9F%B3%E5%90%88%E6%88%90",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "name": "04-reader-expanded-ready",
+      "file": "docs/audits/2026-08-25-product-experience-audit/assets/04-reader-expanded-ready.png",
+      "url": "https://zh.wikipedia.org/wiki/%E8%AF%AD%E9%9F%B3%E5%90%88%E6%88%90",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "name": "04a-reader-player-detail",
+      "file": "docs/audits/2026-08-25-product-experience-audit/assets/04a-reader-player-detail.png",
+      "url": "https://zh.wikipedia.org/wiki/%E8%AF%AD%E9%9F%B3%E5%90%88%E6%88%90",
+      "clip": {
+        "x": 1130,
+        "y": 710,
+        "width": 310,
+        "height": 190
+      }
+    },
+    {
+      "name": "05-reader-playing-highlight",
+      "file": "docs/audits/2026-08-25-product-experience-audit/assets/05-reader-playing-highlight.png",
+      "url": "https://zh.wikipedia.org/wiki/%E8%AF%AD%E9%9F%B3%E5%90%88%E6%88%90",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "name": "05a-reader-marker-detail",
+      "file": "docs/audits/2026-08-25-product-experience-audit/assets/05a-reader-marker-detail.png",
+      "url": "https://zh.wikipedia.org/wiki/%E8%AF%AD%E9%9F%B3%E5%90%88%E6%88%90",
+      "clip": {
+        "x": 0,
+        "y": 395,
+        "width": 760,
+        "height": 150
+      }
+    },
+    {
+      "name": "06-reader-paused",
+      "file": "docs/audits/2026-08-25-product-experience-audit/assets/06-reader-paused.png",
+      "url": "https://zh.wikipedia.org/wiki/%E8%AF%AD%E9%9F%B3%E5%90%88%E6%88%90",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "name": "07-popup-sound",
+      "file": "docs/audits/2026-08-25-product-experience-audit/assets/07-popup-sound.png",
+      "url": "chrome-extension://pnhplmenepakomhgaiieienhnaeicbeh/popup-react.html",
+      "viewport": {
+        "width": 420,
+        "height": 780
+      }
+    },
+    {
+      "name": "08-popup-reading",
+      "file": "docs/audits/2026-08-25-product-experience-audit/assets/08-popup-reading.png",
+      "url": "chrome-extension://pnhplmenepakomhgaiieienhnaeicbeh/popup-react.html",
+      "viewport": {
+        "width": 420,
+        "height": 780
+      }
+    },
+    {
+      "name": "09-popup-more",
+      "file": "docs/audits/2026-08-25-product-experience-audit/assets/09-popup-more.png",
+      "url": "chrome-extension://pnhplmenepakomhgaiieienhnaeicbeh/popup-react.html",
+      "viewport": {
+        "width": 420,
+        "height": 780
+      }
+    },
+    {
+      "name": "10-settings-overview",
+      "file": "docs/audits/2026-08-25-product-experience-audit/assets/10-settings-overview.png",
+      "url": "chrome-extension://pnhplmenepakomhgaiieienhnaeicbeh/options-react.html",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "name": "11-settings-reading-engines",
+      "file": "docs/audits/2026-08-25-product-experience-audit/assets/11-settings-reading-engines.png",
+      "url": "chrome-extension://pnhplmenepakomhgaiieienhnaeicbeh/options-react.html",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "name": "13-settings-reading-engines-narrow",
+      "file": "docs/audits/2026-08-25-product-experience-audit/assets/13-settings-reading-engines-narrow.png",
+      "url": "chrome-extension://pnhplmenepakomhgaiieienhnaeicbeh/options-react.html",
+      "viewport": {
+        "width": 900,
+        "height": 760
+      }
+    },
+    {
+      "name": "12-document-workbench",
+      "file": "docs/audits/2026-08-25-product-experience-audit/assets/12-document-workbench.png",
+      "url": "chrome-extension://pnhplmenepakomhgaiieienhnaeicbeh/document-workbench.html",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "name": "14-document-workbench-narrow",
+      "file": "docs/audits/2026-08-25-product-experience-audit/assets/14-document-workbench-narrow.png",
+      "url": "chrome-extension://pnhplmenepakomhgaiieienhnaeicbeh/document-workbench.html",
+      "viewport": {
+        "width": 960,
+        "height": 760
+      }
+    }
+  ],
+  "pages": {
+    "onboarding": {
+      "title": "欢迎使用 Flowloud / 流声",
+      "text": "FLOWLOUD / 流声 让网页自然地流动起来 安装后即可使用系统语音。不会自动下载模型，也不会自动发送网页正文。 1 立即开始 浏览器系统语音是默认来源，本机处理、无需下载。打开文章或讨论页，点击扩展即可朗读。 2 需要时再选择其他引擎 浏览器模型会先说明大小和许可；本地 Qwen 连接 Windows 服务并支持音色克隆；在线 TTS 仅发送你主动朗读的文本。 3 隐私与页面导览 产品无遥测、无广告、无后台收集。页面导览只定位与朗读，不点击链接、不修改表单，也不替代读屏软件。 使用系统语音开始 查看朗读引擎设置",
+      "controlCount": 2,
+      "unnamedControls": [],
+      "controls": [
+        {
+          "tag": "button",
+          "role": "",
+          "name": "使用系统语音开始",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "查看朗读引擎设置",
+          "disabled": false
+        }
+      ],
+      "bodyScroll": {
+        "width": 1280,
+        "height": 655
+      }
+    },
+    "popupCaptureMode": "actual-react-surface-with-sourced-reader-context; action popup unavailable: worker.evaluate: Error: Cannot access contents of the page. Extension manifest must request permission to access the respective host.",
+    "popupTransport": [
+      {
+        "label": "上一句",
+        "html": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-skip-back\" aria-hidden=\"true\"><path d=\"M17.971 4.285A2 2 0 0 1 21 6v12a2 2 0 0 1-3.029 1.715l-9.997-5.998a2 2 0 0 1-.003-3.432z\"></path><path d=\"M3 20V4\"></path></svg>",
+        "buttonColor": "rgb(15, 31, 61)",
+        "svgColor": "rgb(15, 31, 61)",
+        "svgStroke": "rgb(15, 31, 61)",
+        "svgDisplay": "block",
+        "svgOpacity": "1",
+        "svgRect": {
+          "x": 99.5,
+          "y": 199.5,
+          "width": 17,
+          "height": 17,
+          "top": 199.5,
+          "right": 116.5,
+          "bottom": 216.5,
+          "left": 99.5
+        }
+      },
+      {
+        "label": "继续朗读",
+        "html": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-play\" aria-hidden=\"true\"><path d=\"M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z\"></path></svg>",
+        "buttonColor": "rgb(255, 255, 255)",
+        "svgColor": "rgb(255, 255, 255)",
+        "svgStroke": "rgb(255, 255, 255)",
+        "svgDisplay": "block",
+        "svgOpacity": "1",
+        "svgRect": {
+          "x": 198.5,
+          "y": 196.5,
+          "width": 23,
+          "height": 23,
+          "top": 196.5,
+          "right": 221.5,
+          "bottom": 219.5,
+          "left": 198.5
+        }
+      },
+      {
+        "label": "下一句",
+        "html": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-skip-forward\" aria-hidden=\"true\"><path d=\"M21 4v16\"></path><path d=\"M6.029 4.285A2 2 0 0 0 3 6v12a2 2 0 0 0 3.029 1.715l9.997-5.998a2 2 0 0 0 .003-3.432z\"></path></svg>",
+        "buttonColor": "rgb(15, 31, 61)",
+        "svgColor": "rgb(15, 31, 61)",
+        "svgStroke": "rgb(15, 31, 61)",
+        "svgDisplay": "block",
+        "svgOpacity": "1",
+        "svgRect": {
+          "x": 298.5,
+          "y": 199.5,
+          "width": 17,
+          "height": 17,
+          "top": 199.5,
+          "right": 315.5,
+          "bottom": 216.5,
+          "left": 298.5
+        }
+      }
+    ],
+    "popupSound": {
+      "title": "Flowloud / 流声",
+      "text": "已暂停 系统语音 高级设置 正文 第 1 段 / 共 68 段 语音合成是将人类语音用人工的方式所产生。 1% WIKIPEDIA · 文章 语音合成 点读 已关闭 悬浮播放器 刷新后自动显示 回到正文 声音 阅读 配音 更多 语音来源 浏览器系统语音 浏览器系统语音 浏览器下载模型 本地 TTS 服务 在线 TTS 当前音色 Flowloud 审计语音 · zh-CN Flowloud 审计语音 · zh-CN 朗读速度 0.75× 1× 1.25× 1.5× 1.75× 2× 当前系统音色支持逐词边界。",
+      "controlCount": 21,
+      "unnamedControls": [],
+      "controls": [
+        {
+          "tag": "button",
+          "role": "",
+          "name": "高级设置",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "上一句",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "继续朗读",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "下一句",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "点读已关闭",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "悬浮播放器刷新后自动显示",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "回到正文",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "声音",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "阅读",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "配音",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "更多",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "语音来源",
+          "disabled": false
+        },
+        {
+          "tag": "select",
+          "role": "",
+          "name": "浏览器系统语音浏览器下载模型本地 TTS 服务在线 TTS",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "当前音色",
+          "disabled": false
+        },
+        {
+          "tag": "select",
+          "role": "",
+          "name": "Flowloud 审计语音 · zh-CN",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "0.75×",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "1×",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "1.25×",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "1.5×",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "1.75×",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "2×",
+          "disabled": false
+        }
+      ],
+      "bodyScroll": {
+        "width": 420,
+        "height": 600
+      }
+    },
+    "popupReading": {
+      "title": "Flowloud / 流声",
+      "text": "已暂停 系统语音 高级设置 正文 第 1 段 / 共 68 段 语音合成是将人类语音用人工的方式所产生。 1% WIKIPEDIA · 文章 语音合成 点读 已关闭 悬浮播放器 刷新后自动显示 回到正文 声音 阅读 配音 更多 正文朗读 页面导览 连续朗读正文 提取文章或帖子正文，按作者与段落顺序连续播放。",
+      "controlCount": 13,
+      "unnamedControls": [],
+      "controls": [
+        {
+          "tag": "button",
+          "role": "",
+          "name": "高级设置",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "上一句",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "继续朗读",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "下一句",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "点读已关闭",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "悬浮播放器刷新后自动显示",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "回到正文",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "声音",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "阅读",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "配音",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "更多",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "正文朗读",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "页面导览",
+          "disabled": false
+        }
+      ],
+      "bodyScroll": {
+        "width": 420,
+        "height": 600
+      }
+    },
+    "popupMore": {
+      "title": "Flowloud / 流声",
+      "text": "已暂停 系统语音 高级设置 正文 第 1 段 / 共 68 段 语音合成是将人类语音用人工的方式所产生。 1% WIKIPEDIA · 文章 语音合成 点读 已关闭 悬浮播放器 刷新后自动显示 回到正文 声音 阅读 配音 更多 OCR 与翻译 网页、图片与 PDF 工作台 阅读外观 句子聚焦 · 逐词效果 快捷键 查看常用组合键",
+      "controlCount": 14,
+      "unnamedControls": [],
+      "controls": [
+        {
+          "tag": "button",
+          "role": "",
+          "name": "高级设置",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "上一句",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "继续朗读",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "下一句",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "点读已关闭",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "悬浮播放器刷新后自动显示",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "回到正文",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "声音",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "阅读",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "配音",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "更多",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "OCR 与翻译网页、图片与 PDF 工作台",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "阅读外观句子聚焦 · 逐词效果",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "快捷键查看常用组合键",
+          "disabled": false
+        }
+      ],
+      "bodyScroll": {
+        "width": 420,
+        "height": 600
+      }
+    },
+    "settings": {
+      "title": "Flowloud / 流声 · 全部设置",
+      "text": "Flowloud / 流声 全部设置 已保存 设置分类 朗读与交互 语音来源 OCR 与翻译 声音库 角色配音 阅读外观 快捷键 高级 遇到问题？ 打开诊断工具并复制报告 朗读与交互 让常用操作随手可用 播放、点读和悬浮播放器会自动保存，并立即作用于网页。 播放与阅读方式 控制默认速度，以及把页面当正文还是导览来读。 默认播放速度 1× 0.75× 1× 1.25× 1.5× 1.75× 2× 正文朗读 页面导览 网页中的常用功能 这两个开关也会固定显示在 Popup 播放器下方。 点击正文朗读点击任意句子，从精确位置开始朗读。 显示悬浮播放器在普通网页边缘自动显示入口；无需为每个网站重复授权。",
+      "controlCount": 14,
+      "unnamedControls": [
+        {
+          "tag": "input",
+          "role": "switch",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "switch",
+          "name": "",
+          "disabled": false
+        }
+      ],
+      "controls": [
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "朗读与交互",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "语音来源",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "OCR 与翻译",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "声音库",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "角色配音",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "阅读外观",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "快捷键",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "高级",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "默认播放速度",
+          "disabled": false
+        },
+        {
+          "tag": "select",
+          "role": "",
+          "name": "0.75×1×1.25×1.5×1.75×2×",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "正文朗读",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "页面导览",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "switch",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "switch",
+          "name": "",
+          "disabled": false
+        }
+      ],
+      "bodyScroll": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    "settingsEngines": {
+      "title": "Flowloud / 流声 · 全部设置",
+      "text": "Flowloud / 流声 全部设置 已保存 设置分类 朗读与交互 语音来源 OCR 与翻译 声音库 角色配音 阅读外观 快捷键 高级 遇到问题？ 打开诊断工具并复制报告 语音来源 选择声音从哪里生成 每一种来源都明确展示连接、隐私和存储状态。 当前语音来源 来源切换立即保存；服务失败不会静默改写默认来源。 语音来源 浏览器系统语音 浏览器系统语音 浏览器下载模型 本地服务 OpenAI 兼容在线 TTS 豆包原生 TTS 浏览器系统语音 浏览器提供 · 正文不离开设备 浏览器下载模型 尚未通过离线校验 本地服务 flowloud-qwen · 使用时检查权限 在线 TTS 需要 API 地址、模型与密钥 豆包原生 TTS 需要 App ID、音色与 API Key 隐私提示 系统语音和本地模型不会上传正文；在线 TTS 仅发送当前待朗读文本。 浏览器下载模型 正式模型固定到完整 commit；下载后必须通过离线合成校验。 模型 Kokoro v1.1 中英（预设音色） 运行设备 WebGPU（失败后回退 WASM） WASM 固定 revision 约 110 MB（按需缓存） · Apache-2.0 135.4 GB 可用；下载后会关闭远程加载并重新合成短句，校验通过才标记为可用。 状态：missing · WEBGPU 下载并校验 取消下载 离线校验 删除 本地服务 仅允许 localhost、127.0.0.1 或 ::1；能力以真实健康检查结果为准。 适配器 Flowloud Qwen GPT-SoVITS CosyVoice OpenAI 本地兼容 Base URL 模型 访问令牌 跨浏览器会话记住令牌关闭时仅保存在当前浏览器会话；重新输入令牌后生效。 未保存令牌 保存并测试 清除令牌 OpenAI 兼容在线 TTS 试听会发送下方短句，可能产生少量费用；不会发送当前网页全文。 Base URL 模型 音色 格式 MP3 WAV Opus AAC API Key 试听短句 跨浏览器会话记住 API Key显式开启并重新输入 Key 后才会持久保存；导出设置永远不包含它。 尚未保存 API Key 保存并试听 清除 Key 豆包原生 TTS 使用豆包语音原生单向流式协议，不会伪装成 OpenAI /audio/speech。 Base URL App ID Resource ID 音色 ID API Key 跨浏览器会话记住 API Key关闭时仅保存在当前浏览器会话。 尚未保存 API Key 保存并试听 清除 Key",
+      "controlCount": 41,
+      "unnamedControls": [
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "switch",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "switch",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "switch",
+          "name": "",
+          "disabled": false
+        }
+      ],
+      "controls": [
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "朗读与交互",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "语音来源",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "OCR 与翻译",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "声音库",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "角色配音",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "阅读外观",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "快捷键",
+          "disabled": false
+        },
+        {
+          "tag": "div",
+          "role": "tab",
+          "name": "高级",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "语音来源",
+          "disabled": false
+        },
+        {
+          "tag": "select",
+          "role": "",
+          "name": "浏览器系统语音浏览器下载模型本地服务OpenAI 兼容在线 TTS豆包原生 TTS",
+          "disabled": false
+        },
+        {
+          "tag": "select",
+          "role": "",
+          "name": "Kokoro v1.1 中英（预设音色）",
+          "disabled": true
+        },
+        {
+          "tag": "select",
+          "role": "",
+          "name": "WebGPU（失败后回退 WASM）WASM",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "下载并校验",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "取消下载",
+          "disabled": true
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "离线校验",
+          "disabled": true
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "删除",
+          "disabled": true
+        },
+        {
+          "tag": "select",
+          "role": "",
+          "name": "Flowloud QwenGPT-SoVITSCosyVoiceOpenAI 本地兼容",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "switch",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "保存并测试",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "清除令牌",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "select",
+          "role": "",
+          "name": "MP3WAVOpusAAC",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "switch",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "保存并试听",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "清除 Key",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "switch",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "保存并试听",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "清除 Key",
+          "disabled": false
+        }
+      ],
+      "bodyScroll": {
+        "width": 1440,
+        "height": 2659
+      }
+    },
+    "workbench": {
+      "title": "文档与翻译工作台 · Flowloud",
+      "text": "文档与翻译工作台 网页、截图、图片和 PDF · 识别、翻译并朗读 配置 AI 服务 1. 选择输入 当前网页 粘贴文本 网页截图 上传图片 上传 PDF 当前网页正文 在来源标签页本地提取结构化正文，不会上传网页 HTML。 提取网页正文 2. 选择流程 仅识别 仅翻译 识别并翻译 OCR 服务 未选择 翻译服务 未选择 源语言 目标语言 开始处理 请先在设置中添加 OCR/翻译服务。 3. 校对与朗读 处理结果会显示在这里 原文与译文按块对应，支持单块重试。 复制全部 朗读全部 尚未生成结果 数字 PDF 会先本地提取文字；图片和扫描页按所选 OCR Profile 处理。",
+      "controlCount": 17,
+      "unnamedControls": [
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        }
+      ],
+      "controls": [
+        {
+          "tag": "button",
+          "role": "",
+          "name": "配置 AI 服务",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "当前网页",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "粘贴文本",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "网页截图",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "上传图片",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "上传 PDF",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "提取网页正文",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "仅识别",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "仅翻译",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "识别并翻译",
+          "disabled": false
+        },
+        {
+          "tag": "select",
+          "role": "",
+          "name": "未选择",
+          "disabled": false
+        },
+        {
+          "tag": "select",
+          "role": "",
+          "name": "未选择",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "input",
+          "role": "",
+          "name": "",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "开始处理",
+          "disabled": false
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "复制全部",
+          "disabled": true
+        },
+        {
+          "tag": "button",
+          "role": "",
+          "name": "朗读全部",
+          "disabled": true
+        }
+      ],
+      "bodyScroll": {
+        "width": 1440,
+        "height": 900
+      }
+    }
+  },
+  "readerStates": {
+    "readyCollapsed": null,
+    "readyExpanded": null,
+    "playing": null,
+    "snapshotPlaying": {
+      "status": "playing",
+      "index": 0,
+      "total": 68,
+      "current": {
+        "textLength": 20,
+        "wordIndex": 0,
+        "wordCount": 12
+      }
+    },
+    "paused": null
+  },
+  "keyboard": {
+    "onboardingFirstTab": {
+      "tag": "BUTTON",
+      "id": "start",
+      "text": "使用系统语音开始"
+    }
+  },
+  "motion": {
+    "contract": {
+      "signalWave": "900ms ease-in-out infinite alternate",
+      "quickActions": "opacity 120ms ease, transform 160ms cubic-bezier(.2,.8,.2,1), visibility 0s linear 160ms",
+      "captionEntry": "180ms cubic-bezier(.2, .8, .2, 1) both",
+      "progress": "width 180ms ease",
+      "reducedMotionCoversPlayer": true
+    },
+    "normal": {
+      "reducedMotion": false,
+      "playerTransition": "",
+      "playerAnimation": "",
+      "launcherTransition": ""
+    },
+    "reduced": {
+      "reducedMotion": true,
+      "playerTransition": "",
+      "playerAnimation": "",
+      "launcherTransition": ""
+    }
+  },
+  "consoleErrors": [],
+  "extensionId": "pnhplmenepakomhgaiieienhnaeicbeh"
+}

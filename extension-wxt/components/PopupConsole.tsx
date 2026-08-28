@@ -1,6 +1,5 @@
 import { Button, Dialog, DialogTrigger, Popover, Tab, TabList, TabPanel, Tabs } from 'react-aria-components';
 import {
-  ArrowLeft,
   AudioLines,
   BookOpen,
   Bot,
@@ -10,23 +9,23 @@ import {
   ExternalLink,
   FileText,
   Gauge,
-  Keyboard,
   MousePointerClick,
-  Palette,
   Pause,
   Play,
   RefreshCcw,
   SkipBack,
   SkipForward,
   SlidersHorizontal,
+  Settings2,
   Sparkles,
   UserRound,
   UsersRound,
   Languages,
 } from 'lucide-react';
-import { useState, type ComponentType } from 'react';
-import type { PopupModel, PopupSettings } from './model';
+import type { ComponentType } from 'react';
+import type { PopupModel, PopupSettings, SettingsSection } from './model';
 import { ChoiceSelect } from './FormControls';
+import { configuredProviderOptions, providerSummaryLabels } from './provider-registry';
 
 export type ReaderCommand = 'previous' | 'toggle-playback' | 'next' | 'locate-current' | 'retry-system-once';
 
@@ -35,29 +34,15 @@ interface PopupConsoleProps {
   onCommand?: (command: ReaderCommand) => void | Promise<void>;
   onSettingChange?: <Key extends keyof PopupSettings>(key: Key, value: PopupSettings[Key]) => void | Promise<void>;
   onRequestPersistentSiteAccess?: () => void | Promise<void>;
-  onOpenOptions?: () => void | Promise<void>;
+  onOpenSettings?: (section: SettingsSection, providerId?: string) => void;
   onOpenGuide?: () => void | Promise<void>;
   onReturnSource?: () => void | Promise<void>;
   onReadCurrentPage?: () => void | Promise<void>;
   onVoiceChange?: (voiceId: string) => void | Promise<void>;
   onPageVoiceChange?: (authorId: string, voiceId: string) => void | Promise<void>;
-  onTestLocalService?: () => void | Promise<void>;
   onOpenDocuments?: () => void | Promise<void>;
+  onOpenVoiceStudio?: () => void | Promise<void>;
 }
-
-const providerOptions = [
-  ['browser-system', '浏览器系统语音'],
-  ['browser-model', '浏览器下载模型'],
-  ['local-service', '本地 TTS 服务'],
-  ['openai-compatible', '在线 TTS'],
-] as const;
-
-const providerSummaryLabels: Record<string, string> = {
-  'browser-system': '系统语音',
-  'browser-model': '浏览器模型',
-  'local-service': '本地服务',
-  'openai-compatible': '在线 TTS',
-};
 
 const speedOptions = [0.75, 1, 1.25, 1.5, 1.75, 2] as const;
 const presetOptions = [
@@ -84,17 +69,6 @@ const presetGuidance: Record<string, { label: string; description: string }> = {
     description: '楼主独立；其余楼层按出现顺序轮换音色，适合角色很多的长帖。',
   },
 };
-const focusStyleOptions = [
-  ['paper-wash', '淡蓝衬底'],
-  ['underline-guide', '细线导读'],
-  ['soft-glow', '柔和光晕'],
-] as const;
-const wordStyleOptions = [
-  ['edge-dissolve', '边缘轻扫'],
-  ['classic-glow', '经典高亮'],
-  ['aurora-tide', '柔光推进'],
-] as const;
-
 function ActiveSentence({ text, words, wordIndex }: { text: string; words?: PopupModel['currentWords']; wordIndex?: number }) {
   const active = Number.isInteger(wordIndex) && Number(wordIndex) >= 0 ? words?.[Number(wordIndex)] : null;
   if (!active || active.sourceStart < 0 || active.sourceEnd > text.length || active.sourceEnd <= active.sourceStart) return <>{text}</>;
@@ -105,13 +79,15 @@ function NavRow({ icon: Icon, label, value, onPress }: { icon: ComponentType<{ '
   return <Button className="fl-popup-nav-row" onPress={onPress}><Icon aria-hidden={true} /><strong>{label}</strong><span>{value}</span><ChevronRight aria-hidden={true} /></Button>;
 }
 
-export function PopupConsole({ model, onCommand, onSettingChange, onRequestPersistentSiteAccess, onOpenOptions, onOpenGuide, onReturnSource, onReadCurrentPage, onVoiceChange, onPageVoiceChange, onTestLocalService, onOpenDocuments }: PopupConsoleProps) {
-  const [moreView, setMoreView] = useState<'menu' | 'appearance' | 'shortcuts'>('menu');
+export function PopupConsole({ model, onCommand, onSettingChange, onRequestPersistentSiteAccess, onOpenSettings, onOpenGuide, onReturnSource, onReadCurrentPage, onVoiceChange, onPageVoiceChange, onOpenDocuments, onOpenVoiceStudio }: PopupConsoleProps) {
   const progress = model.total ? Math.min(100, ((model.index + 1) / model.total) * 100) : 0;
   const playing = model.status === 'playing';
-  const primaryLabel = playing ? '暂停朗读' : model.status === 'paused' ? '继续朗读' : '开始朗读';
+  const browserModelVoiceUnavailable = model.settings.activeProviderId === 'browser-model'
+    && model.voiceLoadState === 'ready' && !(model.availableVoices || []).length;
+  const primaryLabel = browserModelVoiceUnavailable ? '请先下载模型音色' : playing ? '暂停朗读' : model.status === 'paused' ? '继续朗读' : '开始朗读';
   const statusLabel = playing ? '正在朗读' : model.status === 'paused' ? '已暂停' : model.status === 'error' ? '连接异常' : '准备就绪';
   const providerSummary = providerSummaryLabels[model.settings.activeProviderId] || '语音来源';
+  const sourceOptions = configuredProviderOptions(model.providerStates || [], model.settings.activeProviderId);
   const availableVoiceOptions = (model.availableVoices || []).map((voice) => [
     voice.id,
     `${voice.label}${voice.lang ? ` · ${voice.lang}` : ''}`,
@@ -139,7 +115,7 @@ export function PopupConsole({ model, onCommand, onSettingChange, onRequestPersi
           <span className={`fl-status is-${model.status}`}>{statusLabel}</span>
           <span className="fl-header-provider">{providerSummary}</span>
         </div>
-        <Button className="fl-header-settings" onPress={onOpenOptions}><SlidersHorizontal aria-hidden={true} />高级设置</Button>
+        <span className="fl-header-product">Flowloud / 流声</span>
       </header>
 
       <div className="fl-console-scroll">
@@ -160,7 +136,7 @@ export function PopupConsole({ model, onCommand, onSettingChange, onRequestPersi
           <h1>{model.title}</h1>
           <div className="fl-transport" role="group" aria-label="朗读控制">
             <Button className="fl-transport-side" aria-label="上一句" onPress={() => onCommand?.('previous')}><SkipBack aria-hidden="true" /></Button>
-            <Button className="fl-transport-primary" aria-label={primaryLabel} onPress={() => onCommand?.('toggle-playback')}>{playing ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}</Button>
+            <Button className="fl-transport-primary" aria-label={primaryLabel} isDisabled={browserModelVoiceUnavailable} onPress={() => onCommand?.('toggle-playback')}>{playing ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}</Button>
             <Button className="fl-transport-side" aria-label="下一句" onPress={() => onCommand?.('next')}><SkipForward aria-hidden="true" /></Button>
           </div>
           {model.controlNotice ? <div className="fl-control-notice" role="status" aria-live="polite"><AudioLines aria-hidden="true" /><span>{model.controlNotice}</span></div> : null}
@@ -194,12 +170,12 @@ export function PopupConsole({ model, onCommand, onSettingChange, onRequestPersi
 
           <TabPanel id="sound" className="fl-popup-tab-panel">
             <div className="fl-popup-card">
-              <div className="fl-popup-select-row"><UserRound aria-hidden="true" /><ChoiceSelect label="语音来源" value={model.settings.activeProviderId} options={providerOptions} onChange={(value) => onSettingChange?.('activeProviderId', value)} /></div>
+              <div className="fl-popup-select-row"><UserRound aria-hidden="true" /><ChoiceSelect label="语音来源" value={model.settings.activeProviderId} options={sourceOptions} onChange={(value) => onSettingChange?.('activeProviderId', value)} /></div>
               {availableVoiceOptions.length ? <div className="fl-popup-select-row"><AudioLines aria-hidden="true" /><ChoiceSelect label="当前音色" value={voiceSelectValue} options={availableVoiceOptions} onChange={(value) => onVoiceChange?.(value)} /></div> : null}
               <div className="fl-popup-speed-row"><Gauge aria-hidden="true" /><span>朗读速度</span><div>{speedOptions.map((speed) => <Button key={speed} className={model.settings.playbackRate === speed ? 'is-active' : ''} onPress={() => onSettingChange?.('playbackRate', speed)}>{speed}×</Button>)}</div></div>
               <div className="fl-provider-note" data-provider={model.settings.activeProviderId}>
                 <span>{model.voiceLoadState === 'loading' ? '正在读取可用音色…' : providerNotice}</span>
-                {model.settings.activeProviderId === 'local-service' && onTestLocalService ? <Button onPress={onTestLocalService}>检查连接</Button> : null}
+                <Button aria-label="打开当前来源设置" onPress={() => onOpenSettings?.('voice', model.settings.activeProviderId)}>管理当前来源…</Button>
               </div>
             </div>
           </TabPanel>
@@ -252,36 +228,15 @@ export function PopupConsole({ model, onCommand, onSettingChange, onRequestPersi
                   </div>
                 );
               })}
+              <Button className="fl-popup-library-link" onPress={onOpenVoiceStudio}><AudioLines aria-hidden="true" />管理、试听与导入声音<ChevronRight aria-hidden="true" /></Button>
             </div>
           </TabPanel>
 
           <TabPanel id="more" className="fl-popup-tab-panel">
-            {moreView === 'menu' ? (
-              <nav className="fl-popup-card fl-popup-footer-nav" aria-label="其他设置">
-                <NavRow icon={Languages} label="OCR 与翻译" value="网页、图片与 PDF 工作台" onPress={onOpenDocuments} />
-                <NavRow icon={Palette} label="阅读外观" value="句子聚焦 · 逐词效果" onPress={() => setMoreView('appearance')} />
-                <NavRow icon={Keyboard} label="快捷键" value="查看常用组合键" onPress={() => setMoreView('shortcuts')} />
-              </nav>
-            ) : null}
-            {moreView === 'appearance' ? (
-              <section className="fl-popup-detail" aria-label="阅读外观">
-                <div className="fl-popup-detail-heading"><Button aria-label="返回更多设置" onPress={() => setMoreView('menu')}><ArrowLeft aria-hidden="true" /></Button><div><strong>阅读外观</strong><span>更改后立即作用于网页</span></div></div>
-                <div className="fl-popup-card">
-                  <div className="fl-popup-select-row"><Palette aria-hidden="true" /><ChoiceSelect label="句子聚焦" value={model.settings.readingFocusStyle} options={focusStyleOptions} onChange={(value) => onSettingChange?.('readingFocusStyle', value as PopupSettings['readingFocusStyle'])} /></div>
-                  <div className="fl-popup-select-row"><Sparkles aria-hidden="true" /><ChoiceSelect label="逐词效果" value={model.settings.wordHighlightStyle} options={wordStyleOptions} onChange={(value) => onSettingChange?.('wordHighlightStyle', value as PopupSettings['wordHighlightStyle'])} /></div>
-                </div>
-              </section>
-            ) : null}
-            {moreView === 'shortcuts' ? (
-              <section className="fl-popup-detail" aria-label="快捷键">
-                <div className="fl-popup-detail-heading"><Button aria-label="返回更多设置" onPress={() => setMoreView('menu')}><ArrowLeft aria-hidden="true" /></Button><div><strong>常用快捷键</strong><span>无需离开正在阅读的网页</span></div></div>
-                <div className="fl-popup-card fl-popup-shortcuts">
-                  <div><span>播放 / 暂停</span><kbd>Alt + Space</kbd></div>
-                  <div><span>上一句 / 下一句</span><kbd>Alt + ← / →</kbd></div>
-                  <div><span>回到正文</span><kbd>Alt + L</kbd></div>
-                </div>
-              </section>
-            ) : null}
+            <nav className="fl-popup-card fl-popup-footer-nav" aria-label="其他设置与工作台">
+              <NavRow icon={Languages} label="OCR 与翻译工作台" value="网页、图片与 PDF" onPress={onOpenDocuments} />
+              <NavRow icon={Settings2} label="打开全部设置" value="唯一设置中心" onPress={() => onOpenSettings?.('voice', model.settings.activeProviderId)} />
+            </nav>
           </TabPanel>
         </Tabs>
       </div>

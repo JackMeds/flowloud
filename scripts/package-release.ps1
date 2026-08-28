@@ -105,7 +105,15 @@ foreach ($browser in @('edge', 'chrome')) {
     if ($forbiddenEntries.Count -gt 0) {
         throw "Release archive contains development-only files: $($forbiddenEntries -join ', ')"
     }
-    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
+    $zipStream = [IO.File]::OpenRead($zip)
+    try {
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        try {
+            $hash = ([BitConverter]::ToString($sha256.ComputeHash($zipStream))).Replace('-', '').ToLowerInvariant()
+        }
+        finally { $sha256.Dispose() }
+    }
+    finally { $zipStream.Dispose() }
     Set-Content -Encoding ascii -LiteralPath "$zip.sha256" -Value "$hash  $([IO.Path]::GetFileName($zip))"
     $unpackedRelative = if ($browser -eq 'edge') { 'dist\Flowloud-Edge' } else { 'dist\Flowloud-Chrome' }
     $unpacked = Join-Path $projectRoot $unpackedRelative

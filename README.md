@@ -46,7 +46,7 @@ Flowloud 适合这些场景：
 ### 五种 TTS 来源
 
 - `browser-system`：默认，使用 `chrome.tts`，无需下载或配置。
-- `browser-model`：用户确认后从 Hugging Face 下载固定 revision 的 Kokoro v1.1 中英权重和预设音色，在浏览器本地推理。
+- `browser-model`：用户确认后默认从魔搭社区（ModelScope）下载固定 revision 的 Kokoro v1.1 中英权重和按需预设音色，在浏览器本地推理；Hugging Face 仅作为手动备用来源。
 - `local-service`：只连接本机回环地址；首批原生适配 Flowloud Qwen、GPT-SoVITS、CosyVoice，并支持 OpenAI 本地兼容协议。
 - `openai-compatible`：用户配置 HTTPS Base URL、model、voice 和 API Key，调用 `/v1/audio/speech`。
 - `doubao-tts`：使用豆包语音原生单向流式协议，不伪装成 OpenAI 接口。

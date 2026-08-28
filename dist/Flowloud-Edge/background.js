@@ -4,6 +4,7 @@ if (typeof importScripts === 'function') {
   if (!globalThis.FlowloudSettings) backgroundScripts.push('shared/settings-schema.js');
   if (!globalThis.QwenReaderApiClient) backgroundScripts.push('shared/api-client.js');
   if (!globalThis.FlowloudProviderCore) backgroundScripts.push('shared/provider-core.js');
+  if (!globalThis.FlowloudBrowserModelManifest) backgroundScripts.push('shared/browser-model-manifest.js');
   if (!globalThis.FlowloudProviderV3) backgroundScripts.push('shared/provider-v3.js');
   if (!globalThis.FlowloudProviderV4) backgroundScripts.push('shared/provider-v4.js');
   if (!globalThis.FlowloudDocumentProviderV1) backgroundScripts.push('shared/document-provider-v1.js');
@@ -42,6 +43,7 @@ if (typeof importScripts === 'function') {
   const PAGE_EDITOR_CONTEXTS_KEY = 'qwenReaderPageEditorContexts';
   const GLOBAL_PLAYBACK_KEY = 'flowloudGlobalPlaybackV1';
   const DOCUMENT_WORKSPACE_SEED_KEY = 'flowloudDocumentWorkspaceSeedV1';
+  const PROVIDER_VALIDATION_KEY = 'flowloudProviderValidationV1';
   const PAGE_EDITOR_PATH = 'page-voices.html';
   const BUILTIN_VOICES = ['邵思萌', 'qwen-clone'];
 
@@ -532,8 +534,19 @@ if (typeof importScripts === 'function') {
       const body = Object.assign({}, message || {});
       if (!active) return body;
       const supplied = identity(body);
-      if (supplied.playbackId || supplied.requestId || supplied.sourceTabId != null) return body;
-      return Object.assign({}, body, {
+      // Control messages commonly carry playbackId/requestId but omit the
+      // provider.  Returning them unchanged used to route a session that had
+      // fallen back to system TTS through the currently selected provider
+      // (usually browser-model), making pause/resume appear to fail.  Merge
+      // the active session identity whenever the supplied identity belongs to
+      // that session; keep an explicitly supplied field authoritative.
+      const suppliedPlayback = supplied.playbackId;
+      const suppliedRequest = supplied.requestId;
+      const suppliedTab = supplied.sourceTabId;
+      if (suppliedPlayback && active.playbackId && suppliedPlayback !== active.playbackId) return body;
+      if (!suppliedPlayback && suppliedRequest && active.requestId && suppliedRequest !== active.requestId) return body;
+      if (suppliedTab != null && active.sourceTabId != null && suppliedTab !== active.sourceTabId) return body;
+      return Object.assign({
         sourceTabId: active.sourceTabId,
         sourceDocumentId: active.sourceDocumentId,
         pageKey: active.pageKey,
@@ -544,7 +557,7 @@ if (typeof importScripts === 'function') {
         clientId: active.clientId,
         providerId: active.providerId,
         intentSequence: active.intentSequence,
-      });
+      }, body);
     }
 
     async function update(patch, matcher) {
@@ -806,6 +819,18 @@ if (typeof importScripts === 'function') {
     if (!api) throw new TypeError('缺少本地 TTS 客户端。');
     let requestSequence = 0;
 
+    async function providerValidations() {
+      const value = await storage.get(PROVIDER_VALIDATION_KEY);
+      return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    }
+
+    async function invalidateProviderValidation(providerId) {
+      const validations = await providerValidations();
+      if (!providerId) return;
+      delete validations[providerId];
+      await storage.set(PROVIDER_VALIDATION_KEY, validations);
+    }
+
     async function profiles() {
       const saved = await storage.get('voiceProfiles');
       return Array.isArray(saved) ? saved : [];
@@ -862,7 +887,8 @@ if (typeof importScripts === 'function') {
           payload.providerSettings = settings.providerSettings[payload.providerId] || {};
           if (payload.request && typeof payload.request === 'object') {
             payload.request.rate = payload.playbackRate;
-            if (!payload.request.voice && settings.providerVoices[payload.providerId]) payload.request.voice = settings.providerVoices[payload.providerId];
+            const assignment = settings.voiceAssignmentsByProvider?.[payload.providerId] || {};
+            if (!payload.request.voice && assignment.narratorVoiceId) payload.request.voice = assignment.narratorVoiceId;
             if (!payload.request.model && payload.providerSettings.model) payload.request.model = payload.providerSettings.model;
             if (!payload.request.response_format && payload.providerSettings.responseFormat) {
               payload.request.response_format = payload.providerSettings.responseFormat;
@@ -963,9 +989,56 @@ if (typeof importScripts === 'function') {
           }
           case 'settings:set': {
             const schema = globalThis.FlowloudSettings;
+            const current = schema ? schema.migrate(await storage.get(SETTINGS_KEY)) : await storage.get(SETTINGS_KEY);
             const next = schema ? schema.publicSettings(body.settings) : body.settings;
             await storage.set(SETTINGS_KEY, next);
+            if (schema) {
+              const validations = await providerValidations();
+              let changed = false;
+              for (const providerId of schema.PROVIDER_IDS) {
+                if (JSON.stringify(current?.providerSettings?.[providerId] || {}) !== JSON.stringify(next?.providerSettings?.[providerId] || {})) {
+                  delete validations[providerId];
+                  changed = true;
+                }
+              }
+              if (changed) await storage.set(PROVIDER_VALIDATION_KEY, validations);
+            }
             return { ok: true, settings: next };
+          }
+          case 'settings:voice:assign': {
+            const schema = globalThis.FlowloudSettings;
+            if (!schema) throw Object.assign(new Error('设置 Schema 尚未加载。'), { code: 'settings_schema_unavailable' });
+            const providerId = String(body.providerId || '');
+            if (!schema.PROVIDER_IDS.includes(providerId)) throw Object.assign(new Error('未知的语音来源。'), { code: 'invalid_provider' });
+            const requested = body.assignment && typeof body.assignment === 'object' ? body.assignment : {};
+            const assertScoped = (voice) => {
+              const split = schema.splitVoice(voice);
+              if (split.providerId && split.providerId !== providerId) {
+                throw Object.assign(new Error('音色与当前语音来源不匹配。'), { code: 'voice_provider_mismatch' });
+              }
+              return schema.namespaceVoice(providerId, split.voiceId);
+            };
+            const current = schema.migrate(await storage.get(SETTINGS_KEY));
+            const previous = current.voiceAssignmentsByProvider[providerId] || {};
+            const authorVoices = Object.assign({}, previous.authorVoices || {});
+            if (requested.authorVoices && typeof requested.authorVoices === 'object') {
+              for (const [authorId, voice] of Object.entries(requested.authorVoices)) {
+                const scoped = assertScoped(voice);
+                if (scoped) authorVoices[String(authorId)] = scoped;
+                else delete authorVoices[String(authorId)];
+              }
+            }
+            const assignment = schema.normalizeAssignment(providerId, {
+              narratorVoiceId: requested.narratorVoiceId === undefined ? previous.narratorVoiceId : assertScoped(requested.narratorVoiceId),
+              replyVoiceIds: requested.replyVoiceIds === undefined ? previous.replyVoiceIds : (Array.isArray(requested.replyVoiceIds) ? requested.replyVoiceIds : []).map(assertScoped),
+              authorVoices,
+            }, previous);
+            const next = schema.publicSettings(Object.assign({}, current, {
+              activeProviderId: providerId,
+              voiceAssignmentsByProvider: Object.assign({}, current.voiceAssignmentsByProvider, { [providerId]: assignment }),
+            }));
+            await storage.set(SETTINGS_KEY, next);
+            return { ok: true, settings: next, assignment: next.voiceAssignmentsByProvider[providerId] };
           }
           case 'settings:reset': {
             const schema = globalThis.FlowloudSettings;
@@ -974,6 +1047,19 @@ if (typeof importScripts === 'function') {
             // Reset preferences without deleting or orphaning downloaded model
             // metadata. Model deletion remains an explicit, separate action.
             defaults.modelCacheRegistry = current.modelCacheRegistry || {};
+            if (defaults.providerSettings?.['browser-model'] && current.providerSettings?.['browser-model']) {
+              const currentBrowserModel = current.providerSettings['browser-model'];
+              const preservedModelKeys = [
+                'modelId', 'repoId', 'revision', 'hfRevision', 'source', 'fallbackSource', 'variant', 'dtype',
+                'device', 'allowWasmFallback', 'downloadConcurrency', 'starterVoiceIds', 'downloaded',
+                'cacheMetadata', 'voiceCacheRegistry', 'configured', 'lastConfiguredAt', 'legacyRevision',
+              ];
+              for (const key of preservedModelKeys) {
+                if (currentBrowserModel[key] !== undefined) {
+                  defaults.providerSettings['browser-model'][key] = currentBrowserModel[key];
+                }
+              }
+            }
             const next = schema ? schema.publicSettings(defaults) : defaults;
             await storage.set(SETTINGS_KEY, next);
             return { ok: true, settings: next };
@@ -1020,6 +1106,7 @@ if (typeof importScripts === 'function') {
             else delete rememberedSecrets[providerId];
             if (session) await session.set(schema.SESSION_SECRET_KEY, sessionSecrets);
             await storage.set(schema.REMEMBERED_SECRET_KEY, rememberedSecrets);
+            await invalidateProviderValidation(providerId);
             return { ok: true, providerId, present: Boolean(secret), remembered: Boolean(body.remember && secret) };
           }
           case 'reader:position:get':
@@ -1040,9 +1127,51 @@ if (typeof importScripts === 'function') {
             return { ok: true, playback: playbackCoordinator ? await playbackCoordinator.getSnapshot() : { active: false, state: 'idle' } };
           case 'playback:release':
             return { ok: true, playback: playbackCoordinator ? await playbackCoordinator.release(body, body.reason) : { active: false, state: 'idle' } };
-          case 'provider:test':
+          case 'provider:status:list': {
+            const schema = globalThis.FlowloudSettings;
+            const settings = schema ? schema.migrate(await storage.get(SETTINGS_KEY)) : {};
+            const validations = await providerValidations();
+            const statuses = (schema?.PROVIDER_IDS || []).map((providerId) => {
+              if (providerId === 'browser-system') return { providerId, configured: true, usable: true, connectionState: 'connected', stage: 'voices', message: '浏览器系统音色可用' };
+              const validation = validations[providerId];
+              const config = settings.providerSettings?.[providerId] || {};
+              const configured = providerId === 'browser-model'
+                ? Boolean(config.downloaded || config.configured || Object.keys(config.voiceCacheRegistry || {}).length)
+                : providerId === 'local-service'
+                  ? Boolean(config.configured || config.lastConfiguredAt)
+                  : providerId === 'openai-compatible'
+                    ? Boolean(config.baseUrl && config.model && (config.voiceIds || []).length)
+                    : Boolean(config.appId && (config.voiceIds || []).length);
+              return validation || { providerId, configured, usable: false, connectionState: configured ? 'unavailable' : 'unconfigured', stage: 'configuration', message: configured ? '已配置，等待验证' : '尚未配置' };
+            });
+            return { ok: true, statuses };
+          }
+          case 'provider:test': {
             if (typeof testProvider !== 'function') throw Object.assign(new Error('朗读引擎测试不可用。'), { code: 'provider_test_unavailable' });
-            return await testProvider(body.providerId, body);
+            const providerId = String(body.providerId || '');
+            try {
+              const result = await testProvider(providerId, body);
+              const validations = await providerValidations();
+              const now = new Date().toISOString();
+              validations[providerId] = {
+                providerId, configured: true, usable: true, connectionState: 'connected',
+                stage: String(result.stage || 'synthesize'), verifiedAt: now,
+                voiceCount: Number(result.voiceCount) || undefined,
+                message: String(result.message || `已验证 · ${now}`),
+              };
+              await storage.set(PROVIDER_VALIDATION_KEY, validations);
+              return Object.assign({}, result, { verifiedAt: now });
+            } catch (error) {
+              const validations = await providerValidations();
+              validations[providerId] = {
+                providerId, configured: true, usable: false, connectionState: 'failed',
+                stage: String(error.stage || 'configuration'), verifiedAt: new Date().toISOString(),
+                message: String(error.message || '验证失败'),
+              };
+              await storage.set(PROVIDER_VALIDATION_KEY, validations);
+              throw error;
+            }
+          }
 
           case 'document:workspace:open':
             if (typeof openDocumentWorkspace !== 'function') throw Object.assign(new Error('文档工作台暂时无法打开。'), { code: 'document_workspace_unavailable' });
@@ -1065,19 +1194,31 @@ if (typeof importScripts === 'function') {
           case 'provider:model:download':
           case 'provider:model:verify':
           case 'provider:model:delete':
-          case 'provider:model:cancel': {
+          case 'provider:model:cancel':
+          case 'provider:model:voice-list':
+          case 'provider:model:voice-info':
+          case 'provider:model:voice-download':
+          case 'provider:model:voice-repair':
+          case 'provider:model:voice-delete': {
             const response = await forward(Object.assign({}, body, { providerId: 'browser-model' }), false);
-            if (response?.ok === false || !['provider:model:download', 'provider:model:verify', 'provider:model:delete'].includes(body.type)) return response;
+            if (response?.ok === false || !['provider:model:download', 'provider:model:verify', 'provider:model:delete', 'provider:model:voice-list', 'provider:model:voice-info', 'provider:model:voice-download', 'provider:model:voice-repair', 'provider:model:voice-delete'].includes(body.type)) return response;
             const schema = globalThis.FlowloudSettings;
             const settings = schema ? schema.migrate(await storage.get(SETTINGS_KEY)) : await storage.get(SETTINGS_KEY);
             const result = response?.result && typeof response.result === 'object' ? response.result : {};
             const browserModel = settings?.providerSettings?.['browser-model'];
             if (!browserModel) return response;
+            if (body.type === 'provider:model:voice-list' || body.type === 'provider:model:voice-info') return response;
             settings.modelCacheRegistry = Object.assign({}, settings.modelCacheRegistry || {});
             if (body.type === 'provider:model:delete') {
               browserModel.downloaded = false;
               browserModel.cacheMetadata = {};
               if (result.cacheId) delete settings.modelCacheRegistry[result.cacheId];
+            } else if (body.type === 'provider:model:voice-download' || body.type === 'provider:model:voice-repair' || body.type === 'provider:model:voice-delete') {
+              const voiceId = String(result.voiceId || body.voiceId || body.voice || '').replace(/^browser-model:/u, '');
+              browserModel.voiceCacheRegistry = Object.assign({}, browserModel.voiceCacheRegistry || {});
+              if (voiceId) browserModel.voiceCacheRegistry[voiceId] = Object.assign({}, browserModel.voiceCacheRegistry[voiceId] || {}, result, {
+                voiceId, cached: body.type === 'provider:model:voice-delete' ? false : result.cached !== false,
+              });
             } else {
               browserModel.downloaded = result.ready === true;
               browserModel.cacheMetadata = Object.assign({}, result);
@@ -1151,13 +1292,16 @@ if (typeof importScripts === 'function') {
               if (!result || !result.ok || !Array.isArray(result.voices)) return result;
               if (!editableLocal) {
                 return Object.assign({}, result, {
-                  voices: result.voices.map((voice) => Object.assign({}, voice, {
-                    providerId,
-                    local: false,
-                    editable: false,
-                    readOnly: true,
-                    source: providerId === 'browser-system' ? 'system' : 'provider',
-                  })),
+                  voices: result.voices.map((voice) => {
+                    const sourceVoice = voice && typeof voice === 'object' ? voice : {};
+                    return Object.assign({}, sourceVoice, {
+                      providerId,
+                      local: false,
+                      editable: false,
+                      readOnly: true,
+                      source: providerId === 'browser-system' ? 'system' : sourceVoice.source || 'provider',
+                    });
+                  }),
                 });
               }
               const savedProfiles = await profiles();
@@ -1315,7 +1459,7 @@ if (typeof importScripts === 'function') {
             if (typeof openVoiceStudio !== 'function') {
               throw new Error('音色录制室暂时无法打开。');
             }
-            await openVoiceStudio();
+            await openVoiceStudio(String(body.providerId || 'local-service'));
             return { ok: true };
 
           default:
@@ -1842,8 +1986,8 @@ if (typeof importScripts === 'function') {
         if (result && typeof result.catch === 'function') result.catch(() => {});
       } catch (_) { /* Older Chromium builds may not expose storage access levels. */ }
     }
-    const openVoiceStudio = () => chromeApi.tabs.create({
-      url: `${chromeApi.runtime.getURL('voice-studio.html')}#voices`,
+    const openVoiceStudio = (providerId = 'local-service') => chromeApi.tabs.create({
+      url: `${chromeApi.runtime.getURL('voice-studio.html')}?provider=${encodeURIComponent(providerId)}`,
     });
     const openDocumentWorkspace = async (requestedTabId) => {
       let sourceTabId = Number(requestedTabId);
@@ -1908,62 +2052,70 @@ if (typeof importScripts === 'function') {
       const stored = await chromeApi.storage.local.get([SETTINGS_KEY, schema.REMEMBERED_SECRET_KEY]);
       const sessionStored = await chromeApi.storage.session.get(schema.SESSION_SECRET_KEY).catch(() => ({}));
       const settings = schema.migrate(stored[SETTINGS_KEY]);
+      const requestId = String(request && request.requestId || `provider-test-${Date.now().toString(36)}`);
+      const previewText = String(request && request.previewText || '你好，这是 Flowloud 语音连接测试。').trim();
+      const assignment = settings.voiceAssignmentsByProvider?.[providerId] || {};
+      const requestedVoice = String(request && request.voiceId || assignment.narratorVoiceId || '');
+      const runStage = async (stage, operation) => {
+        try { return await operation(); }
+        catch (error) {
+          if (error && error.stage && error.stage !== stage) error.providerStage = error.stage;
+          if (error) error.stage = stage;
+          throw error;
+        }
+      };
+      const audioPayload = async (result, fallbackMime = 'audio/mpeg') => {
+        const blob = result && (result.blob || result.audio);
+        if (!blob || typeof blob.arrayBuffer !== 'function') {
+          throw Object.assign(new Error('服务没有返回可试听的音频。'), { code: 'invalid_response', stage: 'synthesize' });
+        }
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        let binary = '';
+        for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+        return { audioBase64: btoa(binary), mimeType: result.mimeType || blob.type || fallbackMime };
+      };
+      if (providerId === 'browser-system') {
+        const voices = await runStage('voices', () => systemTts.voices());
+        if (!Array.isArray(voices) || !voices.length) throw Object.assign(new Error('浏览器没有返回系统音色。'), { code: 'empty_voice_list', stage: 'voices' });
+        return { ok: true, providerId, ready: true, stage: 'voices', voiceCount: voices.length, voices, message: `已读取 ${voices.length} 个系统音色` };
+      }
       if (providerId === 'local-service') {
         const config = settings.providerSettings['local-service'];
         const clientToken = sessionStored[schema.SESSION_SECRET_KEY]?.['local-service']
           || stored[schema.REMEMBERED_SECRET_KEY]?.['local-service'] || '';
         const provider = providerApi.createLocalServiceProvider(Object.assign({}, config, { clientToken }));
-        const result = await provider.health({ requestId: String(request && request.requestId || `health-${Date.now().toString(36)}`) });
-        return {
-          ok: result && result.ok !== false,
-          providerId,
-          adapterId: result.adapterId || config.adapterId,
-          ready: result.ready !== false,
-          capabilities: result.capabilities || provider.capabilities,
-          requestId: result.requestId || String(request && request.requestId || ''),
-        };
+        const health = await runStage('health', () => provider.health({ requestId }));
+        if (health && health.ok === false) throw Object.assign(new Error('本地服务健康检查失败。'), { code: 'health_failed', stage: 'health' });
+        const voices = await runStage('voices', () => provider.voices({ requestId }));
+        if (!Array.isArray(voices) || !voices.length) throw Object.assign(new Error('本地服务已响应，但没有返回任何音色。'), { code: 'empty_voice_list', stage: 'voices' });
+        const voice = requestedVoice || String(voices[0].id || voices[0].voiceId || voices[0].name || '');
+        const result = await runStage('synthesize', () => provider.synthesize({ input: previewText, voice, response_format: config.responseFormat, requestId }));
+        return Object.assign({ ok: true, audition: true, providerId, adapterId: health.adapterId || config.adapterId, ready: true, stage: 'synthesize', voiceCount: voices.length, voices, capabilities: health.capabilities || provider.capabilities, requestId: result.requestId || requestId, message: `连接成功 · 已获取 ${voices.length} 个音色` }, await audioPayload(result, 'audio/wav'));
       }
       if (providerId === 'doubao-tts') {
         const config = settings.providerSettings['doubao-tts'];
         const apiKey = sessionStored[schema.SESSION_SECRET_KEY]?.['doubao-tts'] || stored[schema.REMEMBERED_SECRET_KEY]?.['doubao-tts'] || '';
         const provider = providerApi.createDoubaoTtsProvider(Object.assign({}, config, { apiKey }));
-        const previewText = String(request && request.previewText || '').trim();
-        if (!previewText) throw Object.assign(new Error('请填写用于试听的短句。'), { code: 'missing_preview_text' });
-        const result = await provider.synthesize({ input: previewText, voice: config.voice, response_format: config.responseFormat, requestId: String(request && request.requestId || `doubao-${Date.now().toString(36)}`) });
-        const blob = result && (result.blob || result.audio);
-        const bytes = new Uint8Array(await blob.arrayBuffer());
-        let binary = '';
-        for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-        return { ok: true, audition: true, audioBase64: btoa(binary), mimeType: result.mimeType || blob.type || 'audio/mpeg', providerId, requestId: result.requestId };
+        const voices = await runStage('voices', () => provider.voices({ requestId }));
+        const voice = requestedVoice || String(config.voiceIds?.[0] || '');
+        if (!voice) throw Object.assign(new Error('请先配置豆包音色 ID。'), { code: 'voice_required', stage: 'voices' });
+        const result = await runStage('synthesize', () => provider.synthesize({ input: previewText, voice, response_format: config.responseFormat, requestId }));
+        return Object.assign({ ok: true, audition: true, providerId, stage: 'synthesize', voiceCount: voices.length, requestId: result.requestId || requestId, message: '真实短句合成验证通过' }, await audioPayload(result));
       }
       if (providerId !== 'openai-compatible') throw Object.assign(new Error('当前引擎暂不支持连接测试。'), { code: 'provider_test_unsupported' });
       const config = settings.providerSettings['openai-compatible'];
       const apiKey = sessionStored[schema.SESSION_SECRET_KEY]?.['openai-compatible'] || stored[schema.REMEMBERED_SECRET_KEY]?.['openai-compatible'] || '';
       const provider = providerApi.createOpenAICompatibleProvider(Object.assign({}, config, { apiKey }));
-      const previewText = String(request && request.previewText || '').trim();
-      if (!previewText) throw Object.assign(new Error('请填写用于试听的短句。'), { code: 'missing_preview_text' });
-      const result = await provider.synthesize({
+      const voices = await runStage('voices', () => provider.voices({ requestId }));
+      const voice = requestedVoice || String(config.voiceIds?.[0] || 'alloy');
+      const result = await runStage('synthesize', () => provider.synthesize({
         input: previewText,
         model: config.model,
-        voice: config.voice,
+        voice,
         response_format: config.responseFormat,
-        requestId: String(request && request.requestId || `audition-${Date.now().toString(36)}`),
-      }, { apiKey });
-      const blob = result && (result.blob || result.audio);
-      if (!blob || typeof blob.arrayBuffer !== 'function') throw Object.assign(new Error('在线服务没有返回可试听的音频。'), { code: 'invalid_response' });
-      const bytes = new Uint8Array(await blob.arrayBuffer());
-      let binary = '';
-      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-        binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-      }
-      return {
-        ok: true,
-        audition: true,
-        audioBase64: btoa(binary),
-        mimeType: result.mimeType || blob.type || 'audio/mpeg',
-        providerId,
-        requestId: result.requestId || String(request && request.requestId || ''),
-      };
+        requestId,
+      }, { apiKey }));
+      return Object.assign({ ok: true, audition: true, providerId, stage: 'synthesize', voiceCount: voices.length, requestId: result.requestId || requestId, message: '真实短句合成验证通过' }, await audioPayload(result));
     }
     const router = createMessageRouter({
       api, storage, session, openVoiceStudio, openDocumentWorkspace, captureVisibleTab,

@@ -8,12 +8,12 @@ title: Provider 协议与数据流
 | 来源 | 协议 | 数据去向 | 凭据 |
 |---|---|---|---|
 | 浏览器系统语音 | `chrome.tts` | 浏览器/操作系统 | 无 |
-| 浏览器模型 | Kokoro v1.1 中英 ONNX | 本机 WebGPU；失败后明确回退 WASM | 无 |
+| 浏览器模型 | Kokoro v1.1 中英 ONNX | 本机 WASM 兼容模式（WebGPU 可选；初始化或音频质量失败后回退） | 无 |
 | 本地服务 | Flowloud Qwen、GPT-SoVITS、CosyVoice、OpenAI 本地兼容 | 用户授权的回环地址 | 会话默认，可选本机记住 |
 | OpenAI 兼容 TTS | `/v1/audio/speech` | 用户授权的 HTTPS origin | 会话默认，可选本机记住 |
 | 豆包 TTS | `/api/v3/tts/unidirectional` | 火山语音 origin | 会话默认，可选本机记住 |
 
-浏览器只内置一套 `@uzen/kokoro-js` + Transformers.js + ONNX Runtime Web 运行时。模型 `onnx-community/Kokoro-82M-v1.1-zh-ONNX` 固定到 `6cc0f0d2ebe369a68b0df87c2b65c1af8c0ac3e3`，权重和音色按需进入 Cache Storage，不进入扩展 ZIP。Kokoro 是预设音色模型，不显示参考音频或克隆入口。
+浏览器只内置一套 `@uzen/kokoro-js` + Transformers.js + ONNX Runtime Web 运行时。模型 `onnx-community/Kokoro-82M-v1.1-zh-ONNX` 默认从魔搭社区固定到 revision `71bfd8ce077d1f8c70a183704da7c55c1c4cded6`；Hugging Face revision `6cc0f0d2ebe369a68b0df87c2b65c1af8c0ac3e3` 仅在用户手动选择备用来源时使用。权重和音色按需进入 Cache Storage，不进入扩展 ZIP；Range 分片支持最多 4 路并发并可续传。Kokoro 是预设音色模型，不显示参考音频或克隆入口。
 
 ## Document/Language Provider V1
 

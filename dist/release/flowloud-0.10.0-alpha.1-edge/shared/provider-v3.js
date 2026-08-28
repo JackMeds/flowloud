@@ -1,8 +1,11 @@
 (function providerV3Module(root, factory) {
-  const exported = factory(root.QwenReaderProviderV2 || (typeof require === 'function' ? require('./provider-v2.js') : null));
+  const exported = factory(
+    root.QwenReaderProviderV2 || (typeof require === 'function' ? require('./provider-v2.js') : null),
+    root.FlowloudBrowserModelManifest || (typeof require === 'function' ? require('./browser-model-manifest.js') : null),
+  );
   if (typeof module === 'object' && module.exports) module.exports = exported;
   root.FlowloudProviderV3 = exported;
-}(typeof globalThis !== 'undefined' ? globalThis : this, function makeProviderV3(legacy) {
+}(typeof globalThis !== 'undefined' ? globalThis : this, function makeProviderV3(legacy, browserModelManifest) {
   'use strict';
 
   const PROVIDER_VERSION = 3;
@@ -144,7 +147,7 @@
       if (!key) throw new ProviderError('missing_api_key', '请先填写 API Key。');
       const response = await fetchImpl(`${baseUrl}/v1/audio/speech`, { method: 'POST', signal: object(operation).signal,
         headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model: text(body.model || config.model), voice: rawVoiceId('openai-compatible', body.voice || config.voice || 'alloy'), input: text(body.text || body.input), response_format: body.responseFormat || body.response_format || format }) });
+        body: JSON.stringify({ model: text(body.model || config.model), voice: rawVoiceId('openai-compatible', body.voice || config.voiceIds?.[0] || 'alloy'), input: text(body.text || body.input), response_format: body.responseFormat || body.response_format || format }) });
       if (!response.ok) throw new ProviderError(`http_${response.status}`, `在线 TTS 请求失败（HTTP ${response.status}）。`, { status: response.status });
       const declared = Number(response.headers?.get?.('content-length') || 0);
       if (declared > MAX_RESPONSE_BYTES) throw new ProviderError('response_too_large', '在线 TTS 返回的音频超过 64 MB。');
@@ -165,27 +168,83 @@
         providerId: 'openai-compatible',
         requiresAudition: true,
       }),
-      voices: async () => (config.voices || ['alloy']).map((name) => ({ id: voiceId('openai-compatible', name), voiceId: name, name, label: name, providerId: 'openai-compatible' })),
+      voices: async () => (config.voiceIds || config.voices || ['alloy']).map((name) => ({ id: voiceId('openai-compatible', name), voiceId: name, name, label: name, providerId: 'openai-compatible' })),
       synthesize, cancel: async () => ({ cancelled: true }) });
   }
 
+  const manifestModel = browserModelManifest?.BUILTIN_BROWSER_MODEL || {};
   const BUILTIN_BROWSER_MODELS = Object.freeze({
-    'kokoro-zh': Object.freeze({ repoId: 'onnx-community/Kokoro-82M-v1.1-zh-ONNX', revision: '6cc0f0d2ebe369a68b0df87c2b65c1af8c0ac3e3', lang: 'zh-CN', license: 'Apache-2.0', voice: 'zf_001', estimatedBytes: 110 * 1024 * 1024 }),
+    'kokoro-zh': Object.freeze(Object.assign({
+      repoId: 'onnx-community/Kokoro-82M-v1.1-zh-ONNX',
+      revision: browserModelManifest?.MODELSCOPE_REVISION || '71bfd8ce077d1f8c70a183704da7c55c1c4cded6',
+      hfRevision: browserModelManifest?.HUGGINGFACE_REVISION || '6cc0f0d2ebe369a68b0df87c2b65c1af8c0ac3e3',
+      source: 'modelscope', lang: 'zh-CN', license: 'Apache-2.0', voice: 'zf_001',
+      estimatedBytes: 342 * 1024 * 1024,
+    }, manifestModel, { source: 'modelscope' })),
   });
   function validateRepoId(value) {
     const id = text(value);
-    if (!/^[A-Za-z0-9][\w.-]{0,95}\/[A-Za-z0-9][\w.-]{0,95}$/.test(id)) throw new ProviderError('invalid_model_repo', 'Hugging Face Repo ID 格式无效。');
+    if (!/^[A-Za-z0-9][\w.-]{0,95}\/[A-Za-z0-9][\w.-]{0,95}$/.test(id)) throw new ProviderError('invalid_model_repo', '模型 Repo ID 格式无效。');
     return id;
   }
   function pcmToWav(samples, sampleRate) {
     const input = samples instanceof Float32Array ? samples : Float32Array.from(samples || []);
+    let peak = 0;
+    for (let i = 0; i < input.length; i += 1) {
+      const value = Number(input[i]);
+      if (Number.isFinite(value)) peak = Math.max(peak, Math.abs(value));
+    }
+    // Kokoro's fp32 output is often around -26 dBFS. Apply a bounded make-up
+    // gain so browser playback is intelligible without allowing a malformed
+    // backend waveform to be hidden by arbitrary amplification.
+    const gain = peak > 0 && peak < 0.9 ? Math.min(2.5, 0.9 / peak) : 1;
     const buffer = new ArrayBuffer(44 + input.length * 2); const view = new DataView(buffer);
     const write = (offset, value) => { for (let index = 0; index < value.length; index += 1) view.setUint8(offset + index, value.charCodeAt(index)); };
     write(0, 'RIFF'); view.setUint32(4, 36 + input.length * 2, true); write(8, 'WAVE'); write(12, 'fmt ');
     view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true);
     view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true); write(36, 'data'); view.setUint32(40, input.length * 2, true);
-    for (let i = 0; i < input.length; i += 1) view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, input[i])) * 0x7fff, true);
+    for (let i = 0; i < input.length; i += 1) {
+      const value = Number.isFinite(Number(input[i])) ? Number(input[i]) * gain : 0;
+      view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, value)) * 0x7fff, true);
+    }
     return buffer;
+  }
+  function audioSignal(samples) {
+    let maxAbs = 0;
+    let nonZero = 0;
+    let finite = 0;
+    let clipped = 0;
+    let sum = 0;
+    let sumSquares = 0;
+    let alternatingHigh = 0;
+    let previous = 0;
+    const length = Number(samples?.length) || 0;
+    for (let index = 0; index < length; index += 1) {
+      const value = Number(samples[index]);
+      if (!Number.isFinite(value)) continue;
+      finite += 1;
+      const abs = Math.abs(value);
+      if (abs > 1e-6) nonZero += 1;
+      if (abs > maxAbs) maxAbs = abs;
+      if (abs >= 0.999) clipped += 1;
+      sum += value;
+      sumSquares += value * value;
+      if (index > 0 && abs >= 0.5 && Math.abs(previous) >= 0.5 && Math.sign(previous) !== Math.sign(value)) alternatingHigh += 1;
+      previous = value;
+    }
+    const rms = finite > 0 ? Math.sqrt(sumSquares / finite) : 0;
+    const crestFactor = rms > 0 ? maxAbs / rms : Infinity;
+    // A healthy Kokoro fp32 waveform has a substantial active body and a
+    // crest factor in the single digits.  WebGPU failures observed in the
+    // field contain full-scale alternating spikes or a sparse waveform with
+    // a crest factor above 20; both are perceived as electrical noise.
+    const likelyCorrupt = length >= 1024 && (
+      finite !== length || clipped > 0 || alternatingHigh >= 4 || (maxAbs >= 0.5 && crestFactor >= 20)
+    );
+    return {
+      maxAbs, nonZero, finite, mean: finite > 0 ? sum / finite : 0, rms, crestFactor,
+      clipped, alternatingHigh, likelyCorrupt, audible: maxAbs >= 1e-4 && nonZero > 0,
+    };
   }
   function createBrowserModelProvider(options) {
     const config = object(options); const preset = BUILTIN_BROWSER_MODELS[config.modelId];
@@ -194,14 +253,27 @@
       throw new ProviderError('remote_code_forbidden', '自定义模型不允许远程代码、自定义加载器或任意模型主机。');
     }
     const repoId = validateRepoId(preset?.repoId || config.repoId);
-    const revision = text(preset?.revision || config.revision || 'main');
+    const requestedSource = text(config.source || config.sourceId || config.modelSource || preset?.source || 'modelscope').toLowerCase();
+    if (!['modelscope', 'huggingface'].includes(requestedSource)) throw new ProviderError('invalid_model_source', '模型来源无效，请选择魔搭社区或手动 Hugging Face。');
+    const sourceInfo = browserModelManifest?.source
+      ? browserModelManifest.source(requestedSource)
+      : { id: requestedSource === 'huggingface' ? 'huggingface' : 'modelscope', label: requestedSource === 'huggingface' ? 'Hugging Face（手动备用）' : '魔搭社区', revision: requestedSource === 'huggingface' ? preset?.hfRevision : preset?.revision, host: requestedSource === 'huggingface' ? 'https://huggingface.co/' : 'https://www.modelscope.cn/models/', remotePathTemplate: '{model}/resolve/{revision}/' };
+    const revision = text(config.revision || sourceInfo.revision || 'main');
     if (!/^[A-Za-z0-9._/-]{1,160}$/.test(revision) || revision.includes('..')) throw new ProviderError('invalid_model_revision', '模型 revision 无效。');
     if (!preset && !/^[a-f0-9]{40}$/i.test(revision)) throw new ProviderError('unpinned_model_revision', '实验性自定义模型必须填写完整的 40 位 commit revision。');
     const pipelineFactory = config.pipelineFactory;
     let pipelinePromise = null;
     let resolvedDevice = config.device === 'wasm' ? 'wasm' : 'webgpu';
     let fallbackReason = '';
-    const cacheKey = `flowloud-model-${repoId}@${revision}`;
+    const selectedVariant = () => browserModelManifest?.variant
+      ? browserModelManifest.variant(config.variant || config.dtype || 'auto', resolvedDevice)
+      : { id: text(config.variant || 'auto') || 'auto', dtype: text(config.dtype || 'fp32') || 'fp32', estimatedBytes: Number(preset?.estimatedBytes || 0) };
+    let variantInfo = selectedVariant();
+    let cacheKey = browserModelManifest?.modelKey
+      ? browserModelManifest.modelKey({ repoId, revision, source: sourceInfo.id, variant: config.variant || 'auto', device: config.device })
+      : `flowloud-model-${repoId}@${revision}`;
+    const voiceCatalog = browserModelManifest?.VOICE_CATALOG || ['zf_001', 'zf_002', 'zm_009', 'zm_010'].map((id) => ({ id, name: id, label: id, lang: preset?.lang || 'zh-CN', language: 'zh-CN', gender: id.startsWith('zf_') ? 'female' : 'male', path: `voices/${id}.bin` }));
+    const voiceById = browserModelManifest?.VOICE_BY_ID || Object.fromEntries(voiceCatalog.map((voice) => [voice.id, voice]));
     let modelState = 'missing';
     let verifiedAt = '';
     let activeDownload = null;
@@ -224,12 +296,24 @@
           if (controls.signal?.aborted) throw Object.assign(new Error('模型下载已取消。'), { name: 'AbortError', code: 'cancelled' });
           if (typeof progress === 'function') progress(value);
         };
+        const activeVariant = selectedVariant();
+        variantInfo = activeVariant;
+        cacheKey = browserModelManifest?.modelKey
+          ? browserModelManifest.modelKey({ repoId, revision, source: sourceInfo.id, variant: activeVariant.id, device: resolvedDevice })
+          : cacheKey;
         const baseOptions = {
           revision,
-          dtype: text(config.dtype || 'fp32'),
+          dtype: text(activeVariant.dtype || (resolvedDevice === 'wasm' ? 'q8' : 'fp16')),
+          variant: activeVariant.id,
+          source: sourceInfo.id,
+          sourceInfo,
+          cacheKey,
+          concurrency: Math.max(1, Math.min(4, Number(config.downloadConcurrency) || 4)),
           progress_callback: onProgress,
           flowloudOffline: controls.offline === true,
           signal: controls.signal,
+          starterVoiceIds: Array.isArray(config.starterVoiceIds) ? config.starterVoiceIds.slice() : [],
+          ensureStarterVoices: controls.ensureStarterVoices === true,
         };
         try {
           return await pipelineFactory('text-to-speech', repoId, Object.assign({}, baseOptions, { device: resolvedDevice }));
@@ -237,16 +321,75 @@
           if (resolvedDevice !== 'webgpu' || config.allowWasmFallback === false) throw error;
           fallbackReason = String(error?.message || error?.code || 'WebGPU 初始化失败');
           resolvedDevice = 'wasm';
-          return pipelineFactory('text-to-speech', repoId, Object.assign({}, baseOptions, { device: 'wasm' }));
+          variantInfo = selectedVariant();
+          cacheKey = browserModelManifest?.modelKey
+            ? browserModelManifest.modelKey({ repoId, revision, source: sourceInfo.id, variant: variantInfo.id, device: resolvedDevice })
+            : cacheKey;
+          return pipelineFactory('text-to-speech', repoId, Object.assign({}, baseOptions, {
+            device: 'wasm', dtype: variantInfo.dtype, variant: variantInfo.id, cacheKey,
+          }));
         }
       })();
       return pipelinePromise;
     }
+    let wasmFallbackPromise = null;
+    async function fallbackToWasm(reason) {
+      if (resolvedDevice !== 'webgpu' || config.allowWasmFallback === false) return false;
+      if (!wasmFallbackPromise) {
+        wasmFallbackPromise = (async () => {
+          fallbackReason = text(reason) || 'WebGPU 合成输出异常';
+          // The pipeline has already finished the current inference by the
+          // time this is called. Drop the cached promise before rebuilding;
+          // disposing a failed WebGPU graph can itself tear down the MV3
+          // offscreen document on affected Edge/ORT combinations.
+          pipelinePromise = null;
+          resolvedDevice = 'wasm';
+          variantInfo = selectedVariant();
+          cacheKey = browserModelManifest?.modelKey
+            ? browserModelManifest.modelKey({ repoId, revision, source: sourceInfo.id, variant: variantInfo.id, device: resolvedDevice })
+            : cacheKey;
+          return true;
+        })();
+      }
+      const pending = wasmFallbackPromise;
+      try { return await pending; }
+      finally { if (wasmFallbackPromise === pending) wasmFallbackPromise = null; }
+    }
+    async function generateAudio(textValue, voice, operation) {
+      const controls = object(operation);
+      let engine = await getPipeline(controls.onProgress, {
+        signal: controls.signal,
+        offline: controls.offline === true,
+      });
+      let output = await engine(textValue, { speaker_embeddings: voice });
+      let samples = output && (output.audio || output.waveform);
+      let signal = audioSignal(samples);
+      // Some WebGPU/ORT combinations complete successfully but return a
+      // clipped, sparse waveform (which is heard as static). Treat that as a
+      // backend failure and retry once on the known-stable WASM path.
+      if (resolvedDevice === 'webgpu' && (!signal.audible || signal.likelyCorrupt) && config.allowWasmFallback !== false) {
+        await fallbackToWasm(`WebGPU 音频输出异常（峰值 ${signal.maxAbs.toFixed(3)}、RMS ${signal.rms.toFixed(3)}、削波 ${signal.clipped}）`);
+        engine = await getPipeline(controls.onProgress, {
+          signal: controls.signal,
+          offline: controls.offline === true,
+        });
+        output = await engine(textValue, { speaker_embeddings: voice });
+        samples = output && (output.audio || output.waveform);
+        signal = audioSignal(samples);
+      }
+      if (!samples || !signal.audible) {
+        throw new ProviderError('model_silent', '浏览器模型合成结果为静音；请在“语音来源”中选择 fp32 并重新下载。', signal);
+      }
+      if (signal.likelyCorrupt) {
+        throw new ProviderError('model_audio_invalid', '浏览器模型输出异常，疑似音频失真；请切换到 WASM 后重试。', signal);
+      }
+      return { output, samples, signal };
+    }
     async function probe(engine, signal) {
       if (signal?.aborted) throw Object.assign(new Error('模型校验已取消。'), { name: 'AbortError', code: 'cancelled' });
       const sample = preset?.lang === 'en' ? 'Ready.' : '准备就绪。';
-      const output = await engine(sample, { speaker_embeddings: preset?.voice || config.voice });
-      const samples = output && (output.audio || output.waveform);
+      const generated = await generateAudio(sample, preset?.voice || config.voice, { signal, offline: true, engine });
+      const samples = generated.samples;
       if (!samples || !Number(samples.length)) throw new ProviderError('model_probe_failed', '模型已缓存，但离线短句合成失败。');
       verifiedAt = new Date().toISOString();
       modelState = 'ready';
@@ -275,12 +418,48 @@
       }
     }
     async function synthesize(request, operation) {
-      const body = object(request); const engine = await getPipeline(object(operation).onProgress);
-      const selectedVoice = rawVoiceId('browser-model', body.speaker || body.voice || preset?.voice || config.voice || 'zf_001');
-      const output = await engine(text(body.text || body.input), { speaker_embeddings: selectedVoice });
-      const samples = output.audio || output.waveform; const samplingRate = Number(output.sampling_rate || output.samplingRate || 24000);
-      if (!samples) throw new ProviderError('invalid_response', '浏览器模型没有返回音频。');
+      const body = object(request);
+      const cached = await cacheExists();
+      if (cached === false) {
+        throw new ProviderError('model_not_downloaded', '浏览器模型尚未下载并通过离线校验，请先在“语音来源”中下载模型。');
+      }
+      const selectedVoice = normalizeVoice(body.speaker || body.voice || preset?.voice || config.voice || 'zf_001');
+      const selectedVoiceInfo = await voiceInfo(selectedVoice);
+      if (selectedVoiceInfo.cached === false) {
+        throw new ProviderError('voice_not_downloaded', `音色 ${selectedVoice} 尚未下载，请先在“声音库”中下载或试听该音色。`, { voiceId: selectedVoice });
+      }
+      const generated = await generateAudio(text(body.text || body.input), selectedVoice, { offline: cached === true, onProgress: object(operation).onProgress, signal: object(operation).signal });
+      const output = generated.output; const samples = generated.samples; const samplingRate = Number(output.sampling_rate || output.samplingRate || 24000);
       return { audio: pcmToWav(samples, samplingRate), samplingRate, mimeType: 'audio/wav', providerId: 'browser-model' };
+    }
+    function normalizeVoice(value) {
+      const raw = rawVoiceId('browser-model', value || preset?.voice || 'zf_001');
+      if (!voiceById[raw]) throw new ProviderError('voice_unavailable', `浏览器模型没有音色：${raw}。`);
+      return raw;
+    }
+    async function voiceInfo(value) {
+      const id = normalizeVoice(value);
+      if (typeof pipelineFactory?.voiceInfo === 'function') {
+        return Object.assign({}, voiceById[id], await pipelineFactory.voiceInfo(repoId, {
+          source: sourceInfo.id, revision, voiceId: id,
+        }));
+      }
+      return Object.assign({}, voiceById[id], { cached: null });
+    }
+    async function voiceAction(action, operation) {
+      const controls = object(operation);
+      const id = normalizeVoice(controls.voiceId || controls.voice || controls.request?.voiceId || controls.request?.voice);
+      const method = action === 'download' ? 'downloadVoice' : action === 'delete' ? 'deleteVoice' : 'repairVoice';
+      if (typeof pipelineFactory?.[method] !== 'function') {
+        if (action === 'delete') return { voiceId: id, cached: false, deleted: false };
+        throw new ProviderError('voice_cache_unavailable', '当前构建不支持单独管理浏览器模型音色。');
+      }
+      return Object.assign({ voiceId: id }, await pipelineFactory[method](repoId, {
+        source: sourceInfo.id, revision, variant: variantInfo.id, dtype: variantInfo.dtype,
+        device: resolvedDevice, concurrency: config.downloadConcurrency,
+        voiceId: id, signal: controls.signal,
+        onProgress: controls.onProgress,
+      }));
     }
     const modelManagement = Object.freeze({
       info: async () => {
@@ -289,7 +468,7 @@
         const state = transientState
           ? modelState
           : cached === false ? 'missing' : modelState === 'missing' && cached === true ? 'available-unverified' : modelState;
-        return { cacheId: cacheKey, cacheKey, modelId: text(config.modelId), repoId, revision, license: preset?.license || '由模型仓库声明', estimatedBytes: Number(preset?.estimatedBytes || 0), cached: cached == null ? modelState === 'ready' : cached, state, ready: state === 'ready', verifiedAt, runtimeVersion: text(config.runtimeVersion || 'transformers-js-bundled'), device: resolvedDevice, fallbackReason };
+        return { cacheId: cacheKey, cacheKey, modelId: text(config.modelId), repoId, revision, source: sourceInfo.id, sourceLabel: sourceInfo.label, manualOnlySource: sourceInfo.manualOnly === true, variant: variantInfo.id, variantLabel: variantInfo.label, license: preset?.license || '由模型仓库声明', estimatedBytes: Number(variantInfo.estimatedBytes || preset?.estimatedBytes || 0), cached: cached == null ? modelState === 'ready' : cached, state, ready: state === 'ready', verifiedAt, runtimeVersion: text(config.runtimeVersion || 'transformers-js-bundled'), device: resolvedDevice, fallbackReason, concurrency: Math.max(1, Math.min(4, Number(config.downloadConcurrency) || 4)), voiceCount: voiceCatalog.length, starterVoiceIds: browserModelManifest?.STARTER_VOICE_IDS || ['zf_001', 'zf_002', 'zm_009', 'zm_010'] };
       },
       download: async (operation) => {
         const controls = object(operation);
@@ -299,7 +478,9 @@
         else controls.signal?.addEventListener?.('abort', () => controller.abort(), { once: true });
         modelState = 'downloading';
         try {
-          await getPipeline(controls.onProgress, { signal: controller.signal, forceNew: true, offline: false });
+          await getPipeline(controls.onProgress, {
+            signal: controller.signal, forceNew: true, offline: false, ensureStarterVoices: true,
+          });
           if (controller.signal.aborted) throw Object.assign(new Error('模型下载已取消。'), { name: 'AbortError', code: 'cancelled' });
           const cached = await cacheExists();
           if (cached === false) throw new ProviderError('model_cache_missing', '模型运行库完成加载，但没有找到对应缓存。');
@@ -311,7 +492,7 @@
             forceNew: cached === true,
           });
           if (!validation.ready) throw new ProviderError(validation.error?.code || 'model_probe_failed', validation.error?.message || '模型离线校验失败。');
-          return { downloaded: true, ready: true, state: 'ready', cacheId: cacheKey, cacheKey, modelId: text(config.modelId), repoId, revision, license: preset?.license || '由模型仓库声明', estimatedBytes: Number(preset?.estimatedBytes || 0), device: resolvedDevice, fallbackReason, verifiedAt, downloadedAt: new Date().toISOString(), runtimeVersion: text(config.runtimeVersion || 'transformers-js-bundled') };
+          return { downloaded: true, ready: true, state: 'ready', cacheId: cacheKey, cacheKey, modelId: text(config.modelId), repoId, revision, source: sourceInfo.id, sourceLabel: sourceInfo.label, variant: variantInfo.id, variantLabel: variantInfo.label, license: preset?.license || '由模型仓库声明', estimatedBytes: Number(variantInfo.estimatedBytes || preset?.estimatedBytes || 0), device: resolvedDevice, fallbackReason, verifiedAt, downloadedAt: new Date().toISOString(), runtimeVersion: text(config.runtimeVersion || 'transformers-js-bundled'), concurrency: Math.max(1, Math.min(4, Number(config.downloadConcurrency) || 4)) };
         } catch (error) {
           modelState = error?.name === 'AbortError' ? 'cancelled' : 'corrupt';
           throw error;
@@ -331,16 +512,31 @@
         await disposePipeline();
         const deleted = typeof caches !== 'undefined' ? await caches.delete(cacheKey) : false;
         if (typeof pipelineFactory?.deleteCache === 'function') {
-          await pipelineFactory.deleteCache(repoId, revision);
+          await pipelineFactory.deleteCache(repoId, revision, { source: sourceInfo.id, variant: variantInfo.id, cacheKey });
         }
         modelState = 'missing'; verifiedAt = '';
         return { deleted, cacheId: cacheKey, state: modelState };
       },
+      voiceCatalog: async () => voiceCatalog.map((voice) => Object.assign({}, voice)),
+      voices: async (operation) => Promise.all(voiceCatalog.map((voice) => voiceInfo(voice.id).then((info) => Object.assign({ id: voiceId('browser-model', voice.id), voiceId: voice.id, name: voice.name || voice.id, label: voice.label || voice.name || voice.id, lang: voice.lang || voice.language || preset?.lang || '', providerId: 'browser-model' }, info)))),
+      voiceInfo: async (operation) => voiceInfo(object(operation).voiceId || object(operation).voice),
+      voiceDownload: async (operation) => voiceAction('download', operation),
+      voiceDelete: async (operation) => voiceAction('delete', operation),
+      voiceRepair: async (operation) => voiceAction('repair', operation),
+      'voice-list': async () => ({ voices: await Promise.all(voiceCatalog.map((voice) => voiceInfo(voice.id).then((info) => Object.assign({ id: voiceId('browser-model', voice.id), voiceId: voice.id, name: voice.name || voice.id, label: voice.label || voice.name || voice.id, lang: voice.lang || voice.language || preset?.lang || '', providerId: 'browser-model' }, info)))) }),
+      'voice-info': async (operation) => voiceInfo(object(operation).voiceId || object(operation).voice),
+      'voice-download': async (operation) => voiceAction('download', operation),
+      'voice-delete': async (operation) => voiceAction('delete', operation),
+      'voice-repair': async (operation) => voiceAction('repair', operation),
+      'voice:list': async (operation) => voiceCatalog.map((voice) => Object.assign({}, voice)),
+      'voice:download': async (operation) => voiceAction('download', operation),
+      'voice:delete': async (operation) => voiceAction('delete', operation),
+      'voice:repair': async (operation) => voiceAction('repair', operation),
     });
     return normalizeProvider({ id: 'browser-model', version: 3,
       capabilities: { health: true, voices: true, synthesize: true, cancel: true, modelManagement: true, safeRate: false },
       health: async (operation) => Object.assign({ ok: true, providerId: 'browser-model' }, await verify(operation)),
-      voices: async () => ['zf_001', 'zm_010', 'af_maple', 'af_sol', 'bf_vale'].map((voice) => ({ id: voiceId('browser-model', voice), voiceId: voice, name: voice, lang: preset?.lang || '', providerId: 'browser-model' })),
+      voices: async (operation) => modelManagement.voices(operation),
       synthesize, cancel: async () => ({ cancelled: true }), modelManagement });
   }
 

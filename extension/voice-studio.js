@@ -7,6 +7,7 @@
   const TARGET_RATE = 24000;
   const MAX_IMPORT_FILES = 20;
   const MAX_FILE_BYTES = 100 * 1024 * 1024;
+  const requestedProvider = new URLSearchParams(location.search).get('provider') || '';
   const recordingGate = QwenReaderRecording.createRecordingGate();
   const speechProvider = QwenReaderTranscription.createEdgeSpeechProvider();
   const element = (id) => document.getElementById(id);
@@ -29,6 +30,7 @@
     recordRefTextRevision: 0,
     previewUrl: null,
     isRecording: false,
+    recordingSource: 'microphone',
     voices: [],
     imports: [],
     importSequence: 0,
@@ -63,6 +65,7 @@
   const batchCount = element('batch-count');
   const saveAllButton = element('save-all-button');
   const clearImportsButton = element('clear-imports');
+  const recordSourceButtons = Array.from(document.querySelectorAll('[data-record-source]'));
 
   function setStatus(message, kind) {
     status.textContent = message;
@@ -92,10 +95,41 @@
     if (code === 'audio_decode_failed') return '浏览器无法解码这个音频格式';
     if (code === 'invalid_audio') return '音频文件无效';
     if (code === 'audio_too_large') return '单个音频不能超过 100 MB';
+    if (code === 'system_audio_missing') return '没有检测到电脑声音，请选择“整个屏幕”并勾选共享系统音频';
+    if (code === 'display_capture_unsupported') return '当前浏览器不支持录制电脑声音';
     if (code === 'speech_recognition_unsupported') return '当前 Edge 环境不支持自动识别，可手动填写台词';
     if (code === 'not-allowed' || code === 'service-not-allowed') return '网页语音识别被浏览器策略阻止，可手动填写台词';
     if (code === 'network') return '台词识别网络暂时不可用，可稍后重试或手动填写';
     return error && error.message ? error.message : '处理失败';
+  }
+
+  function friendlyRecordingError(error, source) {
+    if (error && (error.name === 'NotAllowedError' || error.name === 'AbortError')) {
+      return source === 'system-audio' ? '已取消或拒绝共享电脑声音' : '已取消或拒绝麦克风权限';
+    }
+    return friendlyAudioError(error);
+  }
+
+  function recordingIdleNote(source) {
+    return source === 'system-audio'
+      ? '点击开始后请选择“整个屏幕”，并勾选共享系统音频；不会录制麦克风。'
+      : '建议在安静环境朗读 5–15 秒，语速自然，不要带背景音乐。';
+  }
+
+  function updateRecordingSourceUi() {
+    for (const button of recordSourceButtons) {
+      const selected = button.dataset.recordSource === state.recordingSource;
+      button.classList.toggle('is-active', selected);
+      button.setAttribute('aria-pressed', String(selected));
+      button.disabled = state.isRecording;
+    }
+  }
+
+  function setRecordingSource(source) {
+    if (state.isRecording || !['microphone', 'system-audio'].includes(source)) return;
+    state.recordingSource = source;
+    updateRecordingSourceUi();
+    recordNote.textContent = recordingIdleNote(source);
   }
 
   function toBase64(buffer) {
@@ -163,6 +197,7 @@
 
   function stopTracks() {
     if (state.stream) state.stream.getTracks().forEach((track) => track.stop());
+    if (state.processor) state.processor.onaudioprocess = null;
     [state.source, state.processor, state.silence].forEach((node) => {
       try { if (node) node.disconnect(); } catch (_) { /* already disconnected */ }
     });
@@ -178,6 +213,42 @@
     recordButton.disabled = false;
     recordLabel.textContent = '开始录音';
     state.isRecording = false;
+    updateRecordingSourceUi();
+  }
+
+  async function acquireRecordingStream(source) {
+    const mediaDevices = navigator.mediaDevices;
+    if (!mediaDevices) {
+      const unsupported = new Error('当前浏览器不支持媒体录制。');
+      unsupported.code = source === 'system-audio' ? 'display_capture_unsupported' : 'microphone_unsupported';
+      throw unsupported;
+    }
+    if (source === 'system-audio') {
+      if (typeof mediaDevices.getDisplayMedia !== 'function') {
+        const unsupported = new Error('当前浏览器不支持录制电脑声音。');
+        unsupported.code = 'display_capture_unsupported';
+        throw unsupported;
+      }
+      const stream = await mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true,
+        systemAudio: 'include',
+        surfaceSwitching: 'exclude',
+      });
+      if (!stream.getAudioTracks().length) {
+        stream.getTracks().forEach((track) => track.stop());
+        const missing = new Error('共享来源没有提供系统音频。');
+        missing.code = 'system_audio_missing';
+        throw missing;
+      }
+      return stream;
+    }
+    if (typeof mediaDevices.getUserMedia !== 'function') {
+      const unsupported = new Error('此浏览器不支持麦克风录音。');
+      unsupported.code = 'microphone_unsupported';
+      throw unsupported;
+    }
+    return mediaDevices.getUserMedia({ audio: true });
   }
 
   function abortRecordTranscription() {
@@ -206,18 +277,18 @@
   }
 
   async function startRecording() {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setStatus('此浏览器不支持麦克风录音。', 'error');
-      return;
-    }
+    const recordingSource = state.recordingSource;
     const token = recordingGate.begin();
     if (token == null) return;
     clearRecordedPreview();
     recordButton.disabled = true;
-    recordNote.textContent = '正在请求麦克风权限…';
+    recordSourceButtons.forEach((button) => { button.disabled = true; });
+    recordNote.textContent = recordingSource === 'system-audio'
+      ? '正在等待你选择共享屏幕和系统音频…'
+      : '正在请求麦克风权限…';
     let stream = null;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await acquireRecordingStream(recordingSource);
       if (!recordingGate.activate(token)) {
         stream.getTracks().forEach((track) => track.stop());
         return;
@@ -237,16 +308,25 @@
       state.source.connect(state.processor);
       state.processor.connect(state.silence);
       state.silence.connect(state.context.destination);
+      const audioTrack = stream.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.addEventListener('ended', () => {
+          if (recordingGate.isRecording() && state.isRecording) void stopRecording();
+        }, { once: true });
+      }
       state.startedAt = Date.now();
       state.timer = window.setInterval(updateDuration, 100);
       state.isRecording = true;
+      updateRecordingSourceUi();
       recordButton.classList.add('is-recording');
       recordButton.disabled = false;
       recordButton.setAttribute('aria-pressed', 'true');
       recordLabel.textContent = '结束录音';
       recordNote.textContent = '至少录制 5 秒';
       duration.textContent = '00:00';
-      setStatus('正在录音；15 秒后会自动停止。');
+      setStatus(recordingSource === 'system-audio'
+        ? '正在录制电脑声音；15 秒后会自动停止。'
+        : '正在录音；15 秒后会自动停止。');
     } catch (error) {
       if (stream && state.stream !== stream) stream.getTracks().forEach((track) => track.stop());
       if (recordingGate.isRecording()) {
@@ -256,7 +336,9 @@
         recordingGate.fail(token);
       }
       resetRecorderUi();
-      setStatus('无法使用麦克风：' + error.message, 'error');
+      const detail = friendlyRecordingError(error, recordingSource);
+      recordNote.textContent = recordingIdleNote(recordingSource);
+      setStatus((recordingSource === 'system-audio' ? '无法录制电脑声音：' : '无法使用麦克风：') + detail, 'error');
     }
   }
 
@@ -363,7 +445,7 @@
       nameInput.value = '';
       clearRecordedPreview();
       duration.textContent = '00:00';
-      recordNote.textContent = '建议在安静环境朗读 5–15 秒，语速自然，不要带背景音乐。';
+      recordNote.textContent = recordingIdleNote(state.recordingSource);
       setStatus('“' + name + '”已保存到浏览器音色库。', 'success');
       await loadVoices();
     } catch (error) {
@@ -858,9 +940,9 @@
     backendEmpty.hidden = backendVoices.length > 0;
   }
 
-  async function loadVoices() {
+  async function loadVoices(providerId = 'local-service') {
     try {
-      const response = await message({ type: 'voice:list', providerId: 'local-service' });
+      const response = await message({ type: 'voice:list', providerId });
       state.voices = response.voices || response.profiles || [];
       renderVoices();
       const localVoices = state.voices.filter((voice) => voice.local && voice.editable !== false);
@@ -971,6 +1053,10 @@
   }
 
   document.addEventListener('click', handleStudioAction);
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-record-source]');
+    if (button) setRecordingSource(button.dataset.recordSource);
+  });
   document.querySelector('.source-tabs').addEventListener('keydown', (event) => {
     const tabs = [element('record-tab'), element('import-tab')];
     const currentIndex = tabs.indexOf(event.target);
@@ -1057,17 +1143,20 @@
 
   renderImports();
   renderVoices();
+  updateRecordingSourceUi();
   async function refreshForActiveProvider(providerId) {
     let active = providerId;
     if (!active) {
       const saved = await chrome.storage.local.get('qwenReaderSettings');
       active = saved.qwenReaderSettings?.activeProviderId || saved.qwenReaderSettings?.providerId || 'browser-system';
     }
-    if (active === 'local-service') return loadVoices();
-    state.voices = [];
-    renderVoices();
-    setStatus('当前使用系统或其他朗读引擎；音色克隆仅在本地 Qwen 下启用。');
+    const editor = document.querySelector('.studio-editor');
+    const settingsLink = document.querySelector('a[href^="options-react.html"]');
+    if (settingsLink) settingsLink.href = `options-react.html?section=voice&provider=${encodeURIComponent(active)}`;
+    if (editor) editor.hidden = active !== 'local-service';
+    await loadVoices(active);
+    if (active !== 'local-service') setStatus('当前来源不支持克隆；这里仅展示只读音色与能力。');
   }
   window.addEventListener('flowloud:provider-changed', (event) => { void refreshForActiveProvider(event.detail?.providerId); });
-  void refreshForActiveProvider();
+  void refreshForActiveProvider(requestedProvider);
 }());

@@ -5,36 +5,35 @@ const test = require('node:test');
 
 const extensionRoot = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(extensionRoot, 'voice-studio.html'), 'utf8');
-const source = fs.readFileSync(path.join(extensionRoot, 'settings-center.js'), 'utf8');
-const css = fs.readFileSync(path.join(extensionRoot, 'voice-studio.css'), 'utf8');
 const reader = fs.readFileSync(path.join(extensionRoot, 'content', 'reader.js'), 'utf8');
 const defaults = fs.readFileSync(path.join(extensionRoot, 'shared', 'defaults.js'), 'utf8');
+const reactRoot = path.resolve(extensionRoot, '..', 'extension-wxt', 'components');
+const workspace = fs.readFileSync(path.join(reactRoot, 'SettingsWorkspace.tsx'), 'utf8');
+const voiceWorkbench = fs.readFileSync(path.join(reactRoot, 'VoiceWorkbench.tsx'), 'utf8');
+const bridge = fs.readFileSync(path.join(reactRoot, 'runtime-bridge.ts'), 'utf8');
 
-test('options page unifies reading settings and the complete voice studio', () => {
-  assert.match(html, /data-settings-section="reader"/u);
-  assert.match(html, /data-settings-section="voices"/u);
-  for (const name of [
-    'readingFocus', 'readingFocusStyle',
-    'wordHighlightStyle', 'wordHighlightColor', 'wordHighlightGlow',
-    'wordHighlightSpeed', 'opVoice', 'clickToRead', 'showFloatingPlayer', 'preset',
-  ]) {
-    assert.match(html, new RegExp(`name="${name}"`));
-  }
-  assert.match(html, /这里集中管理正文聚焦、逐词动画和网页交互/u);
+test('voice studio is an asset-only tool and links back to the unique Options voice section', () => {
+  assert.doesNotMatch(html, /data-settings-section="(?:reader|engine|storage)"/u);
+  assert.doesNotMatch(html, /settings-center\.js|provider-settings\.js/u);
+  assert.match(html, /options-react\.html\?section=voice&amp;provider=local-service/u);
   assert.match(html, /开始录音/u);
   assert.match(html, /type="file"[^>]+multiple/u);
   assert.match(html, /音色库/u);
-  assert.match(html, /settings-center\.js/u);
 });
 
-test('settings center persists every runtime setting and loads the real voice catalog', () => {
-  assert.match(source, /qwenReaderSettings/u);
-  assert.match(source, /chrome\.storage\.local\.set/u);
-  assert.match(source, /type:\s*'voice:list'/u);
-  assert.match(source, /replyVoices/u);
-  assert.match(source, /data-open-voice-studio/u);
-  assert.match(css, /\.theme-options/u);
-  assert.match(css, /\.reply-voice-options/u);
+test('Options exposes one voice category with unified catalog, assignment, and provider configuration', () => {
+  assert.match(workspace, /<Tab id="voice">[\s\S]*语音与音色/u);
+  assert.doesNotMatch(workspace, /<Tab id="(?:engine|voices|roles)"/u);
+  assert.match(voiceWorkbench, /统一音色库/u);
+  assert.match(voiceWorkbench, /默认旁白/u);
+  assert.match(voiceWorkbench, /人物对白/u);
+  assert.match(voiceWorkbench, /网页临时音色[\s\S]*在 Popup 调整/u);
+  assert.match(voiceWorkbench, /配置并验证/u);
+  assert.doesNotMatch(voiceWorkbench, /demoCatalog|demoStatuses|demoSettings|demoMode/u);
+  assert.match(voiceWorkbench, /setCatalog\(\[\]\)/u);
+  assert.doesNotMatch(workspace, /voiceDemoMode/u);
+  assert.match(bridge, /type:\s*'settings:voice:assign'/u);
+  assert.match(bridge, /type:\s*'provider:status:list'/u);
 });
 
 test('visual setting changes update live reading without interrupting playback', () => {

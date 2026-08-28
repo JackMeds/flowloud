@@ -91,12 +91,69 @@ test('settings secret messages keep credentials out of public settings and disti
   }
 });
 
+test('settings:voice:assign atomically updates one provider and rejects cross-provider voice ids', async () => {
+  const previousSchema = globalThis.FlowloudSettings;
+  globalThis.FlowloudSettings = require('../shared/settings-schema.js');
+  const localValues = { qwenReaderSettings: globalThis.FlowloudSettings.migrate({ voiceAssignmentsByProvider: { 'local-service': { narratorVoiceId: 'local-service:old', replyVoiceIds: ['local-service:reply'], authorVoices: { alice: 'local-service:alice' } } } }) };
+  try {
+    const router = createMessageRouter({ api: {}, storage: { async get(key) { return localValues[key]; }, async set(key, value) { localValues[key] = value; } } });
+    const updated = await router({ type: 'settings:voice:assign', providerId: 'local-service', assignment: { narratorVoiceId: 'new' } });
+    assert.equal(updated.assignment.narratorVoiceId, 'local-service:new');
+    assert.deepEqual(updated.assignment.replyVoiceIds, ['local-service:reply']);
+    assert.equal(updated.assignment.authorVoices.alice, 'local-service:alice');
+    const rejected = await router({ type: 'settings:voice:assign', providerId: 'local-service', assignment: { narratorVoiceId: 'browser-system:wrong' } });
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.error.code, 'voice_provider_mismatch');
+    assert.equal(localValues.qwenReaderSettings.voiceAssignmentsByProvider['local-service'].narratorVoiceId, 'local-service:new');
+  } finally { globalThis.FlowloudSettings = previousSchema; }
+});
+
+test('provider validation is stored separately and invalidated when configuration or secrets change', async () => {
+  const previousSchema = globalThis.FlowloudSettings;
+  globalThis.FlowloudSettings = require('../shared/settings-schema.js');
+  const localValues = { qwenReaderSettings: globalThis.FlowloudSettings.migrate({ providerSettings: { 'local-service': { configured: true } } }) };
+  const sessionValues = {};
+  try {
+    const router = createMessageRouter({
+      api: {}, testProvider: async () => ({ ok: true, stage: 'synthesize', voiceCount: 2, message: 'verified' }),
+      storage: { async get(key) { return localValues[key]; }, async set(key, value) { localValues[key] = value; } },
+      session: { async get(key) { return sessionValues[key]; }, async set(key, value) { sessionValues[key] = value; } },
+    });
+    const validated = await router({ type: 'provider:test', providerId: 'local-service' });
+    assert.equal(validated.ok, true);
+    assert.equal(localValues.flowloudProviderValidationV1['local-service'].connectionState, 'connected');
+    const changed = globalThis.FlowloudSettings.migrate({ ...localValues.qwenReaderSettings, providerSettings: { ...localValues.qwenReaderSettings.providerSettings, 'local-service': { ...localValues.qwenReaderSettings.providerSettings['local-service'], model: 'changed' } } });
+    await router({ type: 'settings:set', settings: changed });
+    assert.equal(localValues.flowloudProviderValidationV1['local-service'], undefined);
+    await router({ type: 'provider:test', providerId: 'local-service' });
+    await router({ type: 'settings:secret:set', providerId: 'local-service', secret: 'changed-secret', remember: false });
+    assert.equal(localValues.flowloudProviderValidationV1['local-service'], undefined);
+  } finally { globalThis.FlowloudSettings = previousSchema; }
+});
+
+test('local provider verification explicitly runs health, voices, and synthesize and rejects an empty catalog', () => {
+  const source = require('node:fs').readFileSync(require('node:path').resolve(__dirname, '..', 'background.js'), 'utf8');
+  const testProviderStart = source.indexOf('async function testProvider');
+  const stagedRunner = source.slice(testProviderStart, source.indexOf("if (providerId === 'browser-system')", testProviderStart));
+  const localStart = source.indexOf("if (providerId === 'local-service')", testProviderStart);
+  const localBlock = source.slice(localStart, source.indexOf("if (providerId === 'doubao-tts')", localStart));
+  assert.match(stagedRunner, /error\.providerStage = error\.stage[\s\S]*error\.stage = stage/u);
+  assert.match(localBlock, /runStage\('health'[\s\S]*provider\.health/u);
+  assert.match(localBlock, /runStage\('voices'[\s\S]*provider\.voices/u);
+  assert.match(localBlock, /empty_voice_list/u);
+  assert.match(localBlock, /runStage\('synthesize'[\s\S]*provider\.synthesize/u);
+});
+
 test('settings reset preserves model cache registry but restores safe Provider defaults', async () => {
   const previousSchema = globalThis.FlowloudSettings;
   globalThis.FlowloudSettings = require('../shared/settings-schema.js');
   let stored = globalThis.FlowloudSettings.migrate({
     activeProviderId: 'openai-compatible', playbackRate: 2,
     modelCacheRegistry: { 'flowloud-model-pinned': { revision: 'a'.repeat(40) } },
+    providerSettings: { 'browser-model': {
+      source: 'huggingface', revision: 'b'.repeat(40), downloaded: true,
+      cacheMetadata: { cacheId: 'flowloud-model-hf' }, voiceCacheRegistry: { zf_001: { cached: true } },
+    } },
   });
   try {
     const router = createMessageRouter({
@@ -111,6 +168,10 @@ test('settings reset preserves model cache registry but restores safe Provider d
     assert.equal(response.settings.activeProviderId, 'browser-system');
     assert.equal(response.settings.playbackRate, 1);
     assert.deepEqual(response.settings.modelCacheRegistry, { 'flowloud-model-pinned': { revision: 'a'.repeat(40) } });
+    assert.equal(response.settings.providerSettings['browser-model'].source, 'huggingface');
+    assert.equal(response.settings.providerSettings['browser-model'].revision, 'b'.repeat(40));
+    assert.equal(response.settings.providerSettings['browser-model'].downloaded, true);
+    assert.equal(response.settings.providerSettings['browser-model'].voiceCacheRegistry.zf_001.cached, true);
   } finally {
     globalThis.FlowloudSettings = previousSchema;
   }
@@ -528,6 +589,24 @@ test('voice:list exposes editable browser profiles without leaking stored audio'
     source: 'backend',
   });
   assert.equal('wavB64' in result.voices[0], false);
+});
+
+test('browser-model voice:list preserves the cache source reported by the provider', async () => {
+  const router = createMessageRouter({
+    api: {},
+    offscreen: {
+      async request() {
+        return { ok: true, voices: [{ id: 'browser-model:zf_001', name: 'zf_001', cached: true, source: 'modelscope' }] };
+      },
+    },
+    storage: { async get() { return undefined; }, async set() {} },
+  });
+
+  const result = await router({ type: 'voice:list', providerId: 'browser-model' });
+
+  assert.equal(result.voices[0].source, 'modelscope');
+  assert.equal(result.voices[0].cached, true);
+  assert.equal(result.voices[0].readOnly, true);
 });
 
 test('built-in and incomplete remote-only voices are rejected as read-only', async () => {
