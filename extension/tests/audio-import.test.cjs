@@ -58,6 +58,19 @@ test('rejects less than five seconds of active speech', () => {
   );
 });
 
+test('accepts a clean stable sample without quiet noise-floor frames', () => {
+  const rate = 1000;
+  const samples = tone(9000, 0.2);
+
+  const result = loadAudioImport().selectReferenceSegment(samples, rate, {
+    minSeconds: 5, maxSeconds: 15,
+  });
+
+  assert.equal(result.startSeconds, 0);
+  assert.equal(result.durationSeconds, 9);
+  assert.ok(result.activeRatio > 0.99);
+});
+
 test('limits normalized import windows to five through fifteen seconds', () => {
   const samples = concat(silence(6000), tone(22000, 0.2));
   const audioImport = loadAudioImport();

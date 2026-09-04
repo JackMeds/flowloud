@@ -275,3 +275,53 @@ test("playback admission gate rejects an older invocation after a newer seek beg
   gate.invalidate();
   assert.equal(gate.isCurrent(newer), false);
 });
+
+test("two reader instances created at the same time cannot collide on client, playback, or request identity", () => {
+  const fixedNow = () => 1_700_000_000_000;
+  const uuidsA = [
+    "11111111-1111-4111-8111-111111111111",
+    "11111111-1111-4111-8111-111111111112",
+    "11111111-1111-4111-8111-111111111113",
+  ];
+  const uuidsB = [
+    "22222222-2222-4222-8222-222222222221",
+    "22222222-2222-4222-8222-222222222222",
+    "22222222-2222-4222-8222-222222222223",
+  ];
+  const first = Player.createIdentityFactory({
+    now: fixedNow,
+    crypto: { randomUUID: () => uuidsA.shift() },
+  });
+  const second = Player.createIdentityFactory({
+    now: fixedNow,
+    crypto: { randomUUID: () => uuidsB.shift() },
+  });
+
+  const identitiesA = [first("client"), first("playback"), first("request")];
+  const identitiesB = [second("client"), second("playback"), second("request")];
+
+  assert.equal(new Set([...identitiesA, ...identitiesB]).size, 6);
+  assert.match(identitiesA[0], /qwen-reader-client-11111111/u);
+  assert.match(identitiesB[1], /qwen-reader-playback-22222222/u);
+});
+
+test("identity fallback keeps per-instance entropy when randomUUID is unavailable", () => {
+  const first = Player.createIdentityFactory({
+    now: () => 42,
+    crypto: null,
+    random: (() => {
+      const values = [0.1, 0.2, 0.3, 0.4];
+      return () => values.shift();
+    })(),
+  });
+  const second = Player.createIdentityFactory({
+    now: () => 42,
+    crypto: null,
+    random: (() => {
+      const values = [0.5, 0.6, 0.7, 0.8];
+      return () => values.shift();
+    })(),
+  });
+
+  assert.notEqual(first("playback"), second("playback"));
+});

@@ -9,7 +9,7 @@ function loadModules() {
   delete globalThis.QwenReaderForumContent;
   delete globalThis.QwenReaderNormalizedDocument;
   delete globalThis.QwenReaderExtractors;
-  for (const relativePath of ['shared/text.js', 'shared/forum-content.js', 'shared/normalized-document.js', 'shared/extractors.js']) {
+  for (const relativePath of ['shared/text.js', 'shared/forum-content.js', 'shared/generic-thread-detector.js', 'shared/normalized-document.js', 'shared/extractors.js']) {
     const absolutePath = path.join(__dirname, '..', relativePath);
     if (!fs.existsSync(absolutePath)) continue;
     const source = fs.readFileSync(absolutePath, 'utf8');
@@ -469,6 +469,45 @@ test('XenForo keeps paragraph boundaries and speaker metadata inside one post', 
   ]);
 });
 
+test('mirror card forum keeps br paragraphs, author identity, and a shared source container', async () => {
+  const { extractDocument } = loadModules();
+  const content = { innerHTML: 'First line<br>Second line<br>短' };
+  const author = {
+    textContent: 'Alice',
+    getAttribute(name) { return name === 'href' ? '/author/40475' : ''; }
+  };
+  const subtitle = { textContent: 'Re: Thread title' };
+  const post = {
+    id: 'p280414',
+    querySelector(selector) {
+      if (selector === '.card-body') return content;
+      if (selector.includes('.ui-link')) return author;
+      if (selector.includes('.text-muted')) return subtitle;
+      return null;
+    }
+  };
+  const document = {
+    title: 'Thread',
+    location: makeLocation('https://mirror.chromaso.net/thread/29141/2'),
+    querySelectorAll(selector) {
+      if (selector === '.mm-post .card-body') return [content];
+      if (selector === '.mm-post') return [post];
+      return [];
+    }
+  };
+
+  const result = await extractDocument(document, {});
+
+  assert.equal(result.adapterId, 'mirror-card');
+  assert.deepEqual(result.blocks.map(({ text, authorId, authorName, isOp }) => ({ text, authorId, authorName, isOp })), [
+    { text: 'First line', authorId: '40475', authorName: 'Alice', isOp: false },
+    { text: 'Second line', authorId: '40475', authorName: 'Alice', isOp: false },
+    { text: '短', authorId: '40475', authorName: 'Alice', isOp: false }
+  ]);
+  assert.deepEqual(result.blocks.map((item) => item.sourceLocator.unitIndex), [0, 1, 2]);
+  assert.ok(result.blocks.every((item) => item.sourceSelector === '[id="p280414"] .card-body'));
+});
+
 test('Readability receives a cloned document and wins over the generic fallback', async () => {
   const { extractDocument } = loadModules();
   const original = makeGenericDocument(['通用回退不应被使用']);
@@ -492,6 +531,27 @@ test('Readability receives a cloned document and wins over the generic fallback'
   assert.equal(result.adapterId, 'readability');
   assert.equal(result.title, '文章标题');
   assert.deepEqual(result.blocks.map((block) => block.text), ['第一段', '第二段']);
+});
+
+test('Readability preserves br-only visual paragraphs for range mapping', async () => {
+  const { extractDocument } = loadModules();
+  const original = makeGenericDocument(['fallback']);
+  original.location = makeLocation('https://mirror.example/thread/42/2');
+  original.cloneNode = () => ({ marker: 'clone' });
+  class BreakReadability {
+    parse() {
+      return {
+        title: 'Thread',
+        content: '<div class="card-body">First line<br>Second line<br><br>短</div>',
+        textContent: 'First line Second line 短'
+      };
+    }
+  }
+
+  const result = await extractDocument(original, { ReadabilityCtor: BreakReadability });
+
+  assert.equal(result.adapterId, 'readability');
+  assert.deepEqual(result.blocks.map((block) => block.text), ['First line', 'Second line', '短']);
 });
 
 test('a null Readability result falls through to the generic extractor', async () => {
@@ -584,6 +644,30 @@ test('extractGeneric chooses readable article blocks instead of navigation contr
   const segments = extractGeneric(document);
 
   assert.deepEqual(segments.map((segment) => segment.text), fixture.articleBlocks);
+});
+
+test('extractGeneric splits a br-only content container into visual paragraphs', () => {
+  const { extractGeneric } = loadModules();
+  const candidate = {
+    tagName: 'DIV',
+    innerHTML: 'First line<br>Second line<br>短',
+    textContent: 'First line Second line 短',
+    hidden: false,
+    getAttribute: () => null,
+    closest: () => null,
+    cloneNode() {
+      return { textContent: this.textContent, querySelectorAll: () => [] };
+    },
+    querySelectorAll(selector) {
+      if (selector.includes('a')) return [];
+      return [];
+    }
+  };
+  const document = { querySelectorAll: () => [candidate] };
+
+  const segments = extractGeneric(document);
+
+  assert.deepEqual(segments.map((segment) => segment.text), ['First line', 'Second line', '短']);
 });
 
 function makeCandidate(tagName, blocks, linkCount) {
@@ -767,3 +851,34 @@ function makeGenericDocument(blocks) {
     }
   };
 }
+
+test('candidate evaluator records deterministic quality metrics and penalizes duplicate blocks', () => {
+  const { evaluateCandidate } = loadModules();
+  const diverse = evaluateCandidate({
+    adapterId: 'generic',
+    blocks: [
+      { text: '第一段包含足够长的正文，用来验证候选质量评分。' },
+      { text: '第二段提供不同的信息，因此应该获得较高的内容多样性。' }
+    ]
+  });
+  const duplicated = evaluateCandidate({
+    adapterId: 'generic',
+    blocks: [
+      { text: '完全重复的正文片段。' },
+      { text: '完全重复的正文片段。' },
+      { text: '完全重复的正文片段。' }
+    ]
+  });
+
+  assert.equal(diverse.metrics.blockCount, 2);
+  assert.equal(diverse.metrics.uniqueRatio, 1);
+  assert.ok(diverse.score > duplicated.score);
+});
+
+test('candidate chooser prefers Readability on an exact quality tie', () => {
+  const { chooseCandidate } = loadModules();
+  const readability = { id: 'readability', score: 60, document: { adapterId: 'readability' } };
+  const generic = { id: 'generic', score: 60, document: { adapterId: 'generic' } };
+
+  assert.equal(chooseCandidate([generic, readability]), readability);
+});

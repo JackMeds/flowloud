@@ -138,6 +138,18 @@ test('resolver falls back to the post selector when the paragraph cannot be foun
   }), document.post);
 });
 
+test('resolver keeps a matched br-only container as the shared range root', () => {
+  const locator = loadLocator();
+  const document = fakeDocument([]);
+  const container = document.querySelector('.post .Post-body');
+
+  assert.equal(locator.resolve(document, {
+    sourceLocator: {
+      containerSelector: '.post .Post-body', unitIndex: 1, fingerprint: 'virtual-line'
+    }
+  }), container);
+});
+
 test('resolver returns null when the locator container and post selector are unavailable', () => {
   const locator = loadLocator();
 

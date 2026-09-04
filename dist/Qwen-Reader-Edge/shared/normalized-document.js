@@ -35,6 +35,24 @@
     }
   }
 
+  function normalizeSourceLocator(input) {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+    const keys = ['adapter', 'containerSelector', 'unitIndex', 'fingerprint'];
+    if (!keys.every((key) => {
+      const value = input[key];
+      return (typeof value === 'string' || typeof value === 'number') &&
+        (typeof value !== 'number' || Number.isFinite(value));
+    })) return null;
+    const unitIndex = Number(input.unitIndex);
+    if (!Number.isFinite(unitIndex)) return null;
+    return {
+      adapter: String(input.adapter),
+      containerSelector: String(input.containerSelector),
+      unitIndex,
+      fingerprint: String(input.fingerprint)
+    };
+  }
+
   function createBlock(input) {
     const source = input || {};
     const floorValue = Number(source.floor);
@@ -48,7 +66,8 @@
       isOp: Boolean(source.isOp),
       postId: String(source.postId == null ? '' : source.postId),
       sourceKey: String(source.sourceKey == null ? '' : source.sourceKey),
-      sourceSelector: String(source.sourceSelector == null ? '' : source.sourceSelector)
+      sourceSelector: String(source.sourceSelector == null ? '' : source.sourceSelector),
+      sourceLocator: normalizeSourceLocator(source.sourceLocator)
     };
   }
 
@@ -85,6 +104,11 @@
     const source = document || {};
     const blocks = Array.isArray(source.blocks) ? source.blocks : [];
     const split = global.QwenReaderText && global.QwenReaderText.splitText;
+    const canSpeak = global.QwenReaderText && global.QwenReaderText.hasSpeakableText;
+    const prepare = global.QwenReaderText && global.QwenReaderText.prepareSpeech;
+    const hasSpeakableText = typeof canSpeak === 'function'
+      ? canSpeak
+      : (value) => /[\p{L}\p{N}]/u.test(String(value == null ? '' : value));
     const output = [];
     blocks.forEach((input, blockIndex) => {
       const normalized = createBlock(input);
@@ -92,10 +116,22 @@
         ? split(normalized.text, maxChars)
         : [normalized.text];
       chunks.forEach((chunk, chunkIndex) => {
-        output.push(createBlock(Object.assign({}, normalized, {
+        const prepared = typeof prepare === 'function'
+          ? prepare(chunk)
+          : { sourceText: chunk, speechText: chunk, ranges: [] };
+        if (!hasSpeakableText(prepared.speechText)) return;
+        const segment = createBlock(Object.assign({}, normalized, {
           id: `${normalized.id || `block-${blockIndex}`}:${chunkIndex}`,
           text: chunk
-        })));
+        }));
+        segment.speechText = prepared.speechText;
+        segment.speechSourceMap = {
+          sourceText: prepared.sourceText,
+          speechText: prepared.speechText,
+          ranges: (Array.isArray(prepared.ranges) ? prepared.ranges : [])
+            .map((range) => Object.assign({}, range))
+        };
+        output.push(segment);
       });
     });
     return output;

@@ -228,11 +228,48 @@
     };
   }
 
+  function createIdentityFactory(options) {
+    const config = options || {};
+    const cryptoImpl = Object.prototype.hasOwnProperty.call(config, "crypto")
+      ? config.crypto
+      : (typeof globalThis !== "undefined" ? globalThis.crypto : null);
+    const now = typeof config.now === "function" ? config.now : Date.now;
+    const random = typeof config.random === "function" ? config.random : Math.random;
+    const prefix = String(config.prefix || "qwen-reader")
+      .replace(/[^A-Za-z0-9._:-]/gu, "-")
+      .slice(0, 48) || "qwen-reader";
+    let sequence = 0;
+
+    function randomHex() {
+      if (cryptoImpl && typeof cryptoImpl.getRandomValues === "function") {
+        const values = new Uint32Array(4);
+        cryptoImpl.getRandomValues(values);
+        return Array.from(values, (value) => value.toString(16).padStart(8, "0")).join("");
+      }
+      const first = Math.floor(Number(random()) * 0x100000000) >>> 0;
+      const second = Math.floor(Number(random()) * 0x100000000) >>> 0;
+      return `${first.toString(16).padStart(8, "0")}${second.toString(16).padStart(8, "0")}`;
+    }
+
+    const instanceEntropy = randomHex();
+    return function nextIdentity(kind) {
+      const label = String(kind || "request")
+        .replace(/[^A-Za-z0-9._:-]/gu, "-")
+        .slice(0, 32) || "request";
+      sequence += 1;
+      if (cryptoImpl && typeof cryptoImpl.randomUUID === "function") {
+        return `${prefix}-${label}-${cryptoImpl.randomUUID()}`;
+      }
+      return `${prefix}-${label}-${Number(now()).toString(36)}-${instanceEntropy}-${sequence.toString(36)}-${randomHex()}`;
+    };
+  }
+
   return {
     createInitialState,
     reduce,
     createRequestCache,
     resolveAudioRequest,
     createInvocationGate,
+    createIdentityFactory,
   };
 });

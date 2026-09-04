@@ -1,26 +1,52 @@
 /* global chrome, importScripts */
-if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
-  importScripts('shared/api-client.js');
+if (typeof importScripts === 'function') {
+  const backgroundScripts = [];
+  if (!globalThis.QwenReaderApiClient) backgroundScripts.push('shared/api-client.js');
+  if (!globalThis.QwenReaderVoiceLibrary) {
+    if (!globalThis.QwenReaderVoiceNaming) backgroundScripts.push('shared/voice-naming.js');
+    backgroundScripts.push('shared/voice-library.js');
+  }
+  if (backgroundScripts.length) importScripts(...backgroundScripts);
 }
 
 (function backgroundModule(root, factory) {
   const apiModule = root.QwenReaderApiClient || (typeof require === 'function'
     ? require('./shared/api-client.js') : null);
-  const exported = factory(apiModule);
+  const voiceLibrary = root.QwenReaderVoiceLibrary || (typeof require === 'function'
+    ? require('./shared/voice-library.js') : null);
+  const exported = factory(apiModule, voiceLibrary);
   if (typeof module === 'object' && module.exports) module.exports = exported;
   root.QwenReaderBackground = exported;
 
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
     exported.install(chrome);
   }
-}(typeof globalThis !== 'undefined' ? globalThis : this, function makeBackground(apiModule) {
+}(typeof globalThis !== 'undefined' ? globalThis : this, function makeBackground(apiModule, voiceLibrary) {
   'use strict';
 
   const OFFSCREEN_TARGET = 'qwen-reader-offscreen';
+  const STREAM_EVENT_TARGET = 'qwen-reader-stream-event';
   const OFFSCREEN_PATH = 'offscreen.html';
   const REQUIRED_ORIGIN = 'http://127.0.0.1:7811/*';
   const SETTINGS_KEY = 'qwenReaderSettings';
+  const CLEANUP_QUEUE_KEY = 'voiceCleanupQueue';
   const BUILTIN_VOICES = ['邵思萌', 'qwen-clone'];
+
+  function isReadOnlyProfile(profile) {
+    if (!profile || typeof profile !== 'object') return false;
+    const kind = String(profile.kind || '').trim().toLowerCase();
+    const nonLocalKinds = ['builtin', 'alias', 'remote', 'provider'];
+    const hasWav = Boolean(String(profile.wavB64 || profile.wav_b64 || ''));
+    const hasExtractedVoice = Boolean(
+      String(profile.spkB64 || profile.spk_b64 || '') &&
+      String(profile.rvqB64 || profile.rvq_b64 || ''),
+    );
+    return (
+      profile.local === false || profile.remote === true || profile.builtIn || profile.builtin ||
+      nonLocalKinds.includes(kind) || BUILTIN_VOICES.includes(profile.name) ||
+      (!hasWav && !hasExtractedVoice)
+    );
+  }
 
   function repairVoiceSettings(current, deletedName, remainingProfiles) {
     if (!current || typeof current !== 'object' || Array.isArray(current)) return null;
@@ -67,6 +93,9 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
       },
       async set(key, value) {
         await chromeApi.storage.local.set({ [key]: value });
+      },
+      async setMany(values) {
+        await chromeApi.storage.local.set(values);
       },
     };
   }
@@ -128,8 +157,8 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
       if (!creating) {
         creating = chromeApi.offscreen.createDocument({
           url: OFFSCREEN_PATH,
-          reasons: ['BLOBS'],
-          justification: 'Convert local Qwen TTS WAV blobs to transferable Base64 during long model cold starts.',
+          reasons: ['BLOBS', 'AUDIO_PLAYBACK'],
+          justification: 'Convert local Qwen TTS WAV blobs and schedule bounded streaming playback during long model cold starts.',
         }).then(() => {
           assumedOpen = true;
         }).catch(async (error) => {
@@ -182,21 +211,21 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
       return Array.isArray(saved) ? saved : [];
     }
 
-    async function saveProfile(profile) {
-      const saved = await profiles();
-      const index = saved.findIndex((item) => item && item.name === profile.name);
-      if (index >= 0) saved[index] = profile;
-      else saved.push(profile);
-      await storage.set('voiceProfiles', saved);
-    }
-
     function withIdentity(message) {
       const body = message || {};
       const sessionId = String(body.sessionId || '');
       const clientId = String(body.clientId || sessionId || 'legacy-client');
       const playbackId = String(body.playbackId || sessionId || 'legacy-playback');
       const requestId = String(body.requestId || `${sessionId || clientId}:${++requestSequence}`);
-      return Object.assign({}, body, { clientId, playbackId, requestId });
+      const normalized = Object.assign({}, body, { clientId, playbackId, requestId });
+      if (body.request && typeof body.request === 'object' && !Array.isArray(body.request)) {
+        normalized.request = Object.assign({}, body.request, {
+          requestId,
+          playbackId,
+          sessionId,
+        });
+      }
+      return normalized;
     }
 
     async function forward(message, includeProfiles) {
@@ -210,17 +239,87 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
       return offscreen.request(payload);
     }
 
+    async function deferCleanup(name, activeName) {
+      const queued = await storage.get(CLEANUP_QUEUE_KEY);
+      const names = [...(Array.isArray(queued) ? queued : []), name]
+        .map((item) => String(item || '').trim())
+        .filter((item, index, list) => (
+          item && item !== activeName && list.indexOf(item) === index
+        ));
+      await storage.set(CLEANUP_QUEUE_KEY, names);
+    }
+
+    async function cleanupPendingVoices() {
+      let queued;
+      try {
+        queued = await storage.get(CLEANUP_QUEUE_KEY);
+      } catch (_) {
+        return;
+      }
+      if (!Array.isArray(queued) || !queued.length) return;
+
+      const uniqueNames = queued
+        .map((name) => String(name || '').trim())
+        .filter((name, index, list) => name && list.indexOf(name) === index);
+      const remaining = [];
+      for (const name of uniqueNames) {
+        try {
+          const result = await forward({ type: 'voice:delete', name }, false);
+          if (!result || !result.ok) remaining.push(name);
+        } catch (_) {
+          remaining.push(name);
+        }
+      }
+      try {
+        await storage.set(CLEANUP_QUEUE_KEY, remaining);
+      } catch (_) {
+        // Cleanup is best-effort and must never block listing voices.
+      }
+    }
+
     return async function route(message) {
       const body = message || {};
       try {
         switch (body.type) {
           case 'tts:status':
+            if (offscreen && typeof offscreen.request === 'function') {
+              return await forward(body, false);
+            }
             return { ok: true, status: await api.status() };
 
           case 'tts:voices':
-          case 'voice:list':
           case 'tts:synthesize':
             return await forward(body, true);
+
+          case 'voice:list':
+            await cleanupPendingVoices();
+            {
+              const result = await forward(body, true);
+              if (!result || !result.ok || !Array.isArray(result.voices)) return result;
+              const savedProfiles = await profiles();
+              const profileByName = new Map(savedProfiles
+                .filter((profile) => profile && profile.name)
+                .map((profile) => [String(profile.name), profile]));
+              return Object.assign({}, result, {
+                voices: result.voices.map((voice) => {
+                  const sourceVoice = voice && typeof voice === 'object' ? voice : {};
+                  const profile = profileByName.get(String(sourceVoice.name || ''));
+                  const editable = Boolean(profile && !isReadOnlyProfile(profile));
+                  const presented = Object.assign({}, sourceVoice, {
+                    local: editable,
+                    editable,
+                    readOnly: !editable,
+                    source: editable ? 'browser' : 'backend',
+                  });
+                  if (editable) {
+                    presented.sourceFileName = String(profile.sourceFileName || '');
+                    presented.durationSeconds = Number(profile.durationSeconds) || 0;
+                    presented.refText = String(profile.refText || profile.ref_text || '');
+                  }
+                  return presented;
+                }),
+              });
+            }
 
           case 'tts:cancel':
             if (!offscreen || typeof offscreen.cancel !== 'function') {
@@ -230,9 +329,78 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
 
           case 'voice:save': {
             const profile = body.profile || {};
+            const saved = await profiles();
+            const previousProfile = saved.find((item) => item && item.name === profile.name) || null;
             const result = await forward(body, false);
-            if (result && result.ok) await saveProfile(profile);
+            if (!result || !result.ok) return result;
+            const nextProfiles = saved.slice();
+            const index = nextProfiles.findIndex((item) => item && item.name === profile.name);
+            if (index >= 0) nextProfiles[index] = profile;
+            else nextProfiles.push(profile);
+            try {
+              await storage.set('voiceProfiles', nextProfiles);
+            } catch (error) {
+              try {
+                if (previousProfile) {
+                  await forward({ type: 'voice:save', profile: previousProfile }, false);
+                } else {
+                  await forward({ type: 'voice:delete', name: profile.name }, false);
+                }
+              } catch (_) {
+                // The storage failure remains primary; rollback is best-effort.
+              }
+              throw error;
+            }
             return result;
+          }
+
+          case 'voice:rename': {
+            const saved = await profiles();
+            const currentSettings = await storage.get(SETTINGS_KEY);
+            const matchedProfile = saved.find((profile) => profile && profile.name === body.oldName);
+            if (!matchedProfile || isReadOnlyProfile(matchedProfile)) {
+              const error = new Error('该音色为只读，无法重命名。');
+              error.code = 'voice_read_only';
+              throw error;
+            }
+            const plan = voiceLibrary.planRename(
+              saved,
+              currentSettings,
+              body.oldName,
+              body.newName,
+            );
+            const registered = await forward({ type: 'voice:save', profile: plan.newProfile }, false);
+            if (!registered || !registered.ok) return registered;
+            try {
+              await storage.setMany({
+                voiceProfiles: plan.profiles,
+                [SETTINGS_KEY]: plan.settings,
+              });
+            } catch (error) {
+              try {
+                await forward({ type: 'voice:delete', name: plan.newProfile.name }, false);
+              } catch (_) {
+                // The storage error remains the primary transaction failure.
+              }
+              throw error;
+            }
+
+            let deleted;
+            try {
+              deleted = await forward({ type: 'voice:delete', name: body.oldName }, false);
+            } catch (_) {
+              deleted = null;
+            }
+            if (deleted && deleted.ok) return deleted;
+
+            await deferCleanup(body.oldName, plan.newProfile.name);
+            return {
+              ok: true,
+              warning: {
+                code: 'old_voice_cleanup_pending',
+                message: '旧音色将在下次列出音色时重试清理。',
+              },
+            };
           }
 
           case 'voice:delete': {
@@ -271,9 +439,16 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
       url: chromeApi.runtime.getURL('voice-studio.html'),
     });
     const router = createMessageRouter({ api, storage, openVoiceStudio, offscreen });
-    chromeApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-      if (message && message.target === OFFSCREEN_TARGET) return undefined;
-      router(message).then(sendResponse);
+    chromeApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message && (message.target === OFFSCREEN_TARGET || message.target === STREAM_EVENT_TARGET)) {
+        return undefined;
+      }
+      const sourceTabId = sender && sender.tab && sender.tab.id != null
+        ? sender.tab.id : null;
+      const forwarded = sourceTabId == null || !message || message.sourceTabId != null
+        ? message
+        : Object.assign({}, message, { sourceTabId });
+      router(forwarded).then(sendResponse);
       return true;
     });
 
@@ -300,9 +475,11 @@ if (typeof importScripts === 'function' && !globalThis.QwenReaderApiClient) {
 
   return {
     OFFSCREEN_TARGET,
+    STREAM_EVENT_TARGET,
     OFFSCREEN_PATH,
     REQUIRED_ORIGIN,
     SETTINGS_KEY,
+    CLEANUP_QUEUE_KEY,
     createMessageRouter,
     createOffscreenManager,
     chromeStorage,

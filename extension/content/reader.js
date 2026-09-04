@@ -1,4 +1,4 @@
-/* global chrome, QwenReaderDefaults, QwenReaderText, QwenReaderDocument, QwenReaderExtractors, QwenReaderSourceLocator, QwenReaderFollow, QwenReaderVoiceAssignment, QwenReaderPlayer, Readability */
+/* global chrome, QwenReaderDefaults, QwenReaderText, QwenReaderDocument, QwenReaderExtractors, QwenReaderSourceLocator, QwenReaderSentenceRange, QwenReaderMarkerPlacement, QwenReaderFollow, QwenReaderVoiceAssignment, QwenReaderPlayer, Readability */
 (function installQwenReader() {
   "use strict";
 
@@ -9,11 +9,13 @@
   const DocumentModel = globalThis.QwenReaderDocument;
   const Extractors = globalThis.QwenReaderExtractors;
   const SourceLocator = globalThis.QwenReaderSourceLocator;
+  const SentenceRange = globalThis.QwenReaderSentenceRange;
+  const MarkerPlacement = globalThis.QwenReaderMarkerPlacement;
   const Follow = globalThis.QwenReaderFollow;
   const VoiceAssignment =
     globalThis.QwenReaderVoiceAssignment || globalThis.QwenReaderVoices;
   const Player = globalThis.QwenReaderPlayer;
-  if (!Text || !Extractors || !SourceLocator || !Follow || !VoiceAssignment || !Player) {
+  if (!Text || !Extractors || !SourceLocator || !SentenceRange || !MarkerPlacement || !Follow || !VoiceAssignment || !Player) {
     console.error("Qwen Reader: shared modules are missing.");
     return;
   }
@@ -26,6 +28,8 @@
       Defaults.replyVoices && Defaults.replyVoices.length
         ? Defaults.replyVoices.slice()
         : ["qwen-clone"],
+    clickToRead: true,
+    interactionVersion: 2,
   };
 
   const host = document.createElement("div");
@@ -48,9 +52,17 @@
   shadow.append(stylesheet);
 
   const logoUrl = chrome.runtime.getURL("assets/qwen-reader-128.png");
+  const iconUrls = Object.freeze({
+    play: chrome.runtime.getURL("assets/icons/play.svg"),
+    pause: chrome.runtime.getURL("assets/icons/pause.svg"),
+    previous: chrome.runtime.getURL("assets/icons/skip-back.svg"),
+    next: chrome.runtime.getURL("assets/icons/skip-forward.svg"),
+    close: chrome.runtime.getURL("assets/icons/x.svg"),
+    stop: chrome.runtime.getURL("assets/icons/stop.svg"),
+  });
   const shell = document.createElement("div");
   shell.innerHTML = `
-    <button class="qr-orb" type="button" data-action="toggle-panel" aria-label="打开 Qwen 网页朗读">
+    <button class="qr-orb" type="button" data-role="floating-orb" data-action="toggle-panel" aria-label="打开 Qwen 网页朗读">
       <img class="qr-orb-logo" src="${logoUrl}" alt="" aria-hidden="true">
     </button>
     <aside class="qr-panel" aria-label="Qwen 网页朗读侧栏">
@@ -64,7 +76,7 @@
               <span data-role="service-label">检查本地服务…</span>
             </div>
           </div>
-          <button class="qr-icon-button" type="button" data-action="close-panel" aria-label="关闭侧栏">×</button>
+          <button class="qr-icon-button" type="button" data-action="close-panel" aria-label="关闭侧栏"><img class="qr-icon" src="${iconUrls.close}" alt=""></button>
         </header>
         <nav class="qr-tabs" role="tablist" aria-label="朗读功能">
           <button class="qr-tab" type="button" role="tab" aria-selected="true" data-tab="now">正在朗读</button>
@@ -78,6 +90,11 @@
         </div>
       </div>
     </aside>
+    <div class="qr-reading-marker" data-role="reading-marker" role="group" aria-label="当前句音色与朗读控制"></div>
+    <button class="qr-follow-chip" type="button" data-action="resume-follow" aria-label="回到当前朗读位置">
+      <span class="qr-follow-chip-dot" aria-hidden="true"></span>
+      回到朗读位置
+    </button>
     <div class="qr-toast" role="status" aria-live="polite"></div>
   `;
   shadow.append(shell);
@@ -85,26 +102,54 @@
   const pageStyle = document.createElement("style");
   pageStyle.id = "qwen-reader-page-style";
   pageStyle.textContent = `
-    .qwen-reader-speaking {
-      background-image: linear-gradient(
-        90deg,
-        transparent 0%,
-        rgba(104, 73, 226, .24) 8%,
-        rgba(126, 86, 255, .98) 38%,
-        rgba(70, 159, 255, .94) 72%,
-        transparent 100%
-      ) !important;
-      background-repeat: no-repeat !important;
-      background-position: 0 100% !important;
-      background-size: 100% 3px !important;
-      box-shadow: 0 10px 22px -18px rgba(87, 102, 255, .9) !important;
+    ::highlight(qwen-reader-current) {
+      color: inherit;
       text-shadow:
-        0 0 2px rgba(255, 255, 255, .92),
-        0 0 10px rgba(118, 87, 232, .28) !important;
-      transition:
-        background-size .24s ease,
-        text-shadow .24s ease,
-        box-shadow .24s ease !important;
+        0 0 1px rgba(100, 74, 220, .9),
+        0 0 5px rgba(100, 74, 220, .62),
+        0 0 13px rgba(91, 102, 226, .38),
+        0 0 24px rgba(55, 151, 232, .2);
+      animation: qwen-reader-text-bloom 1.1s cubic-bezier(.2, .72, .2, 1) 1 forwards;
+    }
+    .qwen-reader-speaking {
+      background: transparent !important;
+      box-shadow: none !important;
+      outline: 0 !important;
+      text-shadow:
+        0 0 1px rgba(100, 74, 220, .9),
+        0 0 5px rgba(100, 74, 220, .62),
+        0 0 13px rgba(91, 102, 226, .38),
+        0 0 24px rgba(55, 151, 232, .2) !important;
+      animation: qwen-reader-text-bloom 1.1s cubic-bezier(.2, .72, .2, 1) 1 forwards !important;
+    }
+    @keyframes qwen-reader-text-bloom {
+      0% {
+        text-shadow:
+          0 0 1px rgba(100, 74, 220, .46),
+          0 0 2px rgba(100, 74, 220, .24),
+          0 0 5px rgba(91, 102, 226, .12),
+          0 0 9px rgba(55, 151, 232, .06);
+      }
+      42% {
+        text-shadow:
+          0 0 2px rgba(115, 86, 236, .82),
+          0 0 8px rgba(100, 74, 220, .58),
+          0 0 20px rgba(91, 102, 226, .36),
+          0 0 36px rgba(55, 151, 232, .2);
+      }
+      100% {
+        text-shadow:
+          0 0 1px rgba(100, 74, 220, .68),
+          0 0 5px rgba(100, 74, 220, .4),
+          0 0 13px rgba(91, 102, 226, .24),
+          0 0 24px rgba(55, 151, 232, .12);
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      ::highlight(qwen-reader-current),
+      .qwen-reader-speaking {
+        animation: none !important;
+      }
     }
   `;
   (document.head || document.documentElement).appendChild(pageStyle);
@@ -113,18 +158,24 @@
   let settings = Object.assign({}, DEFAULT_SETTINGS, {
     replyVoices: (DEFAULT_SETTINGS.replyVoices || []).slice(),
     panelWidth: clampPanelWidth(DEFAULT_SETTINGS.panelWidth || 376),
-    clickToRead: Boolean(DEFAULT_SETTINGS.clickToRead),
+    clickToRead: DEFAULT_SETTINGS.clickToRead !== false,
+    orbEdge: DEFAULT_SETTINGS.orbEdge === "left" ? "left" : "right",
+    orbY: clampUnit(DEFAULT_SETTINGS.orbY, 0.82),
+    interactionVersion: 2,
   });
   let knownVoices = unique([
     settings.opVoice,
     ...(settings.replyVoices || []),
   ]).filter(Boolean);
   let currentAudio = null;
-  let sessionCounter = 0;
   let activeSession = "";
+  let activeStreamRequest = "";
   const playbackGate = Player.createInvocationGate();
   const followController = Follow.createController();
-  const clientId = createClientId();
+  const nextIdentity = typeof Player.createIdentityFactory === "function"
+    ? Player.createIdentityFactory({ prefix: "qwen-reader" })
+    : createIdentityFactoryFallback();
+  const clientId = nextIdentity("client");
   let scanCounter = 0;
   let activeScanController = null;
   let lastObservedPageKey = getCurrentPageKey();
@@ -134,8 +185,22 @@
   let dynamicResumeIndex = null;
   const requestCache = Player.createRequestCache(cancelSessionById);
   let highlightedElement = null;
+  let highlightedRange = null;
+  let highlightedIndex = -1;
+  let hoveredSegmentIndex = -1;
+  let lastMarkerIndex = -1;
+  let hoverHideTimer = null;
+  let pointerFrame = null;
+  let overlayFrame = null;
+  let sourceElements = [];
+  let sourceIndicesByElement = new WeakMap();
+  let sentenceRanges = new Map();
+  let sentenceRangeOffsets = new Map();
+  let indexedSegments = null;
   let lastScrolledLocatorKey = "";
   let toastTimer = null;
+  let orbDrag = null;
+  let suppressOrbClick = false;
 
   bindEvents();
   render();
@@ -155,6 +220,11 @@
       if (!button) return;
       const action = button.dataset.action;
       if (action === "toggle-panel") {
+        if (suppressOrbClick) {
+          suppressOrbClick = false;
+          event.preventDefault();
+          return;
+        }
         state = Player.reduce(state, { type: "PANEL_TOGGLE" });
         renderShell();
       } else if (action === "close-panel") {
@@ -162,6 +232,16 @@
         renderShell();
       } else if (action === "play-toggle") {
         await togglePlayback();
+      } else if (action === "marker-play") {
+        const inlineIndex = Number(button.dataset.index);
+        if (!Number.isInteger(inlineIndex) || !state.segments[inlineIndex]) return;
+        if (inlineIndex === state.index && ["playing", "paused"].includes(state.status)) {
+          await togglePlayback();
+        } else {
+          followController.resume();
+          lastScrolledLocatorKey = "";
+          await playIndex(inlineIndex);
+        }
       } else if (action === "scan-page") {
         await refreshCurrentPage();
       } else if (action === "next") {
@@ -197,17 +277,16 @@
     shadow.addEventListener("change", async (event) => {
       if (!event.isTrusted && !TEST_MODE) return;
       const control = event.target;
-      if (control.dataset.setting === "panelWidth") {
-        settings.panelWidth = clampPanelWidth(control.value);
-        applyPanelWidth();
-        await saveSettings();
-        renderNow();
-        return;
-      } else if (control.dataset.setting === "clickToRead") {
+      if (control.dataset.setting === "clickToRead") {
         settings.clickToRead = Boolean(control.checked);
+        if (!settings.clickToRead) {
+          clearTimeout(hoverHideTimer);
+          hoveredSegmentIndex = -1;
+          renderReadingMarker();
+        }
         await saveSettings();
         renderNow();
-        showToast(settings.clickToRead ? "网页点读已开启：点击正文即可从该段朗读。" : "网页点读已关闭。");
+        showToast(settings.clickToRead ? "网页点读已开启：点击正文即可从该句朗读。" : "网页点读已关闭。");
         return;
       } else if (control.dataset.setting === "preset") {
         settings.preset = control.value;
@@ -260,17 +339,23 @@
       render();
     });
 
-    shadow.addEventListener("input", (event) => {
-      const control = event.target;
-      if (!control || control.dataset.setting !== "panelWidth") return;
-      settings.panelWidth = clampPanelWidth(control.value);
-      applyPanelWidth();
-      const output = shadow.querySelector('[data-role="panel-width-value"]');
-      if (output) output.textContent = `${settings.panelWidth}px`;
-    });
-
     let resizePointerId = null;
     shadow.addEventListener("pointerdown", (event) => {
+      const orb = event.target.closest('[data-role="floating-orb"]');
+      if (orb && (event.isTrusted || TEST_MODE) && (event.button == null || event.button === 0)) {
+        const rect = orb.getBoundingClientRect();
+        orbDrag = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          centerOffsetX: event.clientX - (rect.left + rect.width / 2),
+          centerOffsetY: event.clientY - (rect.top + rect.height / 2),
+          moved: false,
+        };
+        try { orb.setPointerCapture?.(event.pointerId); } catch (_) {}
+        event.preventDefault();
+        return;
+      }
       const handle = event.target.closest('[data-role="panel-resize"]');
       if (!handle || (!event.isTrusted && !TEST_MODE)) return;
       resizePointerId = event.pointerId;
@@ -279,15 +364,51 @@
       event.preventDefault();
     });
     shadow.addEventListener("pointermove", (event) => {
+      if (orbDrag && event.pointerId === orbDrag.pointerId) {
+        const orb = shadow.querySelector('[data-role="floating-orb"]');
+        const dx = event.clientX - orbDrag.startX;
+        const dy = event.clientY - orbDrag.startY;
+        if (!orbDrag.moved && Math.hypot(dx, dy) >= 5) {
+          orbDrag.moved = true;
+          orb.classList.add("is-dragging");
+        }
+        if (orbDrag.moved) {
+          const size = orb.offsetWidth || 34;
+          const padding = 8;
+          const centerX = event.clientX - orbDrag.centerOffsetX;
+          const centerY = event.clientY - orbDrag.centerOffsetY;
+          orb.style.left = `${Math.round(Math.max(padding, Math.min(window.innerWidth - size - padding, centerX - size / 2)))}px`;
+          orb.style.top = `${Math.round(Math.max(padding, Math.min(window.innerHeight - size - padding, centerY - size / 2)))}px`;
+          orb.style.right = "auto";
+          orb.style.bottom = "auto";
+        }
+        event.preventDefault();
+        return;
+      }
       if (resizePointerId == null || event.pointerId !== resizePointerId) return;
       settings.panelWidth = clampPanelWidth(window.innerWidth - event.clientX - 14);
       applyPanelWidth();
-      const range = shadow.querySelector('[data-setting="panelWidth"]');
-      const output = shadow.querySelector('[data-role="panel-width-value"]');
-      if (range) range.value = String(settings.panelWidth);
-      if (output) output.textContent = `${settings.panelWidth}px`;
     });
+    async function finishOrbDrag(event) {
+      if (!orbDrag || event.pointerId !== orbDrag.pointerId) return false;
+      const drag = orbDrag;
+      orbDrag = null;
+      const orb = shadow.querySelector('[data-role="floating-orb"]');
+      orb.classList.remove("is-dragging");
+      if (!drag.moved) return true;
+      suppressOrbClick = true;
+      const rect = orb.getBoundingClientRect();
+      settings.orbEdge = rect.left + rect.width / 2 < window.innerWidth / 2 ? "left" : "right";
+      const padding = 12;
+      const available = Math.max(1, window.innerHeight - rect.height - padding * 2);
+      settings.orbY = clampUnit((rect.top - padding) / available, settings.orbY);
+      applyOrbPosition();
+      await saveSettings();
+      window.setTimeout(() => { suppressOrbClick = false; }, 120);
+      return true;
+    }
     const finishResize = async (event) => {
+      if (await finishOrbDrag(event)) return;
       if (resizePointerId == null || event.pointerId !== resizePointerId) return;
       resizePointerId = null;
       host.classList.remove("is-resizing");
@@ -297,25 +418,42 @@
     shadow.addEventListener("pointercancel", finishResize);
 
     const markManualScroll = (event) => {
+      if (!["playing", "paused", "loading"].includes(state.status)) return;
       if (!Follow.isScrollIntent(event, {
         host,
         viewportWidth: document.documentElement.clientWidth,
       })) return;
       if (!followController.canFollow()) return;
       followController.markManual();
+      renderReadingMarker();
       renderNow();
     };
     window.addEventListener("wheel", markManualScroll, { capture: true, passive: true });
     window.addEventListener("touchmove", markManualScroll, { capture: true, passive: true });
     window.addEventListener("keydown", markManualScroll, true);
     window.addEventListener("pointerdown", markManualScroll, true);
+    window.addEventListener("scroll", scheduleOverlayUpdate, { capture: true, passive: true });
+    window.addEventListener("resize", () => {
+      applyOrbPosition();
+      scheduleOverlayUpdate();
+    }, { passive: true });
+    document.addEventListener("pointermove", handlePagePointerMove, { capture: true, passive: true });
+    document.addEventListener("pointerleave", clearHoveredSegment, true);
     document.addEventListener("click", handlePageClick, true);
+
+    const readingMarker = shadow.querySelector('[data-role="reading-marker"]');
+    readingMarker.addEventListener("pointerenter", () => clearTimeout(hoverHideTimer));
+    readingMarker.addEventListener("pointerleave", () => {
+      if (!isPlaybackActive()) scheduleHoverHide();
+    });
 
     chrome.runtime.onMessage.addListener((message) => {
       if (message && message.type === "ui:toggle") {
         state = Player.reduce(state, { type: "PANEL_TOGGLE" });
         renderShell();
+        return;
       }
+      if (message && message.type === "tts:stream:event") handleStreamEvent(message);
     });
 
     if (chrome.storage.onChanged && typeof chrome.storage.onChanged.addListener === "function") {
@@ -353,7 +491,10 @@
     try {
       const saved = await chrome.storage.local.get(SETTINGS_KEY);
       const value = saved && saved[SETTINGS_KEY];
-      if (adoptSettings(value)) render();
+      if (adoptSettings(value)) {
+        await saveSettings();
+        render();
+      }
     } catch (error) {
       console.warn("Qwen Reader settings could not be restored", error);
     }
@@ -364,7 +505,12 @@
     const before = JSON.stringify(settings);
     const next = Object.assign({}, settings, value);
     next.panelWidth = clampPanelWidth(next.panelWidth);
-    next.clickToRead = Boolean(next.clickToRead);
+    next.orbEdge = next.orbEdge === "left" ? "left" : "right";
+    next.orbY = clampUnit(next.orbY, DEFAULT_SETTINGS.orbY || 0.82);
+    next.clickToRead = Number(value.interactionVersion || 0) < 2
+      ? true
+      : Boolean(next.clickToRead);
+    next.interactionVersion = 2;
     next.opVoice = String(next.opVoice || DEFAULT_SETTINGS.opVoice || "邵思萌").trim();
     const requestedReplies = Array.isArray(value.replyVoices)
       ? value.replyVoices
@@ -407,14 +553,142 @@
     host.style.setProperty("--qr-panel-width", `${settings.panelWidth}px`);
   }
 
+  function clampUnit(value, fallback) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : fallback;
+  }
+
+  function applyOrbPosition() {
+    const orb = shadow.querySelector('[data-role="floating-orb"]');
+    if (!orb || (orbDrag && orbDrag.moved)) return;
+    const size = orb.offsetHeight || 34;
+    const padding = 12;
+    const available = Math.max(1, window.innerHeight - size - padding * 2);
+    orb.style.top = `${Math.round(padding + clampUnit(settings.orbY, 0.82) * available)}px`;
+    orb.style.bottom = "auto";
+    const panelOffset = state.panelOpen && window.innerWidth > 700
+      ? settings.panelWidth + 20
+      : padding;
+    if (settings.orbEdge === "left") {
+      orb.style.left = `${padding}px`;
+      orb.style.right = "auto";
+    } else {
+      orb.style.left = "auto";
+      orb.style.right = `${panelOffset}px`;
+    }
+  }
+
   async function handlePageClick(event) {
     if ((!event.isTrusted && !TEST_MODE) || !settings.clickToRead || !state.segments.length) return;
     const path = typeof event.composedPath === "function" ? event.composedPath() : [];
     if (path.includes(host)) return;
     const target = event.target;
     if (!target || target.nodeType !== 1) return;
-    if (target.closest("a, button, input, select, textarea, label, summary, [contenteditable='true'], [role='button']")) return;
-    const contentNode = target.closest([
+    if (isInteractivePageTarget(target)) return;
+    const selection = typeof window.getSelection === "function" ? window.getSelection() : null;
+    if (selectionCoversPoint(selection, event.clientX, event.clientY)) return;
+    const matchingIndex = findSegmentIndexAtTarget(target, event.clientX, event.clientY, {
+      refreshMissing: true,
+    });
+    if (matchingIndex < 0) return;
+    followController.resume();
+    lastScrolledLocatorKey = "";
+    hoveredSegmentIndex = matchingIndex;
+    await seek(matchingIndex);
+  }
+
+  function handlePagePointerMove(event) {
+    if (!settings.clickToRead || isPlaybackActive() || pointerFrame != null) {
+      if (!settings.clickToRead && hoveredSegmentIndex >= 0) {
+        hoveredSegmentIndex = -1;
+        renderReadingMarker();
+      }
+      return;
+    }
+    const target = event.target;
+    const clientX = event.clientX;
+    const clientY = event.clientY;
+    const eventPath = typeof event.composedPath === "function" ? event.composedPath() : [];
+    const insideReader = target === host || eventPath.includes(host);
+    pointerFrame = requestAnimationFrame(() => {
+      pointerFrame = null;
+      if (insideReader) return;
+      if (!target || target.nodeType !== 1 || isInteractivePageTarget(target)) {
+        scheduleHoverHide();
+        return;
+      }
+      const nextIndex = findSegmentIndexAtTarget(target, clientX, clientY);
+      if (nextIndex < 0) {
+        scheduleHoverHide();
+        return;
+      }
+      clearTimeout(hoverHideTimer);
+      if (hoveredSegmentIndex === nextIndex) {
+        positionReadingMarker(nextIndex);
+        return;
+      }
+      hoveredSegmentIndex = nextIndex;
+      renderReadingMarker();
+    });
+  }
+
+  function scheduleHoverHide() {
+    clearTimeout(hoverHideTimer);
+    hoverHideTimer = setTimeout(clearHoveredSegment, 140);
+  }
+
+  function clearHoveredSegment() {
+    clearTimeout(hoverHideTimer);
+    if (isPlaybackActive() || hoveredSegmentIndex < 0) return;
+    hoveredSegmentIndex = -1;
+    renderReadingMarker();
+  }
+
+  function selectionCoversPoint(selection, clientX, clientY) {
+    if (!selection || selection.isCollapsed || !String(selection).trim()) return false;
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return true;
+    for (let index = 0; index < selection.rangeCount; index += 1) {
+      let rects = [];
+      try {
+        rects = Array.from(selection.getRangeAt(index).getClientRects());
+      } catch (_) {}
+      if (rects.some((rect) =>
+        clientX >= rect.left - 2 && clientX <= rect.right + 2 &&
+        clientY >= rect.top - 2 && clientY <= rect.bottom + 2
+      )) return true;
+    }
+    return false;
+  }
+
+  function isPlaybackActive() {
+    return Boolean(state.current) && ["playing", "paused", "loading"].includes(state.status);
+  }
+
+  function isInteractivePageTarget(target) {
+    return Boolean(target && typeof target.closest === "function" && target.closest([
+      "a",
+      "button",
+      "input",
+      "select",
+      "textarea",
+      "label",
+      "summary",
+      "pre",
+      "code",
+      "img",
+      "video",
+      "audio",
+      "canvas",
+      "svg",
+      "[contenteditable='']",
+      "[contenteditable='true']",
+      "[role='button']",
+      "[role='link']",
+    ].join(",")));
+  }
+
+  function closestReadableTarget(target) {
+    return target.closest([
       "p",
       "li",
       "blockquote",
@@ -429,26 +703,70 @@
       ".cooked",
       ".message-body",
       ".message-content",
+      ".mm-post .card-body",
+      ".card-body",
+      "[itemprop='articleBody']",
+      "#chaptercontent",
+      "#content",
+      ".article-content",
+      ".article-body",
+      ".entry-content",
+      ".entry-body",
+      ".post-content",
+      ".chapter-content",
+      ".read-content",
+      ".reader-content",
+      ".novel-content",
+      ".content",
+      "main",
+      "[role='main']",
       "article",
     ].join(",")) || target;
-    let matchingIndex = -1;
-    for (let index = 0; index < state.segments.length; index += 1) {
-      const segment = state.segments[index];
-      const element = SourceLocator.resolve(document, segment);
-      if (
-        element &&
-        (element === contentNode ||
-          element.contains(contentNode) ||
-          contentNode.contains(element))
-      ) {
-        matchingIndex = index;
-        break;
+  }
+
+  function findSegmentIndexAtTarget(target, clientX, clientY, options) {
+    ensureSourceIndex();
+    const contentNode = closestReadableTarget(target);
+    const collectIndices = () => {
+      let node = contentNode;
+      let indices = null;
+      while (node && node !== document.documentElement.parentElement) {
+        const found = sourceIndicesByElement.get(node);
+        if (found && found.length) {
+          indices = found;
+          break;
+        }
+        node = node.parentElement;
       }
+      if (!indices) {
+        indices = sourceElements.reduce((output, element, index) => {
+          if (
+            element && element.isConnected !== false &&
+            (element === contentNode || element.contains(contentNode) || contentNode.contains(element))
+          ) output.push(index);
+          return output;
+        }, []);
+      }
+      return indices;
+    };
+    let indices = collectIndices();
+    if (!indices.length && options && options.refreshMissing) {
+      invalidateSourceIndex();
+      ensureSourceIndex();
+      indices = collectIndices();
     }
-    if (matchingIndex < 0) return;
-    followController.resume();
-    lastScrolledLocatorKey = "";
-    await seek(matchingIndex);
+    if (!indices.length) return -1;
+    const entries = indices.map((index) => ({
+      index,
+      rects: getSegmentRects(index),
+    })).filter((entry) => entry.rects.length);
+    if (entries.length && Number.isFinite(clientX) && Number.isFinite(clientY)) {
+      const picked = SentenceRange.pickSegmentIndexAtPoint(entries, clientX, clientY, {
+        maxDistance: 68,
+      });
+      if (Number.isInteger(picked) && picked >= 0) return picked;
+    }
+    return indices.length === 1 ? indices[0] : -1;
   }
 
   async function checkService() {
@@ -543,6 +861,8 @@
     if (!preserveDynamicQueue) {
       followController.reset();
       lastScrolledLocatorKey = "";
+      hoveredSegmentIndex = -1;
+      invalidateSourceIndex();
     }
     dynamicResumeIndex = null;
     dynamicScanPending = false;
@@ -600,6 +920,8 @@
         segments: assigned,
         index: resumeIndex,
       });
+      invalidateSourceIndex();
+      ensureSourceIndex();
       render();
     } catch (error) {
       if (
@@ -655,8 +977,88 @@
     });
   }
 
+  function findNextSpeakableIndex(segments, startIndex) {
+    if (typeof Text.findNextSpeakableIndex === "function") {
+      return Text.findNextSpeakableIndex(segments, startIndex);
+    }
+    const source = Array.isArray(segments) ? segments : [];
+    for (let index = Math.max(0, Number(startIndex) || 0); index < source.length; index += 1) {
+      if (/[\p{L}\p{N}]/u.test(String(source[index] && source[index].text || ""))) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  function isCurrentStreamEvent(message) {
+    if (!message || !activeSession) return false;
+    if (message.clientId && String(message.clientId) !== String(clientId)) return false;
+    if (message.playbackId && String(message.playbackId) !== String(activeSession)) return false;
+    if (activeStreamRequest && message.requestId && String(message.requestId) !== String(activeStreamRequest)) {
+      return false;
+    }
+    return true;
+  }
+
+  function finishStreamPlayback() {
+    activeStreamRequest = "";
+    const nextIndex = findNextSpeakableIndex(state.segments, state.index + 1);
+    if (nextIndex >= 0) {
+      void playIndex(nextIndex);
+      return;
+    }
+    if (dynamicScanPending) dynamicResumeIndex = state.segments.length;
+    activeSession = "";
+    state = Player.reduce(state, { type: "STOP" });
+    hoveredSegmentIndex = -1;
+    render();
+    clearHighlight();
+    flushPendingDynamicScan();
+  }
+
+  function handleStreamEvent(message) {
+    if (!isCurrentStreamEvent(message)) return;
+    const event = String(message.event || "");
+    if (event === "started") {
+      activeStreamRequest = String(message.requestId || activeSession);
+      state = Player.reduce(state, {
+        type: "AUDIO_PLAYING",
+        sessionId: activeSession,
+        prefetchedIndex: state.prefetchedIndex,
+      });
+      render();
+      return;
+    }
+    if (event === "ended") {
+      finishStreamPlayback();
+      return;
+    }
+    if (event === "error") {
+      const detail = message.error || {};
+      if (detail.code === "cancelled" || !activeSession) return;
+      activeStreamRequest = "";
+      state = Player.reduce(state, {
+        type: "ERROR",
+        message: detail.message || "流式音频播放失败，请重试。",
+      });
+      setServiceStatus("合成失败", "error");
+      hoveredSegmentIndex = -1;
+      clearHighlight();
+      render();
+      flushPendingDynamicScan();
+    }
+  }
+
   async function playIndex(index) {
-    if (!state.segments[index]) return;
+    index = findNextSpeakableIndex(state.segments, index);
+    if (index < 0 || !state.segments[index]) {
+      state = Player.reduce(state, { type: "STOP" });
+      hoveredSegmentIndex = -1;
+      render();
+      clearHighlight();
+      flushPendingDynamicScan();
+      return;
+    }
     const playbackId = playbackGate.begin();
     const pageKey = state.pageKey;
     const segment = Object.assign({}, state.segments[index]);
@@ -677,8 +1079,9 @@
     state = Player.reduce(state, { type: "SEEK", index });
     const sessionId =
       (prefetched && prefetched.sessionId) ||
-      `qwen-reader-${Date.now()}-${++sessionCounter}`;
+      nextIdentity("playback");
     activeSession = sessionId;
+    activeStreamRequest = "";
     state = Player.reduce(state, {
       type: "AUDIO_LOADING",
       sessionId,
@@ -689,13 +1092,34 @@
     try {
       const audioResult = await Player.resolveAudioRequest(
         prefetched,
-        () => synthesizeSegment(segment, sessionId),
+        () => synthesizeSegment(segment, sessionId, { stream: true }),
       );
       if (
         !playbackGate.isCurrent(playbackId) ||
         state.sessionId !== sessionId ||
         state.pageKey !== pageKey
       ) {
+        return;
+      }
+      if (audioResult && audioResult.streaming && !audioResult.audioBase64) {
+        activeStreamRequest = String(audioResult.requestId || sessionId);
+        state = Player.reduce(state, {
+          type: "AUDIO_PLAYING",
+          sessionId,
+          prefetchedIndex: findNextSpeakableIndex(state.segments, index + 1),
+        });
+        render();
+        const nextIndex = findNextSpeakableIndex(state.segments, index + 1);
+        if (nextIndex >= 0) {
+          const nextSegment = Object.assign({}, state.segments[nextIndex]);
+          const nextSession = `${sessionId}-prefetch-${nextIndex}`;
+          const pendingPrefetch = requestCache.prefetch(
+            requestCacheKey(pageKey, nextIndex),
+            nextSession,
+            () => synthesizeSegment(nextSegment, nextSession, { stream: false }),
+          );
+          pendingPrefetch.catch(() => {});
+        }
         return;
       }
       if (!audioResult || !audioResult.audioBase64) {
@@ -707,12 +1131,13 @@
       currentAudio = audio;
       audio.addEventListener("ended", () => {
         if (!playbackGate.isCurrent(playbackId) || currentAudio !== audio) return;
-        const nextIndex = state.index + 1;
-        if (nextIndex < state.segments.length) {
+        const nextIndex = findNextSpeakableIndex(state.segments, state.index + 1);
+        if (nextIndex >= 0) {
           void playIndex(nextIndex);
         } else {
           if (dynamicScanPending) dynamicResumeIndex = state.segments.length;
           state = Player.reduce(state, { type: "STOP" });
+          hoveredSegmentIndex = -1;
           render();
           clearHighlight();
           flushPendingDynamicScan();
@@ -729,20 +1154,20 @@
       });
       await audio.play();
       if (!playbackGate.isCurrent(playbackId) || currentAudio !== audio) return;
+      const nextIndex = findNextSpeakableIndex(state.segments, index + 1);
       state = Player.reduce(state, {
         type: "AUDIO_PLAYING",
         sessionId,
-        prefetchedIndex:
-          index + 1 < state.segments.length ? index + 1 : null,
+        prefetchedIndex: nextIndex >= 0 ? nextIndex : null,
       });
       render();
-      if (index + 1 < state.segments.length) {
-        const nextSegment = Object.assign({}, state.segments[index + 1]);
-        const nextSession = `${sessionId}-prefetch-${index + 1}`;
+      if (nextIndex >= 0) {
+        const nextSegment = Object.assign({}, state.segments[nextIndex]);
+        const nextSession = `${sessionId}-prefetch-${nextIndex}`;
         const pendingPrefetch = requestCache.prefetch(
-          requestCacheKey(pageKey, index + 1),
+          requestCacheKey(pageKey, nextIndex),
           nextSession,
-          () => synthesizeSegment(nextSegment, nextSession),
+          () => synthesizeSegment(nextSegment, nextSession, { stream: false }),
         );
         pendingPrefetch.catch(() => {});
       }
@@ -756,23 +1181,40 @@
           "本地 Qwen 合成失败，请检查托盘服务。",
       });
       setServiceStatus("合成失败", "error");
+      hoveredSegmentIndex = -1;
+      clearHighlight();
       render();
       flushPendingDynamicScan();
     }
   }
 
-  async function synthesizeSegment(segment, sessionId) {
+  async function synthesizeSegment(segment, sessionId, options) {
+    const synthOptions = options || {};
+    const speechText = String(segment.speechText || "") || (
+      typeof Text.prepareSpeechText === "function"
+        ? Text.prepareSpeechText(segment.text)
+        : String(segment.text || "").trim()
+    );
+    if (!speechText) {
+      const error = new Error("当前片段只有标点，已跳过合成。");
+      error.code = "punctuation_only";
+      throw error;
+    }
     const response = await chrome.runtime.sendMessage({
       type: "tts:synthesize",
       clientId,
       playbackId: sessionId,
       requestId: sessionId,
       sessionId,
+      stream: synthOptions.stream === true,
       request: {
-        input: segment.text,
+        input: speechText,
         voice: segment.voice,
         model: Defaults.model || "qwen3-tts-1.7b-base",
         response_format: Defaults.responseFormat || "wav",
+        requestId: sessionId,
+        playbackId: sessionId,
+        sessionId,
       },
     });
     if (!response || !response.ok) {
@@ -808,6 +1250,7 @@
   function stopPlayback() {
     const session = activeSession;
     activeSession = "";
+    activeStreamRequest = "";
     playbackGate.invalidate();
     if (currentAudio) {
       currentAudio.pause();
@@ -820,6 +1263,7 @@
       currentAudio = null;
     }
     state = Player.reduce(state, { type: "STOP" });
+    hoveredSegmentIndex = -1;
     clearHighlight();
     render();
     flushPendingDynamicScan();
@@ -926,6 +1370,8 @@
     dynamicResumeIndex = null;
     followController.reset();
     lastScrolledLocatorKey = "";
+    hoveredSegmentIndex = -1;
+    invalidateSourceIndex();
     clearTimeout(mutationTimer);
     if (activeScanController) activeScanController.abort();
     const invalidationId = ++scanCounter;
@@ -942,13 +1388,41 @@
     }, 450);
   }
 
-  function highlightCurrent(options) {
-    const settings = options || {};
-    const segment = state.current;
-    if (!segment) {
-      clearHighlight();
-      return;
-    }
+  function invalidateSourceIndex() {
+    indexedSegments = null;
+    sourceElements = [];
+    sourceIndicesByElement = new WeakMap();
+    sentenceRanges = new Map();
+    sentenceRangeOffsets = new Map();
+  }
+
+  function ensureSourceIndex() {
+    const mappingsAreFresh = indexedSegments === state.segments && sourceElements.every(
+      (element) => !element || element.isConnected !== false,
+    );
+    if (mappingsAreFresh) return;
+    indexedSegments = state.segments;
+    sourceElements = [];
+    sourceIndicesByElement = new WeakMap();
+    sentenceRanges = new Map();
+    sentenceRangeOffsets = new Map();
+    const elementByKey = new Map();
+    state.segments.forEach((segment, index) => {
+      const key = sourceLocatorKey(segment);
+      let element = key && elementByKey.get(key);
+      if (!element) {
+        element = resolveRawSegmentElement(segment);
+        if (element && key) elementByKey.set(key, element);
+      }
+      sourceElements[index] = element || null;
+      if (!element) return;
+      const indices = sourceIndicesByElement.get(element) || [];
+      indices.push(index);
+      sourceIndicesByElement.set(element, indices);
+    });
+  }
+
+  function resolveRawSegmentElement(segment) {
     let element = SourceLocator.resolve(document, segment);
     if (!element && segment.sourceKey && segment.sourceKey.startsWith("dom:")) {
       const index = Number(segment.sourceKey.split(":")[1]) - 1;
@@ -959,6 +1433,7 @@
         "article p, article li, main p, main li, [role='main'] p, [role='main'] li",
       );
       element = blocks[index] || null;
+      if (!element) element = findReadableElement(segment.text);
     } else if (
       !element &&
       segment.sourceKey &&
@@ -972,28 +1447,146 @@
           `.PostStream-item[data-index="${segment.floor}"] .Post`,
         );
     }
-    if (element) {
-      if (highlightedElement !== element) {
-        clearHighlight();
-        highlightedElement = element;
-        element.classList.add("qwen-reader-speaking");
-      }
-      const locatorKey = sourceLocatorKey(segment);
-      if (
-        followController.canFollow() &&
-        (settings.forceFollow || locatorKey !== lastScrolledLocatorKey) &&
-        typeof element.scrollIntoView === "function"
-      ) {
-        element.scrollIntoView({
-          behavior: "smooth",
-          block: "center",
-          inline: "nearest",
-        });
-        lastScrolledLocatorKey = locatorKey;
-      }
-    } else {
-      clearHighlight();
+    return element;
+  }
+
+  function getSegmentRange(index) {
+    ensureSourceIndex();
+    if (sentenceRanges.has(index)) return sentenceRanges.get(index);
+    const element = sourceElements[index];
+    if (!element) {
+      sentenceRanges.set(index, null);
+      return null;
     }
+    const indices = sourceIndicesByElement.get(element) || [index];
+    const textIndex = SentenceRange.buildTextIndex(element);
+    let cursor = 0;
+    for (const candidateIndex of indices) {
+      if (sentenceRanges.has(candidateIndex)) {
+        const cached = sentenceRanges.get(candidateIndex);
+        if (sentenceRangeOffsets.has(candidateIndex)) cursor = sentenceRangeOffsets.get(candidateIndex);
+        if (candidateIndex === index) return cached;
+        continue;
+      }
+      const candidate = state.segments[candidateIndex];
+      let match = SentenceRange.findSegment(textIndex, candidate && candidate.text, cursor);
+      if (!match && cursor > 0) match = SentenceRange.findSegment(textIndex, candidate && candidate.text, 0);
+      const range = match ? createDocumentRange(match) : null;
+      if (range && match) {
+        sentenceRangeOffsets.set(candidateIndex, match.nextOffset);
+        cursor = match.nextOffset;
+      }
+      sentenceRanges.set(candidateIndex, range);
+      if (candidateIndex === index) return range;
+    }
+    sentenceRanges.set(index, null);
+    return null;
+  }
+
+  function createDocumentRange(match) {
+    try {
+      const range = document.createRange();
+      range.setStart(match.start.node, match.start.offset);
+      range.setEnd(match.end.node, match.end.offset);
+      return range;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function getSegmentRects(index) {
+    const range = getSegmentRange(index);
+    if (range && typeof range.getClientRects === "function") {
+      const rects = Array.from(range.getClientRects()).filter((rect) =>
+        Number.isFinite(rect.left) && Number.isFinite(rect.top) && rect.width > .5 && rect.height > .5
+      );
+      if (rects.length) return rects;
+    }
+    ensureSourceIndex();
+    const element = sourceElements[index];
+    if (!element || typeof element.getBoundingClientRect !== "function") return [];
+    const rect = element.getBoundingClientRect();
+    return rect && rect.width > .5 && rect.height > .5 ? [rect] : [];
+  }
+
+  function highlightCurrent(options) {
+    const followOptions = options || {};
+    const segment = state.current;
+    if (!segment) {
+      clearHighlight();
+      return;
+    }
+    ensureSourceIndex();
+    const index = state.index;
+    const element = sourceElements[index];
+    if (!element) {
+      clearHighlight();
+      return;
+    }
+    const range = getSegmentRange(index);
+    clearElementFallback();
+    clearNativeHighlight();
+    highlightedElement = element;
+    highlightedRange = range;
+    highlightedIndex = index;
+    if (!installNativeHighlight(range)) element.classList.add("qwen-reader-speaking");
+    const followKey = `${sourceLocatorKey(segment)}:${segment.id || index}`;
+    if (
+      followController.canFollow() &&
+      (followOptions.forceFollow || followKey !== lastScrolledLocatorKey)
+    ) {
+      centerSegment(index, element);
+      lastScrolledLocatorKey = followKey;
+    }
+    hoveredSegmentIndex = index;
+    renderReadingMarker();
+  }
+
+  function installNativeHighlight(range) {
+    if (
+      !range ||
+      !globalThis.CSS ||
+      !globalThis.CSS.highlights ||
+      typeof globalThis.Highlight !== "function"
+    ) return false;
+    try {
+      globalThis.CSS.highlights.set("qwen-reader-current", new globalThis.Highlight(range));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function clearNativeHighlight() {
+    try {
+      if (globalThis.CSS && globalThis.CSS.highlights) {
+        globalThis.CSS.highlights.delete("qwen-reader-current");
+      }
+    } catch (_) {}
+  }
+
+  function centerSegment(index, element) {
+    const rects = getSegmentRects(index);
+    const rect = rects[0];
+    if (rect && typeof window.scrollBy === "function") {
+      const delta = rect.top + rect.height / 2 - window.innerHeight / 2;
+      if (Math.abs(delta) > 2) {
+        window.scrollBy({ top: delta, left: 0, behavior: "smooth" });
+      }
+      return;
+    }
+    if (element && typeof element.scrollIntoView === "function") {
+      element.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    }
+  }
+
+  function scheduleOverlayUpdate() {
+    if (overlayFrame != null) return;
+    overlayFrame = requestAnimationFrame(() => {
+      overlayFrame = null;
+      const displayIndex = isPlaybackActive() ? state.index : hoveredSegmentIndex;
+      if (displayIndex >= 0) positionReadingMarker(displayIndex);
+    });
   }
 
   function sourceLocatorKey(segment) {
@@ -1028,28 +1621,178 @@
       ".entry-content p",
       ".chapter-content p",
       ".read-content p",
+      ".mm-post .card-body",
+      ".card-body",
+      "[itemprop='articleBody']",
+      "#chaptercontent",
+      "#content",
+      ".article-content",
+      ".article-body",
+      ".entry-content",
+      ".entry-body",
+      ".post-content",
+      ".message-content",
+      ".chapter-content",
+      ".read-content",
+      ".reader-content",
+      ".novel-content",
+      ".content",
+      "article",
+      "main",
+      "[role='main']",
     ].join(","));
+    let best = null;
+    let bestRank = Infinity;
+    let bestLength = Infinity;
     for (const element of Array.from(candidates).slice(0, 2000)) {
       const candidate = Text.cleanText
         ? Text.cleanText(element.textContent)
         : String(element.textContent || "").trim();
       if (!candidate) continue;
-      if (
-        candidate === needle ||
-        candidate.includes(needle) ||
-        (needle.length > 24 && needle.includes(candidate))
-      ) {
-        return element;
+      let rank = Infinity;
+      if (candidate === needle) rank = 0;
+      else if (candidate.includes(needle)) rank = 1;
+      else if (needle.length > 24 && needle.includes(candidate)) rank = 2;
+      if (rank < bestRank || (rank === bestRank && candidate.length < bestLength)) {
+        best = element;
+        bestRank = rank;
+        bestLength = candidate.length;
       }
     }
-    return null;
+    return best;
+  }
+
+  function renderReadingMarker() {
+    const controller = shadow.querySelector('[data-role="reading-marker"]');
+    const followChip = shadow.querySelector(".qr-follow-chip");
+    if (!controller || !followChip) return;
+    const active = isPlaybackActive();
+    const displayIndex = active ? state.index : settings.clickToRead ? hoveredSegmentIndex : -1;
+    const segment = displayIndex >= 0 ? state.segments[displayIndex] : null;
+    const showFollow = active && followController.mode === "manual";
+    followChip.classList.toggle("is-visible", showFollow);
+    if (!segment) {
+      controller.classList.remove("is-visible", "is-active");
+      controller.replaceChildren();
+      lastMarkerIndex = -1;
+      return;
+    }
+    const isCurrentPlaying = displayIndex === state.index && state.status === "playing";
+    const icon = `<img class="qr-icon qr-marker-icon" src="${isCurrentPlaying ? iconUrls.pause : iconUrls.play}" alt="">`;
+    const actionLabel = isCurrentPlaying ? "暂停当前句" : `从第 ${displayIndex + 1} 句开始朗读`;
+    const voiceColor = voiceAccent(segment.voice || segment.authorId || segment.authorName);
+    const authorLabel = segment.isOp
+      ? "楼主"
+      : (segment.authorName || "正文");
+    controller.innerHTML = `
+      <button class="qr-marker-button" style="--qr-speaker-accent:${voiceColor}" type="button" data-action="marker-play" data-index="${displayIndex}" aria-label="${escapeAttribute(actionLabel)}">
+        <span class="qr-marker-action" aria-hidden="true">${icon}</span>
+        <span class="qr-marker-voice">${escapeHtml(segment.voice || "默认音色")}</span>
+        <span class="qr-marker-separator" aria-hidden="true">·</span>
+        <span class="qr-marker-context">${escapeHtml(authorLabel)}</span>
+        <span class="qr-marker-progress" aria-label="第 ${displayIndex + 1} 句，共 ${state.segments.length} 句">${displayIndex + 1}/${state.segments.length}</span>
+      </button>
+    `;
+    controller.classList.add("is-visible");
+    controller.classList.toggle("is-active", active);
+    if (displayIndex !== lastMarkerIndex) {
+      controller.classList.remove("is-entering");
+      void controller.offsetWidth;
+      controller.classList.add("is-entering");
+      lastMarkerIndex = displayIndex;
+    }
+    positionReadingMarker(displayIndex);
+  }
+
+  function positionReadingMarker(index) {
+    const controller = shadow.querySelector('[data-role="reading-marker"]');
+    if (!controller || !controller.classList.contains("is-visible")) return;
+    const rects = getSegmentRects(index).filter((rect) =>
+      rect.bottom > -32 && rect.top < window.innerHeight + 32
+    );
+    if (!rects.length) {
+      controller.classList.add("is-safe-hidden");
+      return;
+    }
+    const controlWidth = controller.offsetWidth || 150;
+    const controlHeight = controller.offsetHeight || 22;
+    const placement = MarkerPlacement.chooseMarkerPlacement({
+      sentenceRects: rects,
+      markerWidth: controlWidth,
+      markerHeight: controlHeight,
+      viewport: { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight },
+      occupiedRects: collectOccupiedTextRects(index),
+      gap: 7,
+      viewportPadding: 8,
+    });
+    controller.classList.toggle("is-safe-hidden", !placement);
+    if (!placement) return;
+    controller.dataset.placement = placement.placement;
+    controller.style.left = `${Math.round(placement.left)}px`;
+    controller.style.top = `${Math.round(placement.top)}px`;
+  }
+
+  function collectOccupiedTextRects(index) {
+    ensureSourceIndex();
+    const source = sourceElements[index];
+    if (!source || typeof document.createTreeWalker !== "function" || typeof document.createRange !== "function") {
+      return [];
+    }
+    const parent = source.parentElement;
+    const root = parent && parent !== document.body && parent !== document.documentElement ? parent : source;
+    const walker = document.createTreeWalker(root, 4);
+    const rects = [];
+    let visited = 0;
+    let node = walker.nextNode();
+    while (node && visited < 500 && rects.length < 800) {
+      visited += 1;
+      const owner = node.parentElement;
+      const value = String(node.nodeValue || "").trim();
+      if (
+        value &&
+        owner &&
+        !owner.closest("script, style, noscript, template, [hidden], [aria-hidden='true']")
+      ) {
+        try {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          for (const rect of Array.from(range.getClientRects())) {
+            if (
+              rect.width > .5 && rect.height > .5 &&
+              rect.bottom > -40 && rect.top < window.innerHeight + 40
+            ) {
+              rects.push({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom });
+            }
+          }
+          if (typeof range.detach === "function") range.detach();
+        } catch (_) {}
+      }
+      node = walker.nextNode();
+    }
+    return rects;
+  }
+
+  function voiceAccent(value) {
+    const palette = ["#7458e8", "#1877c9", "#b34f76", "#167c68", "#a45b18", "#5863c7"];
+    let hash = 2166136261;
+    for (const character of String(value || "voice")) {
+      hash ^= character.codePointAt(0);
+      hash = Math.imul(hash, 16777619);
+    }
+    return palette[(hash >>> 0) % palette.length];
+  }
+
+  function clearElementFallback() {
+    if (highlightedElement) highlightedElement.classList.remove("qwen-reader-speaking");
   }
 
   function clearHighlight() {
-    if (highlightedElement) {
-      highlightedElement.classList.remove("qwen-reader-speaking");
-      highlightedElement = null;
-    }
+    clearElementFallback();
+    clearNativeHighlight();
+    highlightedElement = null;
+    highlightedRange = null;
+    highlightedIndex = -1;
+    renderReadingMarker();
   }
 
   function render() {
@@ -1057,6 +1800,7 @@
     renderNow();
     renderAuthors();
     renderVoices();
+    renderReadingMarker();
   }
 
   function renderShell() {
@@ -1065,6 +1809,9 @@
     applyPanelWidth();
     panel.classList.toggle("is-open", state.panelOpen);
     orb.classList.toggle("is-shifted", state.panelOpen);
+    orb.classList.toggle("is-reading", ["playing", "loading"].includes(state.status));
+    orb.classList.toggle("is-paused", state.status === "paused");
+    applyOrbPosition();
     orb.setAttribute(
       "aria-label",
       state.panelOpen ? "收起 Qwen 网页朗读" : "打开 Qwen 网页朗读",
@@ -1092,29 +1839,24 @@
         : "读取本页";
     const adapterLabel =
       state.document && (state.document.adapter || state.document.adapterId);
-    const mainIcon = isPlaying
-      ? '<span class="qr-pause-icon" aria-hidden="true"></span>'
-      : '<span class="qr-play-icon" aria-hidden="true"></span>';
+    const mainIcon = `<img class="qr-icon qr-main-icon" src="${isPlaying ? iconUrls.pause : iconUrls.play}" alt="">`;
     const mainLabel = isPlaying ? "暂停" : state.status === "paused" ? "继续" : "播放";
-    const showResumeFollow = Boolean(current) &&
-      ["playing", "paused", "loading"].includes(state.status) &&
-      followController.mode === "manual";
     const queue = state.segments.slice(0, 40).map((segment, index) => `
       <button class="qr-queue-item ${index === state.index ? "is-current" : ""}" type="button" data-index="${index}">
         <span class="qr-mini-avatar">${escapeHtml(initials(segment.authorName || (segment.isOp ? "楼主" : "文")))}</span>
         <span class="qr-queue-copy">
           <span class="qr-queue-name">${escapeHtml(segment.authorName || (segment.isOp ? "楼主" : "正文"))}</span>
-          <span class="qr-queue-text">第 ${escapeHtml(segment.floor || index + 1)} 段 · ${escapeHtml(segment.text)}</span>
+          <span class="qr-queue-text">第 ${escapeHtml(index + 1)} 句${segment.floor ? ` · ${escapeHtml(segment.floor)} 楼` : ""} · ${escapeHtml(segment.text)}</span>
         </span>
         <span class="qr-voice-badge">${escapeHtml(segment.voice || "未分配")}</span>
       </button>
     `).join("");
 
     view.innerHTML = `
-      <p class="qr-kicker">当前主题 · ${total ? `第 ${state.index + 1} / ${total} 段` : "等待识别"}</p>
+      <p class="qr-kicker">当前主题 · ${total ? `第 ${state.index + 1} / ${total} 句` : "等待识别"}</p>
       <h3 class="qr-title">${escapeHtml(cleanTitle(document.title))}</h3>
       <div class="qr-scan-row">
-        <span class="qr-scan-summary">${total ? `已识别 ${total} 段${adapterLabel ? ` · ${escapeHtml(adapterLabel)}` : ""}` : isScanning ? "正在分析正文和作者…" : "自动识别未得到结果"}</span>
+        <span class="qr-scan-summary">${total ? `已识别 ${total} 句${adapterLabel ? ` · ${escapeHtml(adapterLabel)}` : ""}` : isScanning ? "正在分析正文和作者…" : "自动识别未得到结果"}</span>
         <button class="qr-primary qr-scan-button" type="button" data-action="scan-page" ${isScanning ? "disabled" : ""}>${scanLabel}</button>
       </div>
       ${state.status === "error" ? `<div class="qr-error">${escapeHtml(state.error)}</div>` : ""}
@@ -1129,11 +1871,10 @@
       <div class="qr-reading-box"><strong>${isBusy ? "正在准备：" : "当前句："}</strong> ${escapeHtml(current && current.text || "页面会自动识别，但不会自动发声。")}</div>
       <div class="qr-progress" aria-label="朗读进度"><span style="width:${progress}%"></span></div>
       <div class="qr-progress-labels"><span>${total ? state.index + 1 : 0}</span><span>${total}</span></div>
-      ${showResumeFollow ? '<div class="qr-follow-row"><button class="qr-follow-button" type="button" data-action="resume-follow" aria-label="回到当前朗读">回到当前朗读</button></div>' : ""}
       <div class="qr-controls">
-        <button class="qr-control" type="button" data-action="previous" aria-label="上一段" ${!total || isBusy ? "disabled" : ""}><span class="qr-skip-icon is-back" aria-hidden="true"></span></button>
+        <button class="qr-control" type="button" data-action="previous" aria-label="上一句" ${!total || isBusy ? "disabled" : ""}><img class="qr-icon qr-skip-image" src="${iconUrls.previous}" alt=""></button>
         <button class="qr-control is-main" type="button" data-action="play-toggle" aria-label="${mainLabel}" ${isBusy || !total ? "disabled" : ""}>${mainIcon}</button>
-        <button class="qr-control" type="button" data-action="next" aria-label="下一段" ${!total || isBusy ? "disabled" : ""}><span class="qr-skip-icon is-forward" aria-hidden="true"></span></button>
+        <button class="qr-control" type="button" data-action="next" aria-label="下一句" ${!total || isBusy ? "disabled" : ""}><img class="qr-icon qr-skip-image" src="${iconUrls.next}" alt=""></button>
       </div>
       <div class="qr-section">
         <div class="qr-section-head">
@@ -1145,16 +1886,15 @@
           </select>
         </div>
         <label class="qr-toggle-row">
-          <span><strong>网页点读</strong><small>点击正文，从对应段落开始朗读</small></span>
-          <input type="checkbox" data-setting="clickToRead" ${settings.clickToRead ? "checked" : ""}>
-        </label>
-        <label class="qr-width-row">
-          <span><strong>侧栏宽度</strong><output data-role="panel-width-value">${settings.panelWidth}px</output></span>
-          <input type="range" min="300" max="640" step="8" value="${settings.panelWidth}" data-setting="panelWidth" aria-label="调整侧栏宽度">
+          <span><strong>网页点读</strong><small>点击正文，从对应句子开始朗读</small></span>
+          <span class="qr-switch-control">
+            <input type="checkbox" role="switch" data-setting="clickToRead" aria-label="网页点读" ${settings.clickToRead ? "checked" : ""}>
+            <span class="qr-switch-track" aria-hidden="true"></span>
+          </span>
         </label>
       </div>
       <div class="qr-section">
-        <div class="qr-section-head"><h4 class="qr-section-title">即将朗读</h4><button class="qr-icon-button" type="button" data-action="stop" aria-label="停止朗读">■</button></div>
+        <div class="qr-section-head"><h4 class="qr-section-title">即将朗读</h4><button class="qr-icon-button" type="button" data-action="stop" aria-label="停止朗读"><img class="qr-icon" src="${iconUrls.stop}" alt=""></button></div>
         <div class="qr-queue">${queue || '<div class="qr-empty">识别完成后会显示作者、楼层与分配音色</div>'}</div>
       </div>
     `;
@@ -1278,11 +2018,17 @@
     return Array.from(new Set(values));
   }
 
-  function createClientId() {
-    if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
-      return `qwen-reader-${globalThis.crypto.randomUUID()}`;
-    }
-    return `qwen-reader-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  function createIdentityFactoryFallback() {
+    const instanceEntropy = Math.random().toString(16).slice(2);
+    let sequence = 0;
+    return function nextFallbackIdentity(kind) {
+      const label = String(kind || "request");
+      sequence += 1;
+      if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
+        return `qwen-reader-${label}-${globalThis.crypto.randomUUID()}`;
+      }
+      return `qwen-reader-${label}-${Date.now().toString(36)}-${instanceEntropy}-${sequence.toString(36)}-${Math.random().toString(16).slice(2)}`;
+    };
   }
 
   function escapeHtml(value) {

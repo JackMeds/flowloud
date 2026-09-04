@@ -3,65 +3,133 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Qwen 音色录制室</title>
-  <link rel="stylesheet" href="voice-studio.css">
+  <title>Qwen 音色工作室</title>
+  <link rel="stylesheet" href="voice-studio.css?v=0.4.5-final">
 </head>
 <body>
+  <header class="app-bar">
+    <div class="app-bar-inner">
+      <div class="brand-lockup">
+        <img class="brand-logo" src="assets/qwen-reader-48.png" alt="">
+        <div>
+          <strong>Qwen Reader</strong>
+          <span>音色工作室</span>
+        </div>
+      </div>
+      <p id="status" class="status" role="status" aria-live="polite">正在读取本地音色库…</p>
+    </div>
+  </header>
+
   <main class="studio-shell">
-    <header class="hero">
-      <span class="eyebrow">QWEN READER · LOCAL VOICE</span>
-      <h1>音色录制室</h1>
-      <p>录一段干净、自然的话，让本地 Qwen 服务记住这个声音。</p>
+    <header class="studio-intro">
+      <div>
+        <p class="kicker">VOICE LIBRARY</p>
+        <h1>创建与管理音色</h1>
+        <p>录制或导入参考音频。音色注册由本机 Qwen 完成；自动台词识别由 Edge 在线语音服务完成，结果可手动修改。</p>
+      </div>
+      <span class="local-note">本地音色 · 在线识别台词</span>
     </header>
 
-    <section class="record-card" aria-labelledby="record-title">
-      <div class="section-heading">
-        <div>
-          <span class="step">01</span>
-          <h2 id="record-title">录制参考音频</h2>
-        </div>
-        <span id="duration" class="duration" aria-live="polite">00:00</span>
-      </div>
-      <p class="hint">建议在安静环境朗读 5–15 秒；不会上传到互联网。</p>
-      <div class="record-controls">
-        <button id="record-button" class="record-button" type="button" aria-pressed="false">
-          <span class="record-dot" aria-hidden="true"></span>
-          <span id="record-label">开始录音</span>
-        </button>
-        <span id="record-note" class="record-note">准备好后开始</span>
-      </div>
-      <audio id="preview" class="preview" controls hidden></audio>
-    </section>
+    <div class="studio-workspace">
+      <section class="studio-editor" aria-labelledby="create-title">
+        <header class="section-bar">
+          <div>
+            <h2 id="create-title">创建音色</h2>
+            <p>选择麦克风录制，或一次导入多个已有音频。</p>
+          </div>
+          <div class="source-tabs" role="tablist" aria-label="音频来源">
+            <button id="record-tab" class="source-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="record-pane" data-action="show-record" tabindex="0">麦克风</button>
+            <button id="import-tab" class="source-tab" type="button" role="tab" aria-selected="false" aria-controls="import-pane" data-action="show-import" tabindex="-1">导入音频</button>
+          </div>
+        </header>
 
-    <section class="save-card" aria-labelledby="save-title">
-      <div class="section-heading">
-        <div>
-          <span class="step">02</span>
-          <h2 id="save-title">命名并加入音色库</h2>
-        </div>
-      </div>
-      <label class="field-label" for="voice-name">音色名称</label>
-      <input id="voice-name" class="voice-input" maxlength="40" autocomplete="off" placeholder="例如：邵思萌">
-      <p class="field-help">保存后会在本机保留，并注册到 `127.0.0.1:7811`。</p>
-      <button id="save-button" class="save-button" type="button" disabled>保存并注册音色</button>
-    </section>
+        <section id="record-pane" class="source-pane" role="tabpanel" aria-labelledby="record-tab">
+          <div class="record-line">
+            <div>
+              <span class="field-caption">录音时长</span>
+              <span id="duration" class="duration" role="timer" aria-label="录音时长">00:00</span>
+            </div>
+            <button id="record-button" class="primary-button record-button" type="button" aria-pressed="false">
+              <span class="record-dot" aria-hidden="true"></span>
+              <span id="record-label">开始录音</span>
+            </button>
+          </div>
+          <p id="record-note" class="inline-note">建议在安静环境朗读 5–15 秒，语速自然，不要带背景音乐。</p>
+          <audio id="preview" class="audio-preview" controls hidden></audio>
 
-    <section class="library-card" aria-labelledby="library-title">
-      <div class="section-heading">
-        <div>
-          <span class="step">03</span>
-          <h2 id="library-title">我的音色库</h2>
-        </div>
-        <button id="refresh-button" class="text-button" type="button">刷新</button>
-      </div>
-      <ul id="voice-list" class="voice-list" aria-live="polite"></ul>
-      <p id="empty-state" class="empty-state">还没有本地录制的音色。</p>
-    </section>
+          <div class="form-grid record-fields">
+            <label class="field">
+              <span>音色名称</span>
+              <input id="voice-name" maxlength="40" autocomplete="off" placeholder="例如：旁白女声">
+            </label>
+            <label class="field field-wide">
+              <span>参考台词 <small>自动识别，可修改，也可留空</small></span>
+              <textarea id="record-ref-text" rows="3" placeholder="录音完成后会尝试识别台词"></textarea>
+            </label>
+          </div>
+          <p id="record-transcription" class="transcription-note">尚未录制。</p>
+          <div class="action-row">
+            <button id="save-button" class="dark-button" type="button" disabled>保存到音色库</button>
+          </div>
+        </section>
 
-  <p id="status" class="status" role="status" aria-live="polite">正在读取本地音色库…</p>
+        <section id="import-pane" class="source-pane" role="tabpanel" aria-labelledby="import-tab" hidden>
+          <label id="audio-dropzone" class="drop-zone" data-role="audio-dropzone" for="audio-files" tabindex="0" role="button" aria-describedby="audio-import-help">
+            <input id="audio-files" type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac" multiple hidden>
+            <strong>选择音频文件</strong>
+            <span>或将多个 WAV、MP3、M4A、AAC、OGG、FLAC 文件拖到这里</span>
+            <small id="audio-import-help">每个文件会先在本机截取最稳定的 5–15 秒人声；该片段随后会发送给 Microsoft 的 Edge 在线语音服务识别台词。</small>
+          </label>
+
+          <div class="batch-toolbar">
+            <p><strong id="batch-count">0</strong> 个文件</p>
+            <div class="toolbar-actions">
+              <button id="clear-imports" class="text-button" type="button" data-action="clear-imports" disabled>清空</button>
+              <button id="save-all-button" class="dark-button" type="button" data-action="save-all" disabled>保存全部</button>
+            </div>
+          </div>
+          <ol id="import-batch-list" class="import-list" data-role="import-batch-queue"></ol>
+          <p id="import-empty" class="empty-state">还没有选择音频文件。</p>
+        </section>
+      </section>
+
+      <aside class="studio-library" aria-labelledby="library-title">
+        <header class="section-bar library-header">
+          <div>
+            <h2 id="library-title">音色库</h2>
+            <p>浏览器保存的音色可重命名和删除。</p>
+          </div>
+          <button id="refresh-button" class="text-button" type="button" data-action="refresh-voices">刷新</button>
+        </header>
+
+        <section class="library-group" aria-labelledby="local-title">
+          <div class="group-heading">
+            <h3 id="local-title">浏览器保存</h3>
+            <span id="local-count">0</span>
+          </div>
+          <ul id="voice-list" class="voice-list" data-role="local-voice-list"></ul>
+          <p id="empty-state" class="empty-state">还没有浏览器保存的音色。</p>
+        </section>
+
+        <section class="library-group" aria-labelledby="backend-title">
+          <div class="group-heading">
+            <h3 id="backend-title">本地服务音色</h3>
+            <span>只读</span>
+          </div>
+          <p class="group-note">由 Qwen 后端维护，包括以前手动注册的音色；可用于朗读，但不能在浏览器中改名。</p>
+          <ul id="backend-voice-list" class="voice-list" data-role="backend-voice-list"></ul>
+          <p id="backend-empty" class="empty-state">本地服务尚未返回其他音色。</p>
+        </section>
+      </aside>
+    </div>
   </main>
-  <script src="shared/wav.js"></script>
-  <script src="shared/recording-state.js"></script>
-  <script src="voice-studio.js"></script>
+
+  <script src="shared/wav.js?v=0.4.5-final"></script>
+  <script src="shared/recording-state.js?v=0.4.5-final"></script>
+  <script src="shared/voice-naming.js?v=0.4.5-final"></script>
+  <script src="shared/audio-import.js?v=0.4.5-final"></script>
+  <script src="shared/transcription.js?v=0.4.5-final"></script>
+  <script src="shared/voice-library.js?v=0.4.5-final"></script>
+  <script src="voice-studio.js?v=0.4.5-final"></script>
 </body>
 </html>

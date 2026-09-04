@@ -117,6 +117,9 @@ test('toPlaybackSegments is the single chunking point and preserves speaker meta
     'discourse:post:9:1'
   ]);
   assert.deepEqual(chunks.map((chunk) => chunk.text), ['第一句。', '第二句。']);
+  assert.deepEqual(chunks.map((chunk) => chunk.speechText), ['第一句。', '第二句。']);
+  assert.equal(chunks[0].speechSourceMap.sourceText, '第一句。');
+  assert.ok(chunks[0].speechSourceMap.ranges.length > 0);
   assert.equal(chunks[1].authorId, 'op');
   assert.equal(chunks[1].isOp, true);
   assert.equal(chunks[1].sourceSelector, '[data-post-id="9"]');
@@ -124,6 +127,67 @@ test('toPlaybackSegments is the single chunking point and preserves speaker meta
   assert.deepEqual(chunks[1].sourceLocator, locator);
   assert.notEqual(chunks[0].sourceLocator, locator);
   assert.notEqual(chunks[0].sourceLocator, chunks[1].sourceLocator);
+});
+
+test('toPlaybackSegments preserves source text while attaching emoji-safe speech mapping', () => {
+  const model = loadNormalizedDocument();
+  const document = model.createDocument({
+    url: 'https://reader.example/article',
+    blocks: [{ id: 'paragraph-1', text: '你好👋🏽世界！！' }]
+  });
+
+  const [segment] = model.toPlaybackSegments(document, 260);
+
+  assert.equal(segment.text, '你好👋🏽世界！！');
+  assert.equal(segment.speechText, '你好世界！');
+  assert.equal(segment.speechSourceMap.sourceText, segment.text);
+  assert.equal(segment.speechSourceMap.speechText, segment.speechText);
+});
+
+test('toPlaybackSegments defensively filters punctuation-only chunks and preserves valid metadata', () => {
+  const model = loadNormalizedDocument();
+  const locator = {
+    adapter: 'flarum',
+    containerSelector: 'article[data-id="77"] .Post-body',
+    unitIndex: 2,
+    fingerprint: 'valid-77'
+  };
+  globalThis.QwenReaderText = Object.assign({}, globalThis.QwenReaderText, {
+    splitText() {
+      return ['\u3002\u3002\u3002', '\u6709\u6548\u6b63\u6587\u3002'];
+    }
+  });
+  const document = model.createDocument({
+    url: 'https://forum.example/d/77',
+    adapterId: 'flarum',
+    blocks: [{
+      id: 'flarum:post:77',
+      type: 'forum-post',
+      text: '\u539f\u59cb\u6b63\u6587',
+      authorId: 'author-77',
+      authorName: '\u4f5c\u8005',
+      floor: 7,
+      isOp: true,
+      postId: '77',
+      sourceKey: 'flarum:77:7',
+      sourceSelector: '[data-id="77"]',
+      sourceLocator: locator
+    }]
+  });
+
+  const segments = model.toPlaybackSegments(document, 260);
+
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].text, '\u6709\u6548\u6b63\u6587\u3002');
+  assert.equal(segments[0].authorId, 'author-77');
+  assert.equal(segments[0].authorName, '\u4f5c\u8005');
+  assert.equal(segments[0].floor, 7);
+  assert.equal(segments[0].isOp, true);
+  assert.equal(segments[0].postId, '77');
+  assert.equal(segments[0].sourceKey, 'flarum:77:7');
+  assert.equal(segments[0].sourceSelector, '[data-id="77"]');
+  assert.deepEqual(segments[0].sourceLocator, locator);
+  assert.notEqual(segments[0].sourceLocator, locator);
 });
 
 test('createBlock rejects malformed source locators without retaining caller objects', () => {

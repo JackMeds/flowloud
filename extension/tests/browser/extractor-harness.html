@@ -7,10 +7,10 @@
 <body>
   <output id="result">RUNNING</output>
   <script src="../../shared/text.js"></script>
-  <script src="../../shared/forum-content.js"></script>
+  <script src="../../shared/forum-content.js?v=0.4.2"></script>
   <script src="../../vendor/readability/Readability.js"></script>
   <script src="../../shared/normalized-document.js"></script>
-  <script src="../../shared/extractors.js"></script>
+  <script src="../../shared/extractors.js?v=0.4.2"></script>
   <script>
     addEventListener("load", async () => {
       const result = document.querySelector("#result");
@@ -88,6 +88,24 @@
         }
 
         const article = document.implementation.createHTMLDocument("长文章");
+        const mirror = document.implementation.createHTMLDocument("Mirror card forum");
+        mirror.body.innerHTML = `
+          <article class="card my-4 mm-post" id="p280414">
+            <div class="card-header">
+              <a class="ui-link" href="/author/40475">Alice</a>
+              <div class="text-muted">Re: Thread title</div>
+            </div>
+            <div class="card-body">First mirror line.<br>Second mirror line.<br><br>短</div>
+          </article>
+        `;
+        const mirrorSegments = QwenReaderExtractors.extractMirrorCardForum(mirror);
+        if (mirrorSegments.map(segment => segment.text).join("|") !== "First mirror line.|Second mirror line.|短") {
+          throw new Error("mirror br-only visual paragraphs were merged: " + mirrorSegments.map(segment => segment.text).join("|"));
+        }
+        if (!mirrorSegments.every(segment => segment.authorId === "40475" && segment.sourceSelector === '[id="p280414"] .card-body')) {
+          throw new Error("mirror author or source container mapping was lost");
+        }
+
         article.body.innerHTML = `
           <nav>首页 登录 热门推荐</nav>
           <article>

@@ -39,6 +39,14 @@ test('forum HTML falls back to one block when it has no semantic child tags', ()
   );
 });
 
+test('line-break-only forum HTML preserves every visual paragraph as a unit', () => {
+  const content = loadForumContent();
+  const units = content.semanticUnitsFromHtml('<div>First line<br>Second line<br><br>短</div>');
+
+  assert.deepEqual(units.map((unit) => unit.text), ['First line', 'Second line', '短']);
+  assert.deepEqual(units.map((unit) => unit.unitIndex), [0, 1, 2]);
+});
+
 test('live DOM falls back to one block when it has no semantic child tags', () => {
   const content = loadForumContent();
   const root = {

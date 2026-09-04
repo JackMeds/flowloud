@@ -16,11 +16,14 @@
     <h1>女生开发记录 &amp; 各种碎碎念</h1>
     <article class="Post" data-qwen-source="post-1">
       <h3>oprin</h3>
-      <div class="Post-body"><p data-test-paragraph="1">今天继续记录一下最近的变化，也当作留给未来的备忘。</p></div>
+      <div class="Post-body"><p data-test-paragraph="1">今天继续记录一下最近的变化。第二句话用来验证精确点读。</p><a data-test-link href="#safe-link">普通链接</a></div>
     </article>
     <article class="Post" data-qwen-source="post-2">
       <h3>LeR</h3>
       <div class="Post-body"><p data-test-paragraph="2">很短的回复。</p></div>
+    </article>
+    <article class="mm-post" id="mirror-post">
+      <div class="card-body" data-test-br-content>First mirror line.<br>Second mirror line.<br>短</div>
     </article>
   </main>
   <script>
@@ -32,6 +35,7 @@
       pendingSynthesis: null,
       scrollCalls: [],
       storageListener: null,
+      savedSettings: null,
       voiceNames: ["邵思萌", "音色B", "音色C", "音色D"]
     };
     window.__QWEN_READER_TEST__ = true;
@@ -51,7 +55,11 @@
       DEFAULT_SETTINGS: {
         preset: "op-exclusive",
         opVoice: "邵思萌",
-        replyVoices: ["音色B", "音色C"]
+        replyVoices: ["音色B", "音色C"],
+        clickToRead: true,
+        orbEdge: "right",
+        orbY: 0.82,
+        interactionVersion: 2
       }
     };
     window.QwenReaderText = {
@@ -63,8 +71,14 @@
         const segments = [
           {id:"p1", floor:1, authorId:"op", authorName:"oprin", isOp:true, text:"今天继续记录一下最近的变化。", sourceKey:"post-1", sourceSelector:'[data-qwen-source="post-1"]', sourceLocator:{adapter:"flarum",containerSelector:'[data-qwen-source="post-1"] .Post-body',unitIndex:0,fingerprint:QwenReaderForumContent.fingerprint(document.querySelector('[data-test-paragraph="1"]').textContent)}},
           {id:"p2", floor:2, authorId:"ler", authorName:"LeR", isOp:false, text:"很短的回复。", sourceKey:"post-2", sourceSelector:'[data-qwen-source="post-2"]', sourceLocator:{adapter:"flarum",containerSelector:'[data-qwen-source="post-2"] .Post-body',unitIndex:0,fingerprint:QwenReaderForumContent.fingerprint(document.querySelector('[data-test-paragraph="2"]').textContent)}},
-          {id:"p2:chunk", floor:2, authorId:"ler", authorName:"LeR", isOp:false, text:"同一段落的后续音频切片。", sourceKey:"post-2", sourceSelector:'[data-qwen-source="post-2"]', sourceLocator:{adapter:"flarum",containerSelector:'[data-qwen-source="post-2"] .Post-body',unitIndex:0,fingerprint:QwenReaderForumContent.fingerprint(document.querySelector('[data-test-paragraph="2"]').textContent)}}
+          {id:"p2:chunk", floor:2, authorId:"ler", authorName:"LeR", isOp:false, text:"同一段落的后续音频切片。", sourceKey:"post-2", sourceSelector:'[data-qwen-source="post-2"]', sourceLocator:{adapter:"flarum",containerSelector:'[data-qwen-source="post-2"] .Post-body',unitIndex:0,fingerprint:QwenReaderForumContent.fingerprint(document.querySelector('[data-test-paragraph="2"]').textContent)}},
+          {id:"p1:second", floor:1, authorId:"op", authorName:"oprin", isOp:true, text:"第二句话用来验证精确点读。", sourceKey:"post-1", sourceSelector:'[data-qwen-source="post-1"]', sourceLocator:{adapter:"flarum",containerSelector:'[data-qwen-source="post-1"] .Post-body',unitIndex:0,fingerprint:QwenReaderForumContent.fingerprint(document.querySelector('[data-test-paragraph="1"]').textContent)}}
         ];
+        segments.push(
+          {id:"mirror:1", floor:1, authorId:"mirror", authorName:"Mirror", isOp:false, text:"First mirror line.", sourceKey:"readability:first"},
+          {id:"mirror:2", floor:2, authorId:"mirror", authorName:"Mirror", isOp:false, text:"Second mirror line.", sourceKey:"readability:second"},
+          {id:"mirror:3", floor:3, authorId:"mirror", authorName:"Mirror", isOp:false, text:"短", sourceKey:"readability:short"}
+        );
         if (document.querySelector('[data-dynamic-reply]')) {
           segments.push({id:"p3", floor:3, authorId:"new", authorName:"新回复", isOp:false, text:"播放期间动态加载的回复", sourceKey:"post-3"});
         }
@@ -105,23 +119,29 @@
         },
         local: {
           get() { return Promise.resolve({}); },
-          set() { return Promise.resolve(); }
+          set(value) {
+            if (value && value.qwenReaderSettings) window.__qrHarness.savedSettings = value.qwenReaderSettings;
+            return Promise.resolve();
+          }
         }
       }
     };
   </script>
-  <script src="../../shared/forum-content.js"></script>
+  <script src="../../shared/forum-content.js?v=0.4.2"></script>
   <script src="../../shared/normalized-document.js"></script>
   <script src="../../shared/player-state.js"></script>
-  <script src="../../shared/source-locator.js"></script>
+  <script src="../../shared/sentence-range.js?v=0.4.2"></script>
+  <script src="../../shared/marker-placement.js?v=0.4.2"></script>
+  <script src="../../shared/source-locator.js?v=0.4.2"></script>
   <script src="../../shared/follow-controller.js"></script>
   <script>
     document.querySelectorAll('[data-test-paragraph]').forEach((paragraph) => {
       paragraph.getBoundingClientRect = () => ({ top: 1200, bottom: 1260 });
       paragraph.scrollIntoView = (options) => window.__qrHarness.scrollCalls.push(options);
     });
+    window.scrollBy = (options) => window.__qrHarness.scrollCalls.push(options);
   </script>
-  <script src="../../content/reader.js?v=paragraph-follow"></script>
+  <script src="../../content/reader.js?v=0.4.2"></script>
   <script>
     addEventListener("load", async () => {
       await new Promise(resolve => setTimeout(resolve, 250));
@@ -136,16 +156,41 @@
         const orb = root.querySelector('[data-action="toggle-panel"]');
         if (!orb) throw new Error("floating orb missing");
         if (!orb.querySelector(".qr-orb-logo")) throw new Error("generated orb logo missing");
+        const orbStyle = getComputedStyle(orb);
+        const orbLogoStyle = getComputedStyle(orb.querySelector(".qr-orb-logo"));
+        if (orbStyle.backgroundColor !== "rgba(0, 0, 0, 0)") throw new Error("floating logo still has a background circle");
+        if (parseFloat(orbStyle.borderTopWidth) !== 0) throw new Error("floating logo still has a border circle");
+        if (orbStyle.boxShadow !== "none") throw new Error("floating logo still has button shadow chrome");
+        if (!orbLogoStyle.filter.includes("drop-shadow")) throw new Error("naked logo is missing its restrained shadow");
+        if (getComputedStyle(orb).touchAction !== "none") throw new Error("floating logo is not prepared for touch dragging");
+        const orbPointerId = 37;
+        const orbRect = orb.getBoundingClientRect();
+        orb.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: orbPointerId, button: 0, clientX: orbRect.left + 17, clientY: orbRect.top + 17 }));
+        orb.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: orbPointerId, button: 0, clientX: 18, clientY: 190 }));
+        orb.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: orbPointerId, button: 0, clientX: 18, clientY: 190 }));
+        await new Promise(resolve => setTimeout(resolve, 150));
+        if (window.__qrHarness.savedSettings?.orbEdge !== "left") throw new Error("floating logo did not persist its snapped edge");
+        if (parseFloat(orb.style.left) > 16 || orb.style.right !== "auto") throw new Error("floating logo did not snap to the left viewport edge");
+        if (root.querySelector(".qr-panel.is-open")) throw new Error("dragging the floating logo accidentally opened the panel");
         orb.click();
         await new Promise(resolve => setTimeout(resolve, 20));
         if (!root.querySelector(".qr-panel.is-open")) throw new Error("panel did not open");
         const widthControl = root.querySelector('[data-setting="panelWidth"]');
-        if (!widthControl) throw new Error("panel width control missing");
-        widthControl.value = "508";
-        widthControl.dispatchEvent(new Event("input", { bubbles: true }));
-        widthControl.dispatchEvent(new Event("change", { bubbles: true }));
+        if (widthControl) throw new Error("duplicate panel width range control is still present");
+        const resizeHandle = root.querySelector('[data-role="panel-resize"]');
+        if (!resizeHandle) throw new Error("panel resize handle missing");
+        const pointerId = 41;
+        const resizeClientX = Math.max(0, window.innerWidth - 508 - 14);
+        resizeHandle.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId, clientX: resizeClientX }));
+        resizeHandle.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId, clientX: resizeClientX }));
+        resizeHandle.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId, clientX: resizeClientX }));
         await new Promise(resolve => setTimeout(resolve, 20));
-        if (host.style.getPropertyValue("--qr-panel-width") !== "508px") throw new Error("panel width did not update");
+        const expectedPanelWidth = Math.max(300, Math.min(640, window.innerWidth - 48, 508));
+        if (host.style.getPropertyValue("--qr-panel-width") !== `${expectedPanelWidth}px`) throw new Error("drag resize did not update panel width");
+        const tabsStyle = getComputedStyle(root.querySelector('.qr-tabs'));
+        const selectedTabStyle = getComputedStyle(root.querySelector('.qr-tab[aria-selected="true"]'));
+        if (tabsStyle.backgroundColor !== "rgba(0, 0, 0, 0)") throw new Error("sidebar tabs still use a pill background");
+        if (selectedTabStyle.borderRadius !== "0px" || selectedTabStyle.boxShadow !== "none") throw new Error("selected sidebar tab is still a card pill");
         if (root.textContent.includes("Ⅱ")) throw new Error("Roman numeral pause glyph is present");
         if (window.__qrHarness.extractCalls !== 1) throw new Error("initial page scan should run exactly once");
         if (window.__qrHarness.synthCalls !== 0) throw new Error("initial page scan must not synthesize audio");
@@ -155,30 +200,63 @@
         await new Promise(resolve => setTimeout(resolve, 80));
         if (window.__qrHarness.extractCalls !== 2) throw new Error("manual rescan did not run once");
         if (window.__qrHarness.synthCalls !== 0) throw new Error("manual rescan must not synthesize audio");
+        let firstParagraph = document.querySelector('[data-test-paragraph="1"]');
+        const secondParagraph = document.querySelector('[data-test-paragraph="2"]');
+        const hoverRange = document.createRange();
+        hoverRange.setStart(firstParagraph.firstChild, 0);
+        hoverRange.setEnd(firstParagraph.firstChild, firstParagraph.firstChild.data.indexOf("第二句话"));
+        const hoverRect = hoverRange.getBoundingClientRect();
+        const hoverX = hoverRect.left + Math.max(1, hoverRect.width / 2);
+        const hoverY = hoverRect.top + Math.max(1, hoverRect.height / 2);
+        let pointSwitch = root.querySelector('[data-setting="clickToRead"]');
+        if (!pointSwitch || pointSwitch.getAttribute("role") !== "switch" || !pointSwitch.nextElementSibling?.classList.contains("qr-switch-track")) throw new Error("point-reading is not rendered as an accessible switch");
+        pointSwitch.checked = false;
+        pointSwitch.dispatchEvent(new Event("change", { bubbles: true }));
+        await new Promise(resolve => setTimeout(resolve, 30));
+        firstParagraph.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, composed: true, clientX: hoverX, clientY: hoverY }));
+        await new Promise(resolve => setTimeout(resolve, 30));
+        if (root.querySelector('.qr-reading-marker.is-visible')) throw new Error("disabled point-reading still exposed a hover marker");
+        pointSwitch = root.querySelector('[data-setting="clickToRead"]');
+        pointSwitch.checked = true;
+        pointSwitch.dispatchEvent(new Event("change", { bubbles: true }));
+        await new Promise(resolve => setTimeout(resolve, 30));
+        firstParagraph.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, composed: true, clientX: hoverX, clientY: hoverY }));
+        await new Promise(resolve => setTimeout(resolve, 30));
+        const hoverController = root.querySelector('.qr-reading-marker.is-visible');
+        if (!hoverController) throw new Error("paragraph hover did not reveal the reading marker");
+        if (!hoverController.querySelector('.qr-marker-voice') || !hoverController.querySelector('.qr-marker-progress')) throw new Error("reading marker metadata is incomplete");
+        if (hoverController.querySelector('.qr-inline-author, .qr-inline-speaker-copy')) throw new Error("reading marker still contains bulky author card content");
+        const markerStyle = getComputedStyle(hoverController);
+        if (markerStyle.backgroundColor !== "rgba(0, 0, 0, 0)" || parseFloat(markerStyle.borderTopWidth) !== 0 || markerStyle.boxShadow !== "none") throw new Error("reading marker is still a floating card");
         root.querySelector('.qr-queue-item[data-index="0"]').click();
         await new Promise(resolve => setTimeout(resolve, 40));
-        const firstParagraph = document.querySelector('[data-test-paragraph="1"]');
-        const secondParagraph = document.querySelector('[data-test-paragraph="2"]');
-        if (!firstParagraph.classList.contains("qwen-reader-speaking")) throw new Error("first paragraph was not highlighted");
-        if (window.__qrHarness.scrollCalls.length !== 1 || window.__qrHarness.scrollCalls[0].block !== "center") throw new Error("first paragraph did not use one centered scroll");
+        if (root.querySelector('.qr-highlight-band, [data-role="highlight-layer"]')) throw new Error("current sentence still uses a rectangular highlight overlay");
+        const pageHighlightStyle = document.querySelector('#qwen-reader-page-style')?.textContent || '';
+        if (!pageHighlightStyle.includes('text-shadow')) throw new Error("current sentence is missing text-edge glow");
+        if (/::highlight\([^)]*\)\s*\{[^}]*background(?:-color)?\s*:/s.test(pageHighlightStyle)) throw new Error("current sentence still paints a rectangular background");
+        document.body.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, composed: true, clientX: 4, clientY: 4 }));
+        await new Promise(resolve => setTimeout(resolve, 20));
+        const activeController = root.querySelector('.qr-reading-marker.is-visible [data-action="marker-play"][data-index="0"]');
+        if (!activeController) throw new Error("reading marker did not remain attached to the active sentence");
+        if (window.__qrHarness.scrollCalls.length !== 1 || window.__qrHarness.scrollCalls[0].behavior !== "smooth") throw new Error("first sentence did not use one centered scroll");
         window.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -120 }));
         root.querySelector('.qr-queue-item[data-index="1"]').click();
         await new Promise(resolve => setTimeout(resolve, 40));
-        if (!secondParagraph.classList.contains("qwen-reader-speaking")) throw new Error("manual browsing stopped paragraph highlighting");
+        if (!document.querySelector('#qwen-reader-page-style')?.textContent.includes('text-shadow')) throw new Error("manual browsing stopped sentence highlighting");
         if (window.__qrHarness.scrollCalls.length !== 1) throw new Error("reader fought manual scrolling");
-        const resumeFollow = root.querySelector('[data-action="resume-follow"]');
+        const resumeFollow = root.querySelector('.qr-follow-chip[data-action="resume-follow"].is-visible');
         if (!resumeFollow) throw new Error("resume-follow button missing in manual mode");
         resumeFollow.click();
         await new Promise(resolve => setTimeout(resolve, 20));
-        if (window.__qrHarness.scrollCalls.length !== 2 || window.__qrHarness.scrollCalls[1].block !== "center") throw new Error("explicit resume did not return once with centered scrolling");
-        if (root.querySelector('[data-action="resume-follow"]')) throw new Error("resume-follow button remained after resuming");
+        if (window.__qrHarness.scrollCalls.length !== 2 || window.__qrHarness.scrollCalls[1].behavior !== "smooth") throw new Error("explicit resume did not return once with centered scrolling");
+        if (root.querySelector('.qr-follow-chip.is-visible')) throw new Error("resume-follow button remained after resuming");
         root.querySelector('.qr-queue-item[data-index="2"]').click();
         await new Promise(resolve => setTimeout(resolve, 40));
-        if (window.__qrHarness.scrollCalls.length !== 2) throw new Error("same source paragraph scrolled again for a later audio chunk");
+        if (window.__qrHarness.scrollCalls.length !== 3) throw new Error("a later sentence was not independently centered");
         firstParagraph.getBoundingClientRect = () => ({ top: 300, bottom: 360 });
         root.querySelector('.qr-queue-item[data-index="0"]').click();
         await new Promise(resolve => setTimeout(resolve, 40));
-        if (window.__qrHarness.scrollCalls.length !== 3 || window.__qrHarness.scrollCalls[2].block !== "center") throw new Error("new visible paragraph was not centered");
+        if (window.__qrHarness.scrollCalls.length !== 4 || window.__qrHarness.scrollCalls[3].behavior !== "smooth") throw new Error("new visible sentence was not centered");
         root.querySelector('[data-action="stop"]').click();
         await new Promise(resolve => setTimeout(resolve, 20));
         window.__qrHarness.synthCalls = 0;
@@ -242,15 +320,59 @@
         tabs[0].click();
         const clickToRead = root.querySelector('[data-setting="clickToRead"]');
         if (!clickToRead) throw new Error("page click-to-read control missing");
-        clickToRead.checked = true;
-        clickToRead.dispatchEvent(new Event("change", { bubbles: true }));
-        await new Promise(resolve => setTimeout(resolve, 30));
+        if (!clickToRead.checked) throw new Error("page click-to-read should default on after the interaction upgrade");
         const synthBeforePageClick = window.__qrHarness.synthCalls;
-        firstParagraph.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+        const replacementParagraph = firstParagraph.cloneNode(true);
+        firstParagraph.replaceWith(replacementParagraph);
+        firstParagraph = replacementParagraph;
+        const unrelatedSelection = window.getSelection();
+        const unrelatedRange = document.createRange();
+        unrelatedRange.selectNodeContents(secondParagraph);
+        unrelatedSelection.removeAllRanges();
+        unrelatedSelection.addRange(unrelatedRange);
+        const textNode = firstParagraph.firstChild;
+        const secondStart = textNode.data.indexOf("第二句话");
+        const secondRange = document.createRange();
+        secondRange.setStart(textNode, secondStart);
+        secondRange.setEnd(textNode, textNode.data.length);
+        const secondRect = secondRange.getBoundingClientRect();
+        firstParagraph.dispatchEvent(new MouseEvent("click", {
+          bubbles: true,
+          composed: true,
+          clientX: secondRect.left + Math.max(1, secondRect.width / 2),
+          clientY: secondRect.top + Math.max(1, secondRect.height / 2)
+        }));
         await new Promise(resolve => setTimeout(resolve, 50));
+        unrelatedSelection.removeAllRanges();
         const currentAfterPageClick = root.querySelector('.qr-queue-item.is-current');
-        if (!currentAfterPageClick || currentAfterPageClick.dataset.index !== "0") throw new Error("page click did not seek the matching paragraph");
+        if (!currentAfterPageClick || currentAfterPageClick.dataset.index !== "3") throw new Error("page click did not seek the exact sentence");
         if (window.__qrHarness.synthCalls <= synthBeforePageClick) throw new Error("page click did not start reading");
+        root.querySelector('[data-action="stop"]').click();
+        await new Promise(resolve => setTimeout(resolve, 20));
+        const brContent = document.querySelector('[data-test-br-content]');
+        const secondBrText = brContent.childNodes[2];
+        const secondBrRange = document.createRange();
+        secondBrRange.selectNodeContents(secondBrText);
+        const secondBrRect = secondBrRange.getBoundingClientRect();
+        brContent.dispatchEvent(new MouseEvent("click", {
+          bubbles: true,
+          composed: true,
+          clientX: secondBrRect.left + Math.max(1, secondBrRect.width / 2),
+          clientY: secondBrRect.top + Math.max(1, secondBrRect.height / 2)
+        }));
+        await new Promise(resolve => setTimeout(resolve, 50));
+        const currentAfterBrClick = root.querySelector('.qr-queue-item.is-current');
+        if (!currentAfterBrClick || currentAfterBrClick.dataset.index !== "5") throw new Error("br-only forum line did not seek its exact segment");
+        const nativeGlow = globalThis.CSS?.highlights?.get("qwen-reader-current");
+        if (!nativeGlow && !brContent.classList.contains("qwen-reader-speaking")) throw new Error("br-only forum line has no visible playback highlight");
+        root.querySelector('[data-action="stop"]').click();
+        await new Promise(resolve => setTimeout(resolve, 20));
+        const synthBeforeLink = window.__qrHarness.synthCalls;
+        const safeLink = document.querySelector('[data-test-link]');
+        safeLink.addEventListener("click", event => event.preventDefault(), { once: true });
+        safeLink.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+        await new Promise(resolve => setTimeout(resolve, 30));
+        if (window.__qrHarness.synthCalls !== synthBeforeLink) throw new Error("clicking a normal link triggered point reading");
         root.querySelector('[data-action="stop"]').click();
         result.value = "PASS";
         result.style.background = "#d9fbe7";
