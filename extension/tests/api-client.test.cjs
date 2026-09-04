@@ -59,6 +59,23 @@ test('local client token is sent as bearer authorization and can be rotated', as
   assert.equal(fake.calls[1].options.headers.authorization, 'Bearer second-token');
 });
 
+test('missing local pairing token explains exactly how to reconnect', async () => {
+  const fake = createFetch([new Response(JSON.stringify({
+    error: { code: 'client_auth_required', message: 'Bearer token required' },
+  }), {
+    status: 401,
+    headers: { 'content-type': 'application/json' },
+  })]);
+  const client = createApiClient({ fetchImpl: fake.fetchImpl });
+
+  await assert.rejects(
+    client.voices(),
+    (error) => error.code === 'client_auth_required'
+      && /QwenTrayGateway/u.test(error.message)
+      && /配对令牌/u.test(error.message),
+  );
+});
+
 test('synthesizeStream negotiates a readable stream and keeps the trusted request contract', async () => {
   const body = new ReadableStream({
     start(controller) {

@@ -8,6 +8,68 @@ test('Provider V3 accepts capability-scoped implementations', () => {
   assert.equal(item.capabilities.synthesize, false);
 });
 
+test('browser model voice batch skips invalid IDs, limits concurrency, and reports partial failures', async () => {
+  const previousCaches = globalThis.caches;
+  globalThis.caches = { keys: async () => [], delete: async () => false };
+  let active = 0;
+  let peak = 0;
+  const progress = [];
+  const pipelineFactory = async () => async () => ({ audio: new Float32Array([0.2]), sampling_rate: 16000 });
+  pipelineFactory.downloadVoice = async (_repoId, options) => {
+    active += 1; peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, options.voiceId === 'zf_002' ? 4 : 1));
+    active -= 1;
+    if (options.voiceId === 'zf_003') throw Object.assign(new Error('源文件暂时不可用'), { code: 'source_unavailable' });
+    return { voiceId: options.voiceId, cached: true, downloaded: true };
+  };
+  try {
+    const item = provider.createBrowserModelProvider({ modelId: 'kokoro-zh', downloadConcurrency: 2, pipelineFactory });
+    const result = await item.modelManagement['voice-batch']({
+      action: 'download', voiceIds: ['browser-model:zf_001', 'zf_002', 'zf_003', 'not-a-voice'],
+      onProgress: (value) => progress.push(value),
+    });
+    assert.deepEqual(result.requested, ['zf_001', 'zf_002', 'zf_003']);
+    assert.deepEqual(result.completed.sort(), ['zf_001', 'zf_002']);
+    assert.equal(result.failed.length, 1);
+    assert.equal(result.failed[0].voiceId, 'zf_003');
+    assert.ok(peak <= 2, `expected at most two concurrent downloads, saw ${peak}`);
+    assert.ok(progress.some((value) => value.completed === 3 && value.phase === 'voice-batch'));
+    assert.equal(result.totalBytes, 3 * 522240);
+  } finally {
+    globalThis.caches = previousCaches;
+  }
+});
+
+test('browser model full install asks the runtime for every catalog voice', async () => {
+  const previousCaches = globalThis.caches;
+  let cacheId = '';
+  globalThis.caches = { keys: async () => cacheId ? [cacheId] : [], delete: async () => false };
+  const builds = [];
+  const pipelineFactory = async (_task, _repoId, options) => {
+    builds.push({ ensureAllVoices: options.ensureAllVoices, ensureVoiceIds: options.ensureVoiceIds });
+    return Object.assign(async () => ({ audio: new Float32Array([0.2, -0.2]), sampling_rate: 16000 }), { dispose: async () => {} });
+  };
+  try {
+    const item = provider.createBrowserModelProvider({ modelId: 'kokoro-zh', device: 'wasm', pipelineFactory });
+    cacheId = (await item.modelManagement.info()).cacheId;
+    const result = await item.modelManagement.download({ installMode: 'full' });
+    assert.equal(result.installMode, 'full');
+    assert.equal(result.downloadedVoiceIds.length, 103);
+    assert.equal(builds[0].ensureAllVoices, true);
+    assert.equal(builds[0].ensureVoiceIds.length, 103);
+  } finally {
+    globalThis.caches = previousCaches;
+  }
+});
+
+test('browser model voice metadata keeps the raw catalog id beside the friendly label', async () => {
+  const item = provider.createBrowserModelProvider({ modelId: 'kokoro-zh', pipelineFactory: async () => async () => ({ audio: new Float32Array([0.2]) }) });
+  const voices = await item.modelManagement.voices();
+  const voice = voices.find((entry) => entry.rawId === 'zf_001');
+  assert.equal(voice.rawLabel, 'zf_001');
+  assert.equal(voice.displayLabel, 'Kokoro 音色 001');
+});
+
 test('online provider rejects unsafe HTTP before fetching', () => {
   assert.throws(() => provider.createOpenAICompatibleProvider({ baseUrl: 'http://tts.example.test' }), /HTTPS/);
 });

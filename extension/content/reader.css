@@ -832,27 +832,27 @@ button {
 
 .qr-word-motion-layer[data-style="edge-dissolve"] .qr-word-motion-ink::after,
 .qr-word-motion-layer[data-style="custom"] .qr-word-motion-ink::after {
-  animation: qr-word-edge-dissolve var(--qr-word-motion-duration, 1370ms) linear both;
+  animation: qr-word-edge-dissolve var(--qr-word-motion-duration, 80ms) linear both;
 }
 
 .qr-word-motion-layer[data-style="edge-dissolve"] .qr-word-motion-cursor.is-running-a,
 .qr-word-motion-layer[data-style="custom"] .qr-word-motion-cursor.is-running-a {
-  animation: qr-word-edge-position var(--qr-word-motion-duration, 1370ms) linear both;
+  animation: qr-word-edge-position var(--qr-word-motion-duration, 80ms) linear both;
 }
 
 .qr-word-motion-layer[data-style="edge-dissolve"] .qr-word-motion-cursor.is-running-b,
 .qr-word-motion-layer[data-style="custom"] .qr-word-motion-cursor.is-running-b {
-  animation: qr-word-edge-position-alt var(--qr-word-motion-duration, 1370ms) linear both;
+  animation: qr-word-edge-position-alt var(--qr-word-motion-duration, 80ms) linear both;
 }
 
 .qr-word-motion-layer[data-style="edge-dissolve"] .qr-word-motion-cursor.is-running-a::after,
 .qr-word-motion-layer[data-style="custom"] .qr-word-motion-cursor.is-running-a::after {
-  animation: qr-word-edge-halo var(--qr-word-motion-duration, 1370ms) linear both;
+  animation: qr-word-edge-halo var(--qr-word-motion-duration, 80ms) linear both;
 }
 
 .qr-word-motion-layer[data-style="edge-dissolve"] .qr-word-motion-cursor.is-running-b::after,
 .qr-word-motion-layer[data-style="custom"] .qr-word-motion-cursor.is-running-b::after {
-  animation: qr-word-edge-halo-alt var(--qr-word-motion-duration, 1370ms) linear both;
+  animation: qr-word-edge-halo-alt var(--qr-word-motion-duration, 80ms) linear both;
 }
 
 .qr-word-motion-layer[data-style="aurora-tide"] .qr-word-motion-ink {
@@ -861,11 +861,11 @@ button {
   background-size: 220% 100%;
   background-clip: text;
   -webkit-background-clip: text;
-  animation: qr-word-aurora-text var(--qr-word-motion-duration, 1370ms) linear both;
+  animation: qr-word-aurora-text var(--qr-word-motion-duration, 80ms) linear both;
 }
 
 .qr-word-motion-layer[data-style="aurora-tide"] .qr-word-motion-ink::after {
-  animation: qr-word-aurora-light var(--qr-word-motion-duration, 1370ms) linear both;
+  animation: qr-word-aurora-light var(--qr-word-motion-duration, 80ms) linear both;
 }
 
 .qr-word-motion-layer[data-style="aurora-tide"] .qr-word-motion-cursor {
@@ -876,11 +876,11 @@ button {
 }
 
 .qr-word-motion-layer[data-style="aurora-tide"] .qr-word-motion-cursor.is-running-a {
-  animation: qr-word-aurora-position var(--qr-word-motion-duration, 1370ms) cubic-bezier(.18,.62,.22,1) both;
+  animation: qr-word-aurora-position var(--qr-word-motion-duration, 80ms) cubic-bezier(.18,.62,.22,1) both;
 }
 
 .qr-word-motion-layer[data-style="aurora-tide"] .qr-word-motion-cursor.is-running-b {
-  animation: qr-word-aurora-position-alt var(--qr-word-motion-duration, 1370ms) cubic-bezier(.18,.62,.22,1) both;
+  animation: qr-word-aurora-position-alt var(--qr-word-motion-duration, 80ms) cubic-bezier(.18,.62,.22,1) both;
 }
 
 .qr-word-motion-layer[data-style="aurora-tide"] .qr-word-motion-cursor::after {

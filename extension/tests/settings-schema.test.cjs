@@ -62,9 +62,9 @@ test('online addresses require HTTPS except on loopback and exports remove secre
   }
 });
 
-test('V3 legacy Qwen assignments are isolated from browser system voices in Schema V8', () => {
+test('V3 legacy Qwen assignments are isolated from browser system voices in Schema V9', () => {
   const settings = schema.migrate({ schemaVersion: 3, activeProviderId: 'browser-system', opVoice: '邵思萌', replyVoices: ['qwen-clone'] });
-  assert.equal(settings.schemaVersion, 8);
+  assert.equal(settings.schemaVersion, 9);
   assert.equal(settings.voiceAssignmentsByProvider['browser-system'].narratorVoiceId, '');
   assert.deepEqual(settings.voiceAssignmentsByProvider['browser-system'].replyVoiceIds, []);
   assert.equal(settings.voiceAssignmentsByProvider['local-service'].narratorVoiceId, 'local-service:邵思萌');
@@ -72,7 +72,7 @@ test('V3 legacy Qwen assignments are isolated from browser system voices in Sche
   assert.equal(settings.opVoice, '');
 });
 
-test('Schema V8 migration is idempotent and keeps provider assignments namespaced', () => {
+test('Schema V9 migration is idempotent and keeps provider assignments namespaced', () => {
   const first = schema.migrate({ schemaVersion: 4, activeProviderId: 'openai-compatible', voiceAssignmentsByProvider: {
     'openai-compatible': { narratorVoiceId: 'alloy', replyVoiceIds: ['verse'], authorVoices: { a: 'nova' } },
   } });
@@ -103,7 +103,7 @@ test('V8 generates legacy fields as compatibility projections and migrates onlin
   assert.deepEqual(schema.migrate(settings), settings);
 });
 
-test('Schema V8 replaces obsolete browser models with pinned Kokoro and keeps AI profile routing', () => {
+test('Schema V9 replaces obsolete browser models with pinned Kokoro and keeps AI profile routing', () => {
   const settings = schema.migrate({
     schemaVersion: 5,
     providerSettings: { 'browser-model': { modelId: 'cmn-vits', repoId: 'old/model', revision: 'main' } },
@@ -131,9 +131,9 @@ test('browser model settings default to ModelScope, bounded parallel chunks, and
   assert.deepEqual(browserModel.voiceCacheRegistry, {});
 });
 
-test('schema 6 browser-model installs migrate away from the unverified WebGPU default', () => {
+test('schema 6 browser-model installs migrate away from the unverified WebGPU default into Schema V9', () => {
   const migrated = schema.migrate({ schemaVersion: 6, providerSettings: { 'browser-model': { device: 'webgpu' } } });
-  assert.equal(migrated.schemaVersion, 8);
+  assert.equal(migrated.schemaVersion, 9);
   assert.equal(migrated.providerSettings['browser-model'].device, 'wasm');
 });
 
@@ -161,6 +161,30 @@ test('legacy silent browser-model variants migrate to the verified fp32 path', (
   const explicit = schema.migrate({ providerSettings: { 'browser-model': { variant: 'fp32', dtype: 'fp32' } } });
   assert.equal(explicit.providerSettings['browser-model'].variant, 'fp32');
   assert.equal(explicit.providerSettings['browser-model'].dtype, 'fp32');
+});
+
+test('Schema V9 defaults to full browser-model voice installation and preserves voice notes', () => {
+  const fresh = schema.migrate({});
+  assert.equal(fresh.providerSettings['browser-model'].installMode, 'full');
+  assert.deepEqual(fresh.providerSettings['browser-model'].selectedVoiceIds, []);
+  assert.deepEqual(fresh.voiceCatalogPreferences, { languageMode: 'auto', locale: '' });
+  const migrated = schema.migrate({
+    schemaVersion: 8,
+    voiceCatalogPreferences: { languageMode: 'fixed', locale: 'zh-CN' },
+    voiceOverridesByProvider: {
+      'browser-model': {
+        zf_001: { alias: '  旁白  ', note: '  适合长文  ', updatedAt: 123 },
+        zf_002: { alias: 'x'.repeat(100), note: 'y'.repeat(600) },
+      },
+    },
+    providerSettings: { 'browser-model': { installMode: 'custom', selectedVoiceIds: ['browser-model:zf_001', 'zf_001'] } },
+  });
+  assert.deepEqual(migrated.voiceCatalogPreferences, { languageMode: 'fixed', locale: 'zh-CN' });
+  assert.deepEqual(migrated.voiceOverridesByProvider['browser-model'].zf_001, { alias: '旁白', note: '适合长文', updatedAt: 123 });
+  assert.equal(migrated.voiceOverridesByProvider['browser-model'].zf_002.alias.length, 64);
+  assert.equal(migrated.voiceOverridesByProvider['browser-model'].zf_002.note.length, 500);
+  assert.equal(migrated.providerSettings['browser-model'].installMode, 'custom');
+  assert.deepEqual(migrated.providerSettings['browser-model'].selectedVoiceIds, ['zf_001']);
 });
 
 test('AI profile custom headers reject secret-like names', () => {

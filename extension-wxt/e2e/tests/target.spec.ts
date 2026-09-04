@@ -1,6 +1,6 @@
 import { test } from '../fixtures';
 import { ExternalSiteBlockedError } from '../reader-page';
-import { assertNoExtensionErrors, runContinuationScenario, runExtractionScenario } from '../scenarios';
+import { assertNoExtensionErrors, runContinuationScenario, runExtractionScenario, runInteractionScenario } from '../scenarios';
 import { targetSiteCase } from '../site-cases';
 
 const targetUrl = String(process.env.FLOWLOUD_TARGET_URL || '').trim();
@@ -13,6 +13,7 @@ test.describe('user supplied real-site target', () => {
     const target = targetSiteCase(targetUrl, scenario);
     try {
       if (target.scenario === 'continuation') await runContinuationScenario(reader, target);
+      else if (target.scenario === 'interaction') await runInteractionScenario(reader, target);
       else await runExtractionScenario(reader, target);
     } catch (error) {
       if (error instanceof ExternalSiteBlockedError) {

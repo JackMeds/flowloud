@@ -13,12 +13,6 @@ function InteractivePopup({ initialModel }: { initialModel: PopupModel }) {
       model={model}
       onSettingChange={changeSetting}
       onVoiceChange={(voiceId) => setModel((current) => ({ ...current, selectedVoiceId: voiceId }))}
-      onPageVoiceChange={(authorId, voiceId) => setModel((current) => {
-        const assignments = { ...(current.pageVoiceAssignments || {}) };
-        if (voiceId === '__strategy__') delete assignments[authorId];
-        else assignments[authorId] = voiceId;
-        return { ...current, pageVoiceAssignments: assignments };
-      })}
       onCommand={(command) => {
         if (command === 'previous') setModel((current) => ({ ...current, index: Math.max(0, current.index - 1) }));
         if (command === 'next') setModel((current) => ({ ...current, index: Math.min(Math.max(0, current.total - 1), current.index + 1) }));

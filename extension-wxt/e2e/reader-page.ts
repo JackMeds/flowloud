@@ -6,7 +6,7 @@ export interface ReaderSnapshot {
   total: number;
   pageKey?: string;
   sessionId?: string | null;
-  current?: { id?: string; text?: string } | null;
+  current?: { id?: string; postId?: string; floor?: number | null; authorKey?: string; text?: string } | null;
 }
 
 export interface TtsProbeSnapshot {
@@ -39,6 +39,8 @@ export class ReaderPage {
         [key]: {
           ...current,
           showFloatingPlayer: true,
+          clickToRead: true,
+          interactionVersion: 3,
           activeProviderId: 'browser-system',
           providerId: 'browser-system',
           opVoice: 'Flowloud E2E Voice',

@@ -114,7 +114,7 @@ html.qwen-reader-word-style-custom .qwen-reader-speaking-word {
     linear-gradient(#39353f, #39353f) !important;
   background-clip: text !important;
   -webkit-background-clip: text !important;
-  animation: qwen-reader-edge-position var(--qwen-reader-word-motion-duration, 1370ms) linear both !important;
+  animation: qwen-reader-edge-position var(--qwen-reader-word-motion-duration, 80ms) linear both !important;
 }
 
 html.qwen-reader-word-style-custom .qwen-reader-speaking-word {
@@ -134,7 +134,7 @@ html.qwen-reader-word-style-aurora-tide .qwen-reader-speaking-word {
   background-size: 100% 100%, 220% 100% !important;
   background-clip: text !important;
   -webkit-background-clip: text !important;
-  animation: qwen-reader-aurora-pass var(--qwen-reader-word-motion-duration, 1370ms) cubic-bezier(.18,.62,.22,1) both !important;
+  animation: qwen-reader-aurora-pass var(--qwen-reader-word-motion-duration, 80ms) cubic-bezier(.18,.62,.22,1) both !important;
 }
 
 @keyframes qwen-reader-edge-position {

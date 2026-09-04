@@ -169,7 +169,8 @@ test('mini caption pans from the shared active-word timeline', () => {
   assert.match(readerSource, /data-role="mini-caption-track"/);
   assert.match(readerSource, /function renderMiniCaption/);
   assert.match(readerSource, /function updateMiniCaptionWord/);
-  assert.match(readerSource, /result\.changed\) updateMiniCaptionWord/);
+  assert.match(readerSource, /scheduleWordVisual\(result\.index, wordTimeline\)/);
+  assert.match(readerSource, /updateMiniCaptionWord\(pending\.index, false\)/);
   assert.match(readerSource, /safeStart = viewportWidth \* \.28/);
   assert.match(readerSource, /safeEnd = viewportWidth \* \.68/);
   assert.match(readerCss, /\.qr-mini-caption-track[\s\S]*?transition:\s*transform 220ms/);
@@ -233,6 +234,13 @@ test('active sentence remains a restrained translucent native highlight', () => 
   assert.equal(readerContent.run_at, 'document_idle');
   assert.ok(readerContent.css.includes('content/page-highlight.css'));
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8'), /insertCSS\(\{ target: \{ tabId \}, files: \['content\/page-highlight\.css'\]/);
+});
+
+test('word motion is event-paced and the Flarum viewport bridge is registered', () => {
+  assert.doesNotMatch(pageHighlightCss, /1370ms/);
+  const bridge = manifest.content_scripts.find((entry) => entry.js?.includes('content/flarum-viewport-bridge.js'));
+  assert.ok(bridge);
+  assert.equal(bridge.world, 'MAIN');
 });
 
 test('click-to-read and manual follow behavior remain independent of the popup', () => {

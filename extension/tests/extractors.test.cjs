@@ -117,7 +117,7 @@ test('extractFlarum fetches a discussion page and returns posts in floor order',
     return new Response(JSON.stringify(payload), { status: 200 });
   });
 
-  assert.match(requestedUrls[0], /filter%5Bdiscussion%5D=23351/);
+  assert.match(requestedUrls[0], /\/api\/discussions\/23351\?page%5Bnear%5D=1/u);
   assert.deepEqual(segments.map((segment) => segment.floor), [1, 2, 3]);
 });
 
@@ -150,7 +150,7 @@ test('Flarum adapter preserves a subdirectory base and follows same-origin pagin
     }
   });
 
-  assert.match(requested[0], /^https:\/\/forum\.example\/community\/api\/posts\?/u);
+  assert.match(requested[0], /^https:\/\/forum\.example\/community\/api\/discussions\/123\?/u);
   assert.equal(requested[1], 'https://forum.example/community/api/posts?page[offset]=50');
   assert.deepEqual(result.blocks.map(({ text, isOp }) => ({ text, isOp })), [
     { text: '楼主首帖', isOp: true },
@@ -359,11 +359,44 @@ test('Flarum entered at a high floor exposes live DOM first and starts API pagin
   });
 
   assert.equal(events[0], 'progress:visible');
-  assert.match(requested[0], /page%5Boffset%5D=164/u);
+  assert.match(requested[0], /\/api\/discussions\/10627\?page%5Bnear%5D=165/u);
   assert.deepEqual(result.blocks.map((block) => block.floor), [165, 166]);
   assert.equal(result.complete, false);
   assert.ok(result.warnings.includes('flarum-prioritized-from-floor:165'));
   assert.ok(result.blocks.every((block) => block.isOp === false));
+});
+
+test('Flarum near-window pagination uses stable post ids instead of floor offsets', async () => {
+  const { extractDocument } = loadModules();
+  const document = makeLocationDocument('https://forum.example/d/49859/320');
+  const requested = [];
+  const posts = [
+    { id: 'p319', number: 319, text: '前一楼' },
+    { id: 'p320', number: 320, text: '当前楼' },
+    { id: 'p321', number: 321, text: '后一楼' },
+  ];
+  const near = {
+    data: {
+      type: 'discussions', id: '49859',
+      relationships: { posts: { data: posts.map(({ id }) => ({ type: 'posts', id })) } },
+    },
+    included: posts.map(({ id, number, text }) => ({
+      type: 'posts', id,
+      attributes: { number, contentHtml: `<p>${text}</p>` },
+      relationships: { user: { data: { type: 'users', id: 'u1' } } },
+    })).concat([{ type: 'users', id: 'u1', attributes: { username: '作者' } }]),
+  };
+  const result = await extractDocument(document, {
+    fetchFn: async (url) => {
+      requested.push(String(url));
+      return jsonResponse(requested.length === 1 ? near : { data: [], included: [] }, String(url));
+    },
+  });
+
+  assert.match(requested[0], /\/api\/discussions\/49859\?page%5Bnear%5D=320/u);
+  assert.match(requested[1], /page%5Boffset%5D=3/u);
+  assert.equal(result.startPostId, 'p320');
+  assert.deepEqual(result.blocks.map((block) => block.floor), [319, 320, 321]);
 });
 
 test('NodeBB reports the first API page before background pagination completes', async () => {

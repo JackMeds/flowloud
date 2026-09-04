@@ -22,8 +22,6 @@ function preserveRuntimeDetails(current: PopupModel, next: PopupModel): PopupMod
     providerNotice: current.providerNotice,
     controlNotice: current.controlNotice,
     authors: samePage && current.authors.length ? current.authors : next.authors,
-    pageVoiceAssignments: samePage ? current.pageVoiceAssignments : {},
-    pageVoiceLoadState: samePage ? current.pageVoiceLoadState : 'idle',
   };
 }
 
@@ -102,9 +100,15 @@ export function RuntimePopup() {
     setModel((current) => ({ ...current, voiceLoadState: 'loading', providerNotice: undefined }));
     void bridge.voices(providerId).then((voices) => {
       if (disposed) return;
+      const overrides = savedSettings.current.voiceOverridesByProvider as Record<string, Record<string, { alias?: string; note?: string }>> | undefined;
+      const labelledVoices = voices.map((voice) => {
+        const rawId = String(voice.rawId || voice.id || '').replace(/^[^:]+:/u, '');
+        const override = overrides?.[providerId]?.[rawId];
+        return override ? { ...voice, label: override.alias || voice.label, displayLabel: override.alias || voice.displayLabel || voice.label, note: override.note || voice.note } : voice;
+      });
       const playableVoices = providerId === 'browser-model'
-        ? voices.filter((voice) => voice.cached === true)
-        : voices;
+        ? labelledVoices.filter((voice) => voice.cached === true)
+        : labelledVoices;
       const assignments = savedSettings.current.voiceAssignmentsByProvider as Record<string, Record<string, unknown>> | undefined;
       const configuredVoiceId = String(assignments?.[providerId]?.narratorVoiceId || '');
       const selected = playableVoices.find((voice) => voice.id === configuredVoiceId) || playableVoices[0];
@@ -116,8 +120,8 @@ export function RuntimePopup() {
             : '当前系统音色未声明逐词边界，将保留句子高亮。';
         } else if (providerId === 'browser-model') {
           providerNotice = playableVoices.length
-            ? `已下载 ${playableVoices.length} / ${voices.length} 个音色；这里只显示现在可播放的音色${current.providerDevice ? ` · ${current.providerDevice.toUpperCase()}` : ''}`
-            : '当前没有已下载且可播放的模型音色，请先到“声音库”下载。';
+            ? `已下载 ${playableVoices.length} / ${labelledVoices.length} 个音色；这里只显示现在可播放的音色${current.providerDevice ? ` · ${current.providerDevice.toUpperCase()}` : ''}`
+            : '当前没有已下载且可播放的模型音色，请先到“声音”下载。';
         }
         return {
           ...current,
@@ -144,29 +148,6 @@ export function RuntimePopup() {
     });
     return () => { disposed = true; };
   }, [bridge, model.settings.activeProviderId]);
-
-  useEffect(() => {
-    if (!bridge.available || context?.tabId == null) return;
-    let disposed = false;
-    setModel((current) => ({ ...current, pageVoiceLoadState: 'loading' }));
-    void bridge.pageVoices(context).then((pageVoices) => {
-      if (disposed) return;
-      setModel((current) => ({
-        ...current,
-        authors: pageVoices.authors.length ? pageVoices.authors : current.authors,
-        pageVoiceAssignments: pageVoices.assignments,
-        pageVoiceLoadState: 'ready',
-      }));
-    }).catch((error) => {
-      if (disposed) return;
-      setModel((current) => ({
-        ...current,
-        pageVoiceLoadState: 'error',
-        message: messageFrom(error, '暂时无法读取本页配音。'),
-      }));
-    });
-    return () => { disposed = true; };
-  }, [bridge, context?.tabId, context?.pageKey]);
 
   const refresh = async () => {
     if (!bridge.available) return;
@@ -263,31 +244,6 @@ export function RuntimePopup() {
     }
   };
 
-  const changePageVoice = async (authorId: string, voiceId: string) => {
-    const strategyVoiceKey = '__strategy__';
-    const previous = { ...(model.pageVoiceAssignments || {}) };
-    const next = { ...previous };
-    if (voiceId === strategyVoiceKey) delete next[authorId];
-    else next[authorId] = voiceId;
-    setModel((current) => ({ ...current, pageVoiceAssignments: next, message: undefined }));
-    if (!bridge.available) return;
-    try {
-      const pageVoices = await bridge.applyPageVoices(context, next);
-      setModel((current) => ({
-        ...current,
-        authors: pageVoices.authors.length ? pageVoices.authors : current.authors,
-        pageVoiceAssignments: pageVoices.assignments,
-        pageVoiceLoadState: 'ready',
-      }));
-    } catch (error) {
-      setModel((current) => ({
-        ...current,
-        pageVoiceAssignments: previous,
-        message: messageFrom(error, '本页配音保存失败。'),
-      }));
-    }
-  };
-
   const openGuide = async () => {
     if (!bridge.available) return;
     await bridge.send({ type: 'guide:open', tabId: context?.tabId });
@@ -300,10 +256,14 @@ export function RuntimePopup() {
     window.close();
   };
 
-  const openVoiceStudio = async () => {
+  const openPageVoices = async () => {
     if (!bridge.available) return;
-    await bridge.openVoiceStudio();
-    window.close();
+    try {
+      await bridge.openPageVoices(context);
+      window.close();
+    } catch (error) {
+      setModel((current) => ({ ...current, message: messageFrom(error, '无法打开本页角色配音。') }));
+    }
   };
 
   const focusSource = async () => {
@@ -334,9 +294,8 @@ export function RuntimePopup() {
       onReturnSource={focusSource}
       onReadCurrentPage={readCurrentPage}
       onVoiceChange={changeVoice}
-      onPageVoiceChange={changePageVoice}
+      onOpenPageVoices={openPageVoices}
       onOpenDocuments={openDocuments}
-      onOpenVoiceStudio={openVoiceStudio}
     />
   );
 }

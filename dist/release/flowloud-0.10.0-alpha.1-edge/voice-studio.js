@@ -2,12 +2,25 @@
 (function installVoiceStudio() {
   'use strict';
 
+  // The studio is now embedded by the unified React voice settings surface.
+  // Keep direct bookmarks working for one release, but never strand users in
+  // a second top-level settings page.
+  const studioQuery = new URLSearchParams(location.search);
+  if (studioQuery.get('embedded') !== '1') {
+    const provider = studioQuery.get('provider') || 'local-service';
+    const target = chrome?.runtime?.getURL
+      ? chrome.runtime.getURL(`options-react.html?section=voice&view=studio&provider=${encodeURIComponent(provider)}`)
+      : `options-react.html?section=voice&view=studio&provider=${encodeURIComponent(provider)}`;
+    location.replace(target);
+    return;
+  }
+
   const MIN_SECONDS = 5;
   const MAX_SECONDS = 15;
   const TARGET_RATE = 24000;
   const MAX_IMPORT_FILES = 20;
   const MAX_FILE_BYTES = 100 * 1024 * 1024;
-  const requestedProvider = new URLSearchParams(location.search).get('provider') || '';
+  const requestedProvider = studioQuery.get('provider') || '';
   const recordingGate = QwenReaderRecording.createRecordingGate();
   const speechProvider = QwenReaderTranscription.createEdgeSpeechProvider();
   const element = (id) => document.getElementById(id);

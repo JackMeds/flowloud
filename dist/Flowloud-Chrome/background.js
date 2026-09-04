@@ -636,6 +636,40 @@ if (typeof importScripts === 'function') {
     });
   }
 
+  const MICROSOFT_SYSTEM_VOICES = Object.freeze([
+    { match: /^Microsoft\s+Huihui(?:\s+Desktop)?(?:\s*-\s*Chinese\s*\(Simplified\))?$/iu, name: '慧慧', locale: 'zh-CN', languageLabel: '简体中文', gender: 'female' },
+    { match: /^Microsoft\s+Yaoyao(?:\s+Desktop)?(?:\s*-\s*Chinese\s*\(Simplified\))?$/iu, name: '瑶瑶', locale: 'zh-CN', languageLabel: '简体中文', gender: 'female' },
+    { match: /^Microsoft\s+Kangkang(?:\s+Desktop)?(?:\s*-\s*Chinese\s*\(Simplified\))?$/iu, name: '康康', locale: 'zh-CN', languageLabel: '简体中文', gender: 'male' },
+    { match: /^Microsoft\s+Hanhan(?:\s+Desktop)?(?:\s*-\s*Chinese\s*\(Traditional\))?$/iu, name: '韩韩', locale: 'zh-TW', languageLabel: '繁體中文', gender: 'female' },
+    { match: /^Microsoft\s+Yating(?:\s+Desktop)?(?:\s*-\s*Chinese\s*\(Traditional\))?$/iu, name: '雅婷', locale: 'zh-TW', languageLabel: '繁體中文', gender: 'female' },
+    { match: /^Microsoft\s+Zhiwei(?:\s+Desktop)?(?:\s*-\s*Chinese\s*\(Traditional\))?$/iu, name: '志伟', locale: 'zh-TW', languageLabel: '繁體中文', gender: 'male' },
+    { match: /^Microsoft\s+Tracy(?:\s+Desktop)?(?:\s*-\s*Chinese\s*\(Traditional\))?$/iu, name: 'Tracy', locale: 'zh-HK', languageLabel: '粤语', gender: 'female' },
+    { match: /^Microsoft\s+David(?:\s+Desktop)?(?:\s*-\s*English\s*\(United\s+States\))?$/iu, name: 'David', locale: 'en-US', languageLabel: 'English (US)', gender: 'male' },
+    { match: /^Microsoft\s+Mark(?:\s+Desktop)?(?:\s*-\s*English\s*\(United\s+States\))?$/iu, name: 'Mark', locale: 'en-US', languageLabel: 'English (US)', gender: 'male' },
+    { match: /^Microsoft\s+Zira(?:\s+Desktop)?(?:\s*-\s*English\s*\(United\s+States\))?$/iu, name: 'Zira', locale: 'en-US', languageLabel: 'English (US)', gender: 'female' },
+    { match: /^Microsoft\s+Hazel(?:\s+Desktop)?(?:\s*-\s*English\s*\(United\s+Kingdom\))?$/iu, name: 'Hazel', locale: 'en-GB', languageLabel: 'English (UK)', gender: 'female' },
+    { match: /^Microsoft\s+George(?:\s+Desktop)?(?:\s*-\s*English\s*\(United\s+Kingdom\))?$/iu, name: 'George', locale: 'en-GB', languageLabel: 'English (UK)', gender: 'male' },
+  ]);
+
+  function enrichMicrosoftSystemVoice(voice) {
+    const rawLabel = String(voice && (voice.voiceName || voice.name) || '').trim();
+    const match = MICROSOFT_SYSTEM_VOICES.find((item) => item.match.test(rawLabel));
+    if (!match) return {
+      rawLabel,
+      displayLabel: rawLabel,
+      metadataSource: 'runtime',
+    };
+    return {
+      rawLabel,
+      displayLabel: `${match.name} · ${match.languageLabel} · 微软`,
+      locale: match.locale,
+      languageLabel: match.languageLabel,
+      vendor: 'Microsoft',
+      gender: match.gender,
+      metadataSource: 'microsoft-official',
+    };
+  }
+
   function createChromeTtsManager(chromeApi) {
     const tts = chromeApi && chromeApi.tts;
     let active = null;
@@ -644,7 +678,32 @@ if (typeof importScripts === 'function') {
     function voices() {
       return new Promise((resolve, reject) => {
         if (!tts || typeof tts.getVoices !== 'function') return reject(Object.assign(new Error('浏览器系统语音不可用。'), { code: 'system_voice_unavailable' }));
-        const done = (items) => resolve((items || []).map((voice) => ({ id: `browser-system:${voice.voiceName}`, voiceId: voice.voiceName, name: voice.voiceName, label: voice.voiceName, lang: voice.lang || '', remote: voice.remote === true, extensionId: voice.extensionId || '', providerId: 'browser-system', eventTypes: voice.eventTypes || [] })));
+        const done = (items) => resolve((items || []).map((voice) => {
+          const metadata = enrichMicrosoftSystemVoice(voice);
+          const lang = voice.lang || metadata.locale || '';
+          return {
+            id: `browser-system:${voice.voiceName}`,
+            rawId: voice.voiceName,
+            voiceId: voice.voiceName,
+            name: metadata.displayLabel || voice.voiceName,
+            label: metadata.displayLabel || voice.voiceName,
+            rawLabel: metadata.rawLabel || voice.voiceName,
+            displayLabel: metadata.displayLabel || voice.voiceName,
+            lang,
+            locale: lang,
+            language: lang,
+            languageLabel: metadata.languageLabel || lang,
+            vendor: metadata.vendor || '',
+            gender: metadata.gender || '',
+            metadataSource: metadata.metadataSource || 'runtime',
+            remote: voice.remote === true,
+            local: voice.remote !== true,
+            default: Boolean(voice.default),
+            extensionId: voice.extensionId || '',
+            providerId: 'browser-system',
+            eventTypes: voice.eventTypes || [],
+          };
+        }));
         try { const result = tts.getVoices(done); if (result && typeof result.then === 'function') result.then(done, reject); } catch (error) { reject(error); }
       });
     }
@@ -1051,7 +1110,7 @@ if (typeof importScripts === 'function') {
               const currentBrowserModel = current.providerSettings['browser-model'];
               const preservedModelKeys = [
                 'modelId', 'repoId', 'revision', 'hfRevision', 'source', 'fallbackSource', 'variant', 'dtype',
-                'device', 'allowWasmFallback', 'downloadConcurrency', 'starterVoiceIds', 'downloaded',
+                'device', 'allowWasmFallback', 'downloadConcurrency', 'starterVoiceIds', 'installMode', 'selectedVoiceIds', 'downloaded',
                 'cacheMetadata', 'voiceCacheRegistry', 'configured', 'lastConfiguredAt', 'legacyRevision',
               ];
               for (const key of preservedModelKeys) {
@@ -1199,9 +1258,10 @@ if (typeof importScripts === 'function') {
           case 'provider:model:voice-info':
           case 'provider:model:voice-download':
           case 'provider:model:voice-repair':
-          case 'provider:model:voice-delete': {
+          case 'provider:model:voice-delete':
+          case 'provider:model:voice-batch': {
             const response = await forward(Object.assign({}, body, { providerId: 'browser-model' }), false);
-            if (response?.ok === false || !['provider:model:download', 'provider:model:verify', 'provider:model:delete', 'provider:model:voice-list', 'provider:model:voice-info', 'provider:model:voice-download', 'provider:model:voice-repair', 'provider:model:voice-delete'].includes(body.type)) return response;
+            if (response?.ok === false || !['provider:model:download', 'provider:model:verify', 'provider:model:delete', 'provider:model:voice-list', 'provider:model:voice-info', 'provider:model:voice-download', 'provider:model:voice-repair', 'provider:model:voice-delete', 'provider:model:voice-batch'].includes(body.type)) return response;
             const schema = globalThis.FlowloudSettings;
             const settings = schema ? schema.migrate(await storage.get(SETTINGS_KEY)) : await storage.get(SETTINGS_KEY);
             const result = response?.result && typeof response.result === 'object' ? response.result : {};
@@ -1219,9 +1279,34 @@ if (typeof importScripts === 'function') {
               if (voiceId) browserModel.voiceCacheRegistry[voiceId] = Object.assign({}, browserModel.voiceCacheRegistry[voiceId] || {}, result, {
                 voiceId, cached: body.type === 'provider:model:voice-delete' ? false : result.cached !== false,
               });
+            } else if (body.type === 'provider:model:voice-batch') {
+              browserModel.voiceCacheRegistry = Object.assign({}, browserModel.voiceCacheRegistry || {});
+              const items = Array.isArray(result.results) ? result.results : [];
+              for (const item of items) {
+                const voiceId = String(item.voiceId || '').replace(/^browser-model:/u, '');
+                if (!voiceId) continue;
+                const itemResult = item.result && typeof item.result === 'object' ? item.result : {};
+                const deleted = String(result.action || body.action || 'download') === 'delete';
+                browserModel.voiceCacheRegistry[voiceId] = Object.assign({}, browserModel.voiceCacheRegistry[voiceId] || {}, itemResult, {
+                  voiceId, cached: deleted ? false : item.status !== 'failed' && item.cached !== false,
+                });
+              }
             } else {
               browserModel.downloaded = result.ready === true;
               browserModel.cacheMetadata = Object.assign({}, result);
+              if (Array.isArray(result.downloadedVoiceIds)) {
+                browserModel.voiceCacheRegistry = Object.assign({}, browserModel.voiceCacheRegistry || {});
+                for (const rawVoiceId of result.downloadedVoiceIds) {
+                  const voiceId = String(rawVoiceId || '').replace(/^browser-model:/u, '');
+                  if (!voiceId) continue;
+                  browserModel.voiceCacheRegistry[voiceId] = Object.assign({}, browserModel.voiceCacheRegistry[voiceId] || {}, {
+                    voiceId,
+                    cached: true,
+                    downloadedAt: result.downloadedAt || new Date().toISOString(),
+                    source: result.source,
+                  });
+                }
+              }
               if (result.cacheId) settings.modelCacheRegistry[result.cacheId] = Object.assign({}, settings.modelCacheRegistry[result.cacheId] || {}, result);
             }
             await storage.set(SETTINGS_KEY, schema ? schema.publicSettings(settings) : settings);

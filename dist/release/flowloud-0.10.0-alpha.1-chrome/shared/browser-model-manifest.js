@@ -47,9 +47,11 @@
     'onnx/model.onnx', 'onnx/model_fp16.onnx', 'onnx/model_quantized.onnx',
   ]);
 
-  // Keep the complete catalog visible without downloading every 522 KB voice.
   // Kokoro's own runtime is the authoritative catalog; these entries provide a
-  // stable display name and allow the cache manager to validate requested IDs.
+  // stable, non-speculative display name and allow the cache manager to
+  // validate requested IDs.  The upstream repository does not publish age,
+  // style, or gender metadata for the numbered Chinese voices, so the UI must
+  // not infer those attributes from the `zf`/`zm` prefixes.
   const VOICE_IDS = Object.freeze([
     'af_maple', 'af_sol', 'bf_vale',
     'zf_001', 'zf_002', 'zf_003', 'zf_004', 'zf_005', 'zf_006', 'zf_007', 'zf_008',
@@ -68,19 +70,22 @@
   ]);
   const STARTER_VOICE_IDS = Object.freeze(['zf_001', 'zf_002', 'zm_009', 'zm_010']);
   const VOICE_CATALOG = Object.freeze(VOICE_IDS.map((id) => {
-    const chinese = id.startsWith('zf_') || id.startsWith('zm_');
-    const female = id.startsWith('zf_') || id === 'af_maple' || id === 'af_sol' || id === 'bf_vale';
     const language = id.startsWith('af_') ? 'en-US' : id.startsWith('bf_') ? 'en-GB' : 'zh-CN';
-    const number = id.slice(-3);
+    const number = /^z[fm]_(\d{3})$/u.exec(id)?.[1];
+    const label = number ? `Kokoro 音色 ${number}` : `Kokoro · ${id}`;
+    const recommendedReason = id === 'zf_001' || id === 'zm_010' ? '官方提供中文样本' : '';
     return Object.freeze({
-      id, name: id,
-      label: chinese ? `中文${female ? '女' : '男'}声 ${number}` : `${language === 'en-GB' ? '英式' : '美式'}${female ? '女' : '男'}声 · ${id}`,
-      lang: language, language, gender: female ? 'female' : 'male',
+      id, name: id, label,
+      rawLabel: id, displayLabel: label,
+      lang: language, language, locale: language,
+      metadataSource: 'model-manifest',
+      ...(recommendedReason ? { recommendedReason } : {}),
       sizeBytes: 522240,
       path: `voices/${id}.bin`,
     });
   }));
   const VOICE_BY_ID = Object.freeze(Object.fromEntries(VOICE_CATALOG.map((voice) => [voice.id, voice])));
+  const VOICE_TOTAL_BYTES = VOICE_CATALOG.reduce((total, voice) => total + Number(voice.sizeBytes || 0), 0);
 
   function source(value) {
     const id = String(value || 'modelscope').trim().toLowerCase();
@@ -315,13 +320,14 @@
     modelId: MODEL_ID, repoId: REPO_ID, lang: 'zh-CN', license: 'Apache-2.0',
     voice: STARTER_VOICE_IDS[0], estimatedBytes: MODEL_VARIANTS.auto.estimatedBytes,
     sources: MODEL_SOURCES, variants: MODEL_VARIANTS, files: MODEL_FILES,
+    voiceTotalBytes: VOICE_TOTAL_BYTES,
     voices: VOICE_CATALOG, starterVoiceIds: STARTER_VOICE_IDS,
   });
 
   return Object.freeze({
     MODEL_ID, REPO_ID, MODELSCOPE_REVISION, HUGGINGFACE_REVISION, CHUNK_SIZE,
     MAX_CONCURRENCY, MAX_RETRIES, MODEL_SOURCES, MODEL_VARIANTS, MODEL_FILES,
-    VOICE_IDS, VOICE_CATALOG, VOICE_BY_ID, STARTER_VOICE_IDS,
+    VOICE_IDS, VOICE_CATALOG, VOICE_BY_ID, VOICE_TOTAL_BYTES, STARTER_VOICE_IDS,
     BUILTIN_BROWSER_MODEL, source, variant, modelKey, resolveUrl, voiceUrl,
     createResumableFetcher,
   });

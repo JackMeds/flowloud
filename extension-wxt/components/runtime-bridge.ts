@@ -109,6 +109,8 @@ function popupModel(context: RuntimeContext, snapshot: Record<string, unknown>, 
   }).filter((word) => word.text && Number.isInteger(word.sourceStart) && Number.isInteger(word.sourceEnd) && word.sourceEnd > word.sourceStart) : [];
   const global = context.globalPlayback && typeof context.globalPlayback === 'object'
     ? context.globalPlayback : {};
+  const wordTiming = current.wordTiming && typeof current.wordTiming === 'object'
+    ? current.wordTiming as Record<string, unknown> : null;
   const providerId = settings.activeProviderId;
   const assignments = rawSettings.voiceAssignmentsByProvider && typeof rawSettings.voiceAssignmentsByProvider === 'object'
     ? rawSettings.voiceAssignmentsByProvider as Record<string, Record<string, unknown>> : {};
@@ -127,10 +129,14 @@ function popupModel(context: RuntimeContext, snapshot: Record<string, unknown>, 
     currentSpeaker: String(current.authorName || ''),
     currentWords: words,
     currentWordIndex: Number.isInteger(Number(current.wordIndex)) ? Number(current.wordIndex) : -1,
+    currentWordTiming: wordTiming ? { mode: String(wordTiming.mode || 'unavailable'), estimated: wordTiming.estimated === true } : undefined,
     message: String(snapshot.error || ''),
     authors: popupAuthors(context.authors),
     settings,
     selectedVoiceId: String(assignments[providerId]?.narratorVoiceId || ''),
+    replyVoiceCount: Array.isArray(assignments[providerId]?.replyVoiceIds)
+      ? (assignments[providerId].replyVoiceIds as unknown[]).length
+      : 0,
     voiceLoadState: 'idle',
     providerBaseUrl: providerId === 'local-service' ? String(providerConfig.baseUrl || 'http://127.0.0.1:7811') : '',
     providerDevice: providerId === 'browser-model' ? String(cacheMetadata.device || providerConfig.device || '') : '',
@@ -230,11 +236,19 @@ export class RuntimeBridge {
       const id = rawId.includes(':') ? rawId : `${providerId}:${rawId}`;
       return {
         id,
+        rawId: String(source.rawId || source.voiceId || rawId.replace(/^[^:]+:/u, '')),
         label: displayVoiceLabel(source.label || source.name || source.voiceId || id.replace(/^[^:]+:/, '')) || id.replace(/^[^:]+:/, ''),
+        rawLabel: String(source.rawLabel || source.name || source.voiceName || source.voiceId || id.replace(/^[^:]+:/, '')),
+        displayLabel: String(source.displayLabel || source.label || source.name || source.voiceId || id.replace(/^[^:]+:/, '')),
         lang: String(source.lang || ''),
+        locale: String(source.locale || source.lang || source.language || ''),
         eventTypes: Array.isArray(source.eventTypes) ? source.eventTypes.map(String) : [],
         language: String(source.language || source.lang || ''),
+        vendor: String(source.vendor || ''),
         gender: String(source.gender || ''),
+        metadataSource: String(source.metadataSource || 'runtime'),
+        recommendedReason: String(source.recommendedReason || ''),
+        note: String(source.note || ''),
         characteristic: String(source.characteristic || source.style || source.description || ''),
         description: String(source.description || ''),
         style: String(source.style || ''),
@@ -282,6 +296,14 @@ export class RuntimeBridge {
     };
   }
 
+  async openPageVoices(context: RuntimeContext | null) {
+    return this.send({
+      type: 'page-voices:open',
+      tabId: context?.tabId,
+      pageKey: context?.pageKey,
+    });
+  }
+
   async command(context: RuntimeContext | null, command: string, options?: { current?: boolean; takeover?: boolean }) {
     return this.send({
       type: 'reader:command',
@@ -294,7 +316,7 @@ export class RuntimeBridge {
   }
 
   async saveSettings(settings: Record<string, unknown>) {
-    return this.send({ type: 'settings:set', settings: { ...settings, schemaVersion: 8, providerVersion: 4, interactionVersion: 3 } });
+    return this.send({ type: 'settings:set', settings: { ...settings, schemaVersion: 9, providerVersion: 4, interactionVersion: 3 } });
   }
 
   async assignVoices(providerId: string, assignment: { narratorVoiceId?: string; replyVoiceIds?: string[]; authorVoices?: Record<string, string> }) {
@@ -344,7 +366,7 @@ export class RuntimeBridge {
   }
 
   async modelAction(
-    action: 'info' | 'download' | 'verify' | 'cancel' | 'delete' | 'voice-list' | 'voice-info' | 'voice-download' | 'voice-repair' | 'voice-delete',
+    action: 'info' | 'download' | 'verify' | 'cancel' | 'delete' | 'voice-list' | 'voice-info' | 'voice-download' | 'voice-repair' | 'voice-delete' | 'voice-batch',
     requestId?: string,
     details: Record<string, unknown> = {},
   ) {
@@ -523,6 +545,11 @@ export class RuntimeBridge {
       estimatedBytes: Number(info.estimatedBytes) || undefined,
       concurrency: Number(info.concurrency) || Number(browserModel.downloadConcurrency) || 4,
       voiceCount: Number(info.voiceCount) || 0,
+      voiceTotalBytes: Number(info.voiceTotalBytes) || 0,
+      installMode: String(info.installMode || browserModel.installMode || 'full') === 'custom' ? 'custom' : 'full',
+      selectedVoiceIds: Array.isArray(info.selectedVoiceIds)
+        ? info.selectedVoiceIds.map(String)
+        : Array.isArray(browserModel.selectedVoiceIds) ? browserModel.selectedVoiceIds.map(String) : [],
       starterVoiceIds: Array.isArray(info.starterVoiceIds) ? info.starterVoiceIds.map(String) : [],
       voiceCacheRegistry: browserModel.voiceCacheRegistry && typeof browserModel.voiceCacheRegistry === 'object'
         ? browserModel.voiceCacheRegistry as Record<string, Record<string, unknown>> : {},

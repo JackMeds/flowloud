@@ -15,7 +15,7 @@ export function OptionsWorkspace() {
     const aliases: Record<string, SettingsSection> = { engine: 'voice', voices: 'voice', roles: 'voice', providers: 'voice', data: 'advanced' };
     const section = aliases[value] || (['reader', 'ai', 'voice', 'appearance', 'shortcuts', 'advanced'].includes(value) ? value as SettingsSection : 'reader');
     const provider = params.get('provider') || '';
-    return { section, provider };
+    return { section, provider, view: params.get('view') || '' };
   }, []);
-  return <SettingsWorkspace defaultSection={location.section} initialProviderId={location.provider} />;
+  return <SettingsWorkspace defaultSection={location.section} initialProviderId={location.provider} initialStudioOpen={location.view === 'studio'} />;
 }

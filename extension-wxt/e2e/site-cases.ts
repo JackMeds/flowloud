@@ -1,5 +1,5 @@
 export type SiteKind = 'flarum' | 'discourse' | 'article';
-export type SiteScenario = 'continuation' | 'extraction';
+export type SiteScenario = 'continuation' | 'extraction' | 'interaction';
 
 export interface RealSiteCase {
   id: string;
@@ -67,12 +67,12 @@ export const REAL_SITE_CASES: RealSiteCase[] = [
 
 export function targetSiteCase(url: string, scenario: string): RealSiteCase {
   const known = REAL_SITE_CASES.find((item) => item.url === url);
-  if (known) return { ...known, scenario: scenario === 'extraction' ? 'extraction' : known.scenario };
+  if (known) return { ...known, scenario: scenario === 'extraction' || scenario === 'interaction' ? scenario : known.scenario };
   return {
     id: 'user-target',
     url,
-    kind: 'article',
-    scenario: scenario === 'extraction' ? 'extraction' : 'continuation',
+    kind: /\/d\/\d+/u.test(url) ? 'flarum' : 'article',
+    scenario: scenario === 'extraction' || scenario === 'interaction' ? scenario : 'continuation',
     timeoutMs: 45_000,
     minSegments: scenario === 'extraction' ? 2 : 3,
     requiresAuth: false,

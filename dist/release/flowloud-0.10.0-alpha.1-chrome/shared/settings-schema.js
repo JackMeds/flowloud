@@ -5,7 +5,7 @@
 }(typeof globalThis !== 'undefined' ? globalThis : this, function makeSettingsSchema(legacyDefaults) {
   'use strict';
 
-  const SCHEMA_VERSION = 8;
+  const SCHEMA_VERSION = 9;
   const SETTINGS_KEY = 'qwenReaderSettings'; // Retained so existing installations migrate in place.
   const SESSION_SECRET_KEY = 'flowloudProviderSecrets';
   const REMEMBERED_SECRET_KEY = 'flowloudRememberedProviderSecrets';
@@ -26,6 +26,7 @@
 
   const DEFAULTS = Object.freeze({
     schemaVersion: SCHEMA_VERSION,
+    interactionVersion: 3,
     activeProviderId: 'browser-system',
     providerId: 'browser-system',
     providerVersion: 4,
@@ -67,6 +68,10 @@
         allowWasmFallback: true,
         downloadConcurrency: 4,
         starterVoiceIds: Object.freeze(['zf_001', 'zf_002', 'zm_009', 'zm_010']),
+        // New installs prefer a complete, immediately auditionable catalog.
+        // Existing installs migrate without starting a network download.
+        installMode: 'full',
+        selectedVoiceIds: Object.freeze([]),
         downloaded: false,
         cacheMetadata: {},
         voiceCacheRegistry: {},
@@ -97,6 +102,8 @@
       'openai-compatible': Object.freeze({ narratorVoiceId: 'openai-compatible:alloy', replyVoiceIds: Object.freeze([]), authorVoices: Object.freeze({}) }),
       'doubao-tts': Object.freeze({ narratorVoiceId: '', replyVoiceIds: Object.freeze([]), authorVoices: Object.freeze({}) }),
     }),
+    voiceCatalogPreferences: Object.freeze({ languageMode: 'auto', locale: '' }),
+    voiceOverridesByProvider: Object.freeze({}),
     modelCacheRegistry: Object.freeze({}),
     legacyDataState: Object.freeze({ isolated: false, inspectedAt: 0, migratedVoiceProfiles: 0 }),
     guide: Object.freeze({ filter: 'all', continuous: false, announceStates: true }),
@@ -115,6 +122,38 @@
     const copy = {};
     for (const [key, item] of Object.entries(value)) copy[key] = clone(item);
     return copy;
+  }
+
+  function sanitizeVoiceOverrides(value) {
+    const source = object(value);
+    const result = {};
+    for (const [providerId, entries] of Object.entries(source)) {
+      const provider = object(entries);
+      result[providerId] = {};
+      for (const [voiceId, raw] of Object.entries(provider)) {
+        const item = object(raw);
+        const alias = String(item.alias == null ? '' : item.alias).trim().slice(0, 64);
+        const note = String(item.note == null ? '' : item.note).trim().slice(0, 500);
+        if (!alias && !note) continue;
+        const updatedAt = Number(item.updatedAt);
+        result[providerId][voiceId] = {
+          alias,
+          note,
+          updatedAt: Number.isFinite(updatedAt) && updatedAt > 0 ? Math.floor(updatedAt) : 0,
+        };
+      }
+      if (!Object.keys(result[providerId]).length) delete result[providerId];
+    }
+    return result;
+  }
+
+  function sanitizeVoiceCatalogPreferences(value) {
+    const source = object(value);
+    const languageMode = String(source.languageMode || 'auto') === 'fixed' ? 'fixed' : 'auto';
+    return {
+      languageMode,
+      locale: languageMode === 'fixed' ? String(source.locale || '').trim().slice(0, 32) : '',
+    };
   }
 
   function rate(value) {
@@ -304,6 +343,13 @@
     migratedBrowserModel.downloadConcurrency = Number.isFinite(concurrency) ? Math.min(4, Math.max(1, Math.floor(concurrency))) : 4;
     const starterVoices = Array.isArray(migratedBrowserModel.starterVoiceIds) ? migratedBrowserModel.starterVoiceIds : DEFAULTS.providerSettings['browser-model'].starterVoiceIds;
     migratedBrowserModel.starterVoiceIds = [...new Set(starterVoices.map((voice) => String(voice || '').replace(/^browser-model:/u, '').trim()).filter(Boolean))].slice(0, 16);
+    migratedBrowserModel.installMode = String(migratedBrowserModel.installMode || 'full') === 'custom' ? 'custom' : 'full';
+    const selectedVoiceIds = Array.isArray(migratedBrowserModel.selectedVoiceIds)
+      ? migratedBrowserModel.selectedVoiceIds
+      : [];
+    migratedBrowserModel.selectedVoiceIds = [...new Set(selectedVoiceIds
+      .map((voice) => String(voice || '').replace(/^browser-model:/u, '').trim())
+      .filter(Boolean))].slice(0, 103);
     migratedBrowserModel.voiceCacheRegistry = clone(object(migratedBrowserModel.voiceCacheRegistry));
     const legacyLocalSettings = object(incomingSettings['local-qwen']);
     if (Object.keys(legacyLocalSettings).length) {
@@ -382,6 +428,8 @@
       result.providerVoices[id] = result.voiceAssignmentsByProvider[id].narratorVoiceId;
     }
     result.modelCacheRegistry = clone(object(source.modelCacheRegistry));
+    result.voiceCatalogPreferences = sanitizeVoiceCatalogPreferences(source.voiceCatalogPreferences);
+    result.voiceOverridesByProvider = sanitizeVoiceOverrides(source.voiceOverridesByProvider);
     result.legacyDataState = Object.assign({}, clone(DEFAULTS.legacyDataState), clone(object(source.legacyDataState)), {
       isolated: true,
     });

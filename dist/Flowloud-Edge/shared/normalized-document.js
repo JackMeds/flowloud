@@ -82,6 +82,11 @@
       url,
       pageKey: String(source.pageKey || pageKey(url)),
       title: clean(source.title),
+      // Forum adapters may provide a stable post id for the URL anchor.  A
+      // floor number is not a safe queue index when posts have been deleted
+      // or hidden, so readers use this id to choose the initial segment.
+      startPostId: String(source.startPostId == null ? '' : source.startPostId),
+      startFloor: Number.isFinite(Number(source.startFloor)) ? Number(source.startFloor) : null,
       kind: String(source.kind || (
         ['flarum', 'discourse', 'nodebb', 'xenforo'].includes(adapterId)
           ? 'forum'

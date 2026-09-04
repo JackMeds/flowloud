@@ -28,6 +28,25 @@ test('chrome.tts provider reports voices and normalizes playback options', async
   assert.equal(events[1].sequence, 1);
 });
 
+test('chrome.tts enriches only exact Microsoft voice names and leaves unknown metadata blank', async () => {
+  const manager = createChromeTtsManager({ tts: {
+    getVoices(callback) {
+      callback([
+        { voiceName: 'Microsoft Huihui Desktop', lang: 'zh-CN', eventTypes: ['word'] },
+        { voiceName: 'Custom Huihui-like', lang: 'zh-CN', eventTypes: [] },
+      ]);
+    },
+    speak() {}, stop() {}, pause() {}, resume() {},
+  } });
+  const voices = await manager.voices();
+  assert.equal(voices[0].displayLabel, '慧慧 · 简体中文 · 微软');
+  assert.equal(voices[0].gender, 'female');
+  assert.equal(voices[0].metadataSource, 'microsoft-official');
+  assert.equal(voices[1].displayLabel, 'Custom Huihui-like');
+  assert.equal(voices[1].gender, '');
+  assert.equal(voices[1].metadataSource, 'runtime');
+});
+
 test('chrome.tts completion may arrive synchronously without losing request result', async () => {
   const manager = createChromeTtsManager({ tts: {
     speak(_input, options) { options.onEvent({ type: 'end' }); },

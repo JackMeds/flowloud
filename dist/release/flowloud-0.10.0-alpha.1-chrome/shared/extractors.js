@@ -294,6 +294,40 @@
     return url.toString();
   }
 
+  function makeFlarumDiscussionUrl(origin, discussionId, basePath, near) {
+    const path = `${basePath || ''}/api/discussions/${encodeURIComponent(discussionId)}`
+      .replace(/\/{2,}/gu, '/');
+    const url = new URL(path.startsWith('/') ? path : `/${path}`, origin);
+    url.searchParams.set('page[near]', String(Math.max(1, Number(near) || 1)));
+    url.searchParams.set('include', 'posts,user');
+    return url.toString();
+  }
+
+  function flarumDiscussionWindow(payload, near) {
+    const source = payload && typeof payload === 'object' ? payload : {};
+    const discussion = source.data && !Array.isArray(source.data) ? source.data : null;
+    const relation = discussion && discussion.relationships && discussion.relationships.posts;
+    const relationIds = Array.isArray(relation && relation.data)
+      ? relation.data.map((record) => String(record && record.id || '')).filter(Boolean)
+      : [];
+    const includedPosts = (Array.isArray(source.included) ? source.included : [])
+      .filter((record) => record && record.type === 'posts' && record.id != null);
+    const includedById = new Map(includedPosts.map((record) => [String(record.id), record]));
+    const orderedPosts = relationIds.length
+      ? relationIds.map((id) => includedById.get(id)).filter(Boolean)
+      : includedPosts;
+    const includedIndices = orderedPosts.map((record) => relationIds.indexOf(String(record.id)))
+      .filter((index) => index >= 0);
+    return {
+      data: orderedPosts,
+      included: Array.isArray(source.included) ? source.included : [],
+      relationIds,
+      firstIndex: includedIndices.length ? Math.min(...includedIndices) : -1,
+      nextOffset: includedIndices.length ? Math.max(...includedIndices) + 1 : -1,
+      startPost: orderedPosts.find((post) => Number(post && post.attributes && post.attributes.number) === Number(near)) || null,
+    };
+  }
+
   function getDomAuthor(post, index) {
     if (!post) return { id: `anonymous:${index}`, name: '匿名用户' };
     const directId = typeof post.getAttribute === 'function' ? post.getAttribute('data-user-id') : '';
@@ -313,7 +347,13 @@
 
   function extractFlarumDom(document) {
     if (!document || typeof document.querySelectorAll !== 'function') return [];
+    // Flarum virtualizes by stream index, but the index is not a floor when
+    // posts are deleted or hidden. Prefer the stable post id for every DOM
+    // locator and use data-index only for old themes that omit data-id.
     let posts = Array.from(document.querySelectorAll(
+      '.DiscussionPage .PostStream .PostStream-item[data-id], .PostStream-item[data-id]'
+    ));
+    if (!posts.length) posts = Array.from(document.querySelectorAll(
       '.DiscussionPage .PostStream .PostStream-item[data-index], .PostStream-item[data-index]'
     ));
     if (!posts.length) posts = Array.from(document.querySelectorAll('.Post'));
@@ -328,13 +368,24 @@
     const first = normalized.find((item) => item.floor === 1 && elementReadableText(item.body, { removeBlockquotes: true }));
     const opKey = first && first.author.id;
     return normalized.flatMap((item) => {
-      const idSelector = `.PostStream-item[data-id="${cssString(item.postId)}"]`;
-      const indexSelector = `.PostStream-item[data-index="${Math.max(0, item.floor - 1)}"]`;
-      const sourceSelector = `${idSelector}, ${indexSelector}`;
+      const idAttribute = item.post && typeof item.post.getAttribute === 'function'
+        ? item.post.getAttribute('data-id') || item.post.id
+        : '';
+      const idSelector = idAttribute
+        ? `.PostStream-item[data-id="${cssString(item.postId)}"]`
+        : '';
+      // data-index is the stream position, not the floor number.  It is only
+      // safe as a DOM-only fallback when the page has no stable post id and
+      // must never be combined with API-backed forum segments.
+      const indexSelector = idSelector
+        ? ''
+        : `.PostStream-item[data-index="${Math.max(0, Number(item.post && item.post.getAttribute && item.post.getAttribute('data-index')) || 0)}"]`;
+      const sourceSelector = idSelector || indexSelector;
+      const containerSelector = `${sourceSelector} .Post-body`;
       return expandForumPost({
       id: `flarum:post:${item.postId}`,
       adapter: 'flarum',
-      containerSelector: `${idSelector} .Post-body, ${indexSelector} .Post-body`,
+        containerSelector,
       postId: item.postId,
       floor: item.floor,
       authorId: item.author.id,
@@ -358,26 +409,91 @@
         warnings: ['flarum-current-dom-only']
       });
     }
+    const routeDomPost = domBlocks.find((block) => Number(block.floor) === route.floor);
+    const baseDocumentFields = {
+      startPostId: routeDomPost && routeDomPost.postId ? routeDomPost.postId : '',
+      startFloor: route.floor,
+    };
     if (domBlocks.length) {
       await reportProgress(options, documentResult(document, {
         adapterId: 'flarum',
         blocks: domBlocks,
         complete: false,
         warnings: ['flarum-visible-posts-first'],
+        ...baseDocumentFields,
         stats: { extractedPosts: domBlocks.length }
       }), { phase: 'visible', floor: route.floor });
     }
     const combined = { data: [], included: [] };
     const prioritizedFromFloor = route.floor > 1;
-    let nextUrl = makeFlarumPostsUrl(
-      route.url.origin,
-      route.discussionId,
-      route.basePath,
-      prioritizedFromFloor ? route.floor - 1 : 0
-    );
+    let nextUrl = '';
+    let startPostId = baseDocumentFields.startPostId;
+    let nextOffset = -1;
     const visited = new Set();
     let fetchedPages = 0;
     try {
+      // Flarum's route number is a post floor, while page[offset] is the
+      // position among visible posts. Deleted/hidden posts make those values
+      // diverge (e.g. floor 320 is stream index 305 on the reported thread).
+      // The discussion endpoint gives us both the near window and the stable
+      // ordered post-id relationship, allowing us to derive the real offset.
+      const nearUrl = makeFlarumDiscussionUrl(
+        route.url.origin,
+        route.discussionId,
+        route.basePath,
+        route.floor
+      );
+      const nearResponse = await fetchJson(fetchFn, nearUrl, {
+        origin: route.url.origin,
+        baseUrl: nearUrl,
+        signal: options.signal
+      });
+      const isLegacyPostsPayload = Array.isArray(nearResponse.payload && nearResponse.payload.data);
+      if (isLegacyPostsPayload) {
+        // Keep compatibility with Flarum mirrors and deterministic fixtures
+        // that expose the posts collection directly instead of a discussion
+        // document. Their pagination links remain safe to follow.
+        combined.data.push(...nearResponse.payload.data);
+        combined.included.push(...(Array.isArray(nearResponse.payload.included) ? nearResponse.payload.included : []));
+        const anchor = combined.data.find((post) => Number(post && post.attributes && post.attributes.number) === route.floor);
+        if (anchor) startPostId = String(anchor.id);
+        const link = nearResponse.payload.links && nearResponse.payload.links.next;
+        nextUrl = link ? makeSameOriginUrl(link, nearResponse.url, route.url.origin).toString() : '';
+      } else {
+        const window = flarumDiscussionWindow(nearResponse.payload, route.floor);
+        if (window.data.length) {
+          combined.data.push(...window.data);
+          combined.included.push(...window.included);
+        }
+        const anchor = window.startPost || window.data.find((post) => Number(post && post.attributes && post.attributes.number) === route.floor);
+        if (anchor) startPostId = String(anchor.id);
+        nextOffset = window.nextOffset;
+        if (nextOffset < 0) {
+          // A forum may return a discussion document without an included near
+          // window. Keep the DOM usable and avoid fabricating an offset.
+          nextUrl = '';
+        } else {
+          nextUrl = makeFlarumPostsUrl(
+            route.url.origin,
+            route.discussionId,
+            route.basePath,
+            nextOffset
+          );
+        }
+      }
+      await reportProgress(options, documentResult(document, {
+        adapterId: 'flarum',
+        blocks: parseFlarumApi(combined, options),
+        complete: !nextUrl && !prioritizedFromFloor,
+        warnings: [
+          ...(nextUrl ? ['flarum-loading-more'] : []),
+          ...(prioritizedFromFloor ? [`flarum-prioritized-from-floor:${route.floor}`] : [])
+        ],
+        startPostId,
+        startFloor: route.floor,
+        stats: { fetchedPages: 1, extractedPosts: combined.data.length }
+      }), { phase: 'initial', page: 1, floor: route.floor });
+      fetchedPages = 1;
       while (nextUrl && fetchedPages < MAX_PAGES && combined.data.length < MAX_POSTS) {
         if (visited.has(nextUrl)) throw new Error('Flarum pagination loop');
         visited.add(nextUrl);
@@ -401,6 +517,8 @@
             ...(nextUrl ? ['flarum-loading-more'] : []),
             ...(prioritizedFromFloor ? [`flarum-prioritized-from-floor:${route.floor}`] : [])
           ],
+          startPostId,
+          startFloor: route.floor,
           stats: { fetchedPages, extractedPosts: combined.data.length }
         }), { phase: fetchedPages === 1 ? 'initial' : 'page', page: fetchedPages });
       }
@@ -413,6 +531,8 @@
           ...(nextUrl ? ['flarum-pagination-limit'] : []),
           ...(prioritizedFromFloor ? [`flarum-prioritized-from-floor:${route.floor}`] : [])
         ],
+        startPostId,
+        startFloor: route.floor,
         stats: { fetchedPages, extractedPosts: blocks.length }
       });
     } catch (error) {
@@ -424,6 +544,8 @@
           blocks,
           complete: false,
           warnings: ['flarum-api-partial'],
+          startPostId,
+          startFloor: route.floor,
           stats: { fetchedPages, extractedPosts: blocks.length }
         });
       }
@@ -431,7 +553,8 @@
         adapterId: 'flarum',
         blocks: domBlocks,
         complete: false,
-        warnings: ['flarum-api-unavailable']
+        warnings: ['flarum-api-unavailable'],
+        ...baseDocumentFields
       });
     }
   }
@@ -1355,6 +1478,8 @@
     makeCandidate,
     chooseCandidate,
     htmlToReadableText,
-    makeFlarumPostsUrl
+    makeFlarumPostsUrl,
+    makeFlarumDiscussionUrl,
+    flarumDiscussionWindow
   });
 })(globalThis);

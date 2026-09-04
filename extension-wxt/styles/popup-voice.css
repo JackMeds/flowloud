@@ -1,0 +1,33 @@
+/* Popup voice controls: all sources stay visible without hiding discovery in a select. */
+.fl-popup-tab-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.fl-popup-source-section { display: grid; gap: 7px; margin-bottom: 9px; }
+.fl-popup-source-heading { display: flex; min-height: 34px; align-items: center; justify-content: space-between; gap: 10px; }
+.fl-popup-source-heading > div { display: grid; gap: 1px; }
+.fl-popup-source-heading strong { color: var(--fl-ink); font-size: 11px; }
+.fl-popup-source-heading small { color: var(--fl-muted); font-size: 8px; }
+.fl-popup-source-heading > button { display: inline-flex; min-height: 30px; align-items: center; gap: 2px; padding: 0 3px 0 7px; border: 0; color: var(--fl-blue-active); background: transparent; font-size: 9px; font-weight: 760; cursor: pointer; }
+.fl-popup-source-heading > button svg { width: 14px; height: 14px; }
+.fl-popup-source-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
+.fl-popup-source-card { position: relative; min-width: 0; min-height: 67px; overflow: hidden; border: 1px solid var(--fl-line); border-radius: 10px; background: #fff; }
+.fl-popup-source-card.is-active { border-color: var(--fl-blue); background: var(--fl-blue-soft); box-shadow: inset 0 0 0 1px rgba(37,99,235,.12); }
+.fl-popup-source-main { display: grid; width: 100%; min-width: 0; min-height: 67px; place-items: center; align-content: center; gap: 3px; padding: 7px 3px 5px; border: 0; color: #334155; background: transparent; cursor: pointer; }
+.fl-popup-source-main:hover { background: rgba(239,246,255,.8); }
+.fl-popup-source-main > svg { width: 17px; height: 17px; color: var(--fl-blue); }
+.fl-popup-source-main > span { display: grid; min-width: 0; justify-items: center; gap: 1px; }
+.fl-popup-source-main strong, .fl-popup-source-main small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-popup-source-main strong { color: var(--fl-ink); font-size: 9px; }
+.fl-popup-source-main small { color: var(--fl-muted); font-size: 8px; }
+.fl-popup-source-card.is-active .fl-popup-source-main small { color: var(--fl-blue-active); font-weight: 750; }
+.fl-popup-source-settings { position: absolute; top: 3px; right: 3px; display: grid; width: 22px; height: 22px; place-items: center; padding: 0; border: 0; border-radius: 6px; color: var(--fl-muted); background: transparent; cursor: pointer; }
+.fl-popup-source-settings:hover, .fl-popup-source-settings:focus-visible { color: var(--fl-blue-active); background: #fff; }
+.fl-popup-source-settings svg { width: 12px; height: 12px; }
+.fl-popup-sound-card { margin-bottom: 2px; }
+.fl-popup-empty-voice { display: flex; width: 100%; min-height: 48px; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px; border: 0; color: var(--fl-ink); background: transparent; text-align: left; cursor: pointer; }
+.fl-popup-empty-voice > span { display: grid; gap: 2px; }
+.fl-popup-empty-voice strong { font-size: 10px; }
+.fl-popup-empty-voice small { color: var(--fl-muted); font-size: 8px; }
+.fl-popup-empty-voice svg { width: 15px; height: 15px; color: var(--fl-muted); }
+
+@media (forced-colors: active) {
+  .fl-popup-source-card, .fl-popup-source-card.is-active { border-color: CanvasText; color: CanvasText; background: Canvas; }
+}

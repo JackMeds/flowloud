@@ -45,7 +45,7 @@ for (const directory of ['chunks', 'assets']) {
   if (!fs.existsSync(sourceDirectory)) continue;
   for (const entry of fs.readdirSync(sourceDirectory, { withFileTypes: true })) {
     if (!entry.isFile()) continue;
-    if (directory === 'assets' && !/^(?:components-.*\.css|pdf\.worker-.*\.mjs)$/u.test(entry.name)) continue;
+    if (directory === 'assets' && !/(?:\.css$|^pdf\.worker-.*\.mjs$)/u.test(entry.name)) continue;
     copyFile(path.join(directory, entry.name), path.join(directory, entry.name), files);
   }
 }

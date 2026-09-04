@@ -35,6 +35,23 @@
     return raw.startsWith(`${providerId}:`) ? raw.slice(providerId.length + 1) : raw;
   }
 
+  async function mapWithConcurrency(items, limit, worker) {
+    const source = Array.isArray(items) ? items : [];
+    const results = new Array(source.length);
+    let cursor = 0;
+    const workerCount = Math.min(source.length, Math.max(1, Number(limit) || 1));
+    async function run() {
+      while (true) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= source.length) return;
+        results[index] = await worker(source[index], index);
+      }
+    }
+    await Promise.all(Array.from({ length: workerCount }, () => run()));
+    return results;
+  }
+
   function capabilities(provider) {
     const declared = object(provider.capabilities);
     const result = {};
@@ -272,7 +289,7 @@
     let cacheKey = browserModelManifest?.modelKey
       ? browserModelManifest.modelKey({ repoId, revision, source: sourceInfo.id, variant: config.variant || 'auto', device: config.device })
       : `flowloud-model-${repoId}@${revision}`;
-    const voiceCatalog = browserModelManifest?.VOICE_CATALOG || ['zf_001', 'zf_002', 'zm_009', 'zm_010'].map((id) => ({ id, name: id, label: id, lang: preset?.lang || 'zh-CN', language: 'zh-CN', gender: id.startsWith('zf_') ? 'female' : 'male', path: `voices/${id}.bin` }));
+    const voiceCatalog = browserModelManifest?.VOICE_CATALOG || ['zf_001', 'zf_002', 'zm_009', 'zm_010'].map((id) => ({ id, name: id, label: `Kokoro 音色 ${id.slice(-3)}`, rawLabel: id, lang: preset?.lang || 'zh-CN', language: 'zh-CN', locale: 'zh-CN', metadataSource: 'model-manifest', path: `voices/${id}.bin` }));
     const voiceById = browserModelManifest?.VOICE_BY_ID || Object.fromEntries(voiceCatalog.map((voice) => [voice.id, voice]));
     let modelState = 'missing';
     let verifiedAt = '';
@@ -314,6 +331,8 @@
           signal: controls.signal,
           starterVoiceIds: Array.isArray(config.starterVoiceIds) ? config.starterVoiceIds.slice() : [],
           ensureStarterVoices: controls.ensureStarterVoices === true,
+          ensureAllVoices: controls.ensureAllVoices === true,
+          ensureVoiceIds: Array.isArray(controls.ensureVoiceIds) ? controls.ensureVoiceIds.slice() : [],
         };
         try {
           return await pipelineFactory('text-to-speech', repoId, Object.assign({}, baseOptions, { device: resolvedDevice }));
@@ -461,6 +480,63 @@
         onProgress: controls.onProgress,
       }));
     }
+    async function voiceBatch(operation) {
+      const controls = object(operation);
+      const action = ['download', 'repair', 'delete'].includes(String(controls.action || ''))
+        ? String(controls.action)
+        : 'download';
+      const requested = controls.all === true || controls.voiceIds === 'all'
+        ? voiceCatalog.map((voice) => voice.id)
+        : (Array.isArray(controls.voiceIds) ? controls.voiceIds : [])
+          .map((voice) => rawVoiceId('browser-model', voice));
+      const ids = [...new Set(requested.filter((id) => voiceById[id]))];
+      if (!ids.length) throw new ProviderError('voice_selection_empty', '至少选择一个有效音色。');
+      const totalBytes = ids.reduce((total, id) => total + Number(voiceById[id]?.sizeBytes || 0), 0);
+      const results = [];
+      let completed = 0;
+      let completedBytes = 0;
+      const concurrency = Math.min(4, Math.max(1, Number(controls.concurrency) || Number(config.downloadConcurrency) || 4));
+      const emit = (progress) => {
+        if (typeof controls.onProgress !== 'function') return;
+        controls.onProgress(Object.assign({
+          phase: 'voice-batch',
+          action,
+          total: ids.length,
+          completed,
+          concurrency,
+          totalBytes,
+          completedBytes,
+        }, progress || {}));
+      };
+      await mapWithConcurrency(ids, concurrency, async (id) => {
+        if (controls.signal?.aborted) throw Object.assign(new Error('音色批量操作已取消。'), { name: 'AbortError', code: 'cancelled' });
+        try {
+          const result = await voiceAction(action, Object.assign({}, controls, {
+            voiceId: id,
+            onProgress: (progress) => emit(Object.assign({}, progress, { voiceId: id, currentVoiceId: id })),
+          }));
+          completed += 1;
+          completedBytes += Number(voiceById[id]?.sizeBytes || 0);
+          results.push({ voiceId: id, status: action === 'delete' ? 'deleted' : result.cached === false ? 'failed' : result.downloaded ? 'downloaded' : 'cached', cached: result.cached !== false, result });
+          emit({ voiceId: id, currentVoiceId: id, completed, completedBytes, loaded: Number(voiceById[id]?.sizeBytes || 0), total: ids.length });
+        } catch (error) {
+          if (controls.signal?.aborted || error?.name === 'AbortError') throw error;
+          results.push({ voiceId: id, status: 'failed', cached: false, error: { code: error?.code || 'voice_operation_failed', message: error?.message || '音色操作失败。' } });
+          completed += 1;
+          emit({ voiceId: id, currentVoiceId: id, completed, completedBytes });
+        }
+      });
+      if (controls.signal?.aborted) throw Object.assign(new Error('音色批量操作已取消。'), { name: 'AbortError', code: 'cancelled' });
+      return {
+        action,
+        requested: ids,
+        results,
+        completed: results.filter((item) => item.status !== 'failed').map((item) => item.voiceId),
+        failed: results.filter((item) => item.status === 'failed'),
+        totalBytes,
+        completedBytes,
+      };
+    }
     const modelManagement = Object.freeze({
       info: async () => {
         const cached = await cacheExists();
@@ -468,7 +544,7 @@
         const state = transientState
           ? modelState
           : cached === false ? 'missing' : modelState === 'missing' && cached === true ? 'available-unverified' : modelState;
-        return { cacheId: cacheKey, cacheKey, modelId: text(config.modelId), repoId, revision, source: sourceInfo.id, sourceLabel: sourceInfo.label, manualOnlySource: sourceInfo.manualOnly === true, variant: variantInfo.id, variantLabel: variantInfo.label, license: preset?.license || '由模型仓库声明', estimatedBytes: Number(variantInfo.estimatedBytes || preset?.estimatedBytes || 0), cached: cached == null ? modelState === 'ready' : cached, state, ready: state === 'ready', verifiedAt, runtimeVersion: text(config.runtimeVersion || 'transformers-js-bundled'), device: resolvedDevice, fallbackReason, concurrency: Math.max(1, Math.min(4, Number(config.downloadConcurrency) || 4)), voiceCount: voiceCatalog.length, starterVoiceIds: browserModelManifest?.STARTER_VOICE_IDS || ['zf_001', 'zf_002', 'zm_009', 'zm_010'] };
+        return { cacheId: cacheKey, cacheKey, modelId: text(config.modelId), repoId, revision, source: sourceInfo.id, sourceLabel: sourceInfo.label, manualOnlySource: sourceInfo.manualOnly === true, variant: variantInfo.id, variantLabel: variantInfo.label, license: preset?.license || '由模型仓库声明', estimatedBytes: Number(variantInfo.estimatedBytes || preset?.estimatedBytes || 0), cached: cached == null ? modelState === 'ready' : cached, state, ready: state === 'ready', verifiedAt, runtimeVersion: text(config.runtimeVersion || 'transformers-js-bundled'), device: resolvedDevice, fallbackReason, concurrency: Math.max(1, Math.min(4, Number(config.downloadConcurrency) || 4)), voiceCount: voiceCatalog.length, voiceTotalBytes: browserModelManifest?.VOICE_TOTAL_BYTES || voiceCatalog.reduce((total, voice) => total + Number(voice.sizeBytes || 0), 0), starterVoiceIds: browserModelManifest?.STARTER_VOICE_IDS || ['zf_001', 'zf_002', 'zm_009', 'zm_010'], installMode: String(config.installMode || 'full') === 'custom' ? 'custom' : 'full', selectedVoiceIds: Array.isArray(config.selectedVoiceIds) ? config.selectedVoiceIds.map((voice) => rawVoiceId('browser-model', voice)).filter((voice) => voiceById[voice]) : [] };
       },
       download: async (operation) => {
         const controls = object(operation);
@@ -477,9 +553,23 @@
         if (controls.signal?.aborted) controller.abort();
         else controls.signal?.addEventListener?.('abort', () => controller.abort(), { once: true });
         modelState = 'downloading';
+        const configuredInstallMode = String(config.installMode || 'full') === 'custom' ? 'custom' : 'full';
+        const effectiveInstallMode = controls.installMode === 'custom' || controls.installMode === 'full'
+          ? controls.installMode : configuredInstallMode;
+        const selectedVoiceIds = Array.isArray(config.selectedVoiceIds)
+          ? [...new Set(config.selectedVoiceIds.map((voice) => rawVoiceId('browser-model', voice)).filter((voice) => voiceById[voice]))]
+          : [];
+        const installVoiceIds = effectiveInstallMode === 'custom'
+          ? (Array.isArray(controls.voiceIds) ? controls.voiceIds : selectedVoiceIds)
+              .map((voice) => rawVoiceId('browser-model', voice))
+              .filter((voice, index, list) => voiceById[voice] && list.indexOf(voice) === index)
+          : voiceCatalog.map((voice) => voice.id);
+        if (!installVoiceIds.length) throw new ProviderError('voice_selection_empty', '自定义安装至少需要选择一个音色。');
         try {
           await getPipeline(controls.onProgress, {
             signal: controller.signal, forceNew: true, offline: false, ensureStarterVoices: true,
+            ensureAllVoices: effectiveInstallMode === 'full',
+            ensureVoiceIds: installVoiceIds,
           });
           if (controller.signal.aborted) throw Object.assign(new Error('模型下载已取消。'), { name: 'AbortError', code: 'cancelled' });
           const cached = await cacheExists();
@@ -492,7 +582,7 @@
             forceNew: cached === true,
           });
           if (!validation.ready) throw new ProviderError(validation.error?.code || 'model_probe_failed', validation.error?.message || '模型离线校验失败。');
-          return { downloaded: true, ready: true, state: 'ready', cacheId: cacheKey, cacheKey, modelId: text(config.modelId), repoId, revision, source: sourceInfo.id, sourceLabel: sourceInfo.label, variant: variantInfo.id, variantLabel: variantInfo.label, license: preset?.license || '由模型仓库声明', estimatedBytes: Number(variantInfo.estimatedBytes || preset?.estimatedBytes || 0), device: resolvedDevice, fallbackReason, verifiedAt, downloadedAt: new Date().toISOString(), runtimeVersion: text(config.runtimeVersion || 'transformers-js-bundled'), concurrency: Math.max(1, Math.min(4, Number(config.downloadConcurrency) || 4)) };
+          return { downloaded: true, ready: true, state: 'ready', cacheId: cacheKey, cacheKey, modelId: text(config.modelId), repoId, revision, source: sourceInfo.id, sourceLabel: sourceInfo.label, variant: variantInfo.id, variantLabel: variantInfo.label, license: preset?.license || '由模型仓库声明', estimatedBytes: Number(variantInfo.estimatedBytes || preset?.estimatedBytes || 0), device: resolvedDevice, fallbackReason, verifiedAt, downloadedAt: new Date().toISOString(), runtimeVersion: text(config.runtimeVersion || 'transformers-js-bundled'), concurrency: Math.max(1, Math.min(4, Number(config.downloadConcurrency) || 4)), installMode: effectiveInstallMode, downloadedVoiceIds: installVoiceIds, voiceTotalBytes: browserModelManifest?.VOICE_TOTAL_BYTES || installVoiceIds.reduce((total, id) => total + Number(voiceById[id]?.sizeBytes || 0), 0) };
         } catch (error) {
           modelState = error?.name === 'AbortError' ? 'cancelled' : 'corrupt';
           throw error;
@@ -518,20 +608,23 @@
         return { deleted, cacheId: cacheKey, state: modelState };
       },
       voiceCatalog: async () => voiceCatalog.map((voice) => Object.assign({}, voice)),
-      voices: async (operation) => Promise.all(voiceCatalog.map((voice) => voiceInfo(voice.id).then((info) => Object.assign({ id: voiceId('browser-model', voice.id), voiceId: voice.id, name: voice.name || voice.id, label: voice.label || voice.name || voice.id, lang: voice.lang || voice.language || preset?.lang || '', providerId: 'browser-model' }, info)))),
+      voices: async (operation) => Promise.all(voiceCatalog.map((voice) => voiceInfo(voice.id).then((info) => Object.assign({}, info, { id: voiceId('browser-model', voice.id), rawId: voice.id, voiceId: voice.id, name: voice.name || voice.id, label: voice.label || voice.name || voice.id, rawLabel: voice.rawLabel || voice.name || voice.id, displayLabel: voice.label || voice.name || voice.id, lang: voice.lang || voice.language || preset?.lang || '', locale: voice.lang || voice.language || preset?.lang || '', language: voice.lang || voice.language || preset?.lang || '', providerId: 'browser-model', metadataSource: 'model-manifest' })))),
       voiceInfo: async (operation) => voiceInfo(object(operation).voiceId || object(operation).voice),
       voiceDownload: async (operation) => voiceAction('download', operation),
       voiceDelete: async (operation) => voiceAction('delete', operation),
       voiceRepair: async (operation) => voiceAction('repair', operation),
-      'voice-list': async () => ({ voices: await Promise.all(voiceCatalog.map((voice) => voiceInfo(voice.id).then((info) => Object.assign({ id: voiceId('browser-model', voice.id), voiceId: voice.id, name: voice.name || voice.id, label: voice.label || voice.name || voice.id, lang: voice.lang || voice.language || preset?.lang || '', providerId: 'browser-model' }, info)))) }),
+      voiceBatch,
+      'voice-list': async () => ({ voices: await Promise.all(voiceCatalog.map((voice) => voiceInfo(voice.id).then((info) => Object.assign({}, info, { id: voiceId('browser-model', voice.id), rawId: voice.id, voiceId: voice.id, name: voice.name || voice.id, label: voice.label || voice.name || voice.id, rawLabel: voice.rawLabel || voice.name || voice.id, displayLabel: voice.label || voice.name || voice.id, lang: voice.lang || voice.language || preset?.lang || '', locale: voice.lang || voice.language || preset?.lang || '', language: voice.lang || voice.language || preset?.lang || '', providerId: 'browser-model', metadataSource: 'model-manifest' })))) }),
       'voice-info': async (operation) => voiceInfo(object(operation).voiceId || object(operation).voice),
       'voice-download': async (operation) => voiceAction('download', operation),
       'voice-delete': async (operation) => voiceAction('delete', operation),
       'voice-repair': async (operation) => voiceAction('repair', operation),
+      'voice-batch': voiceBatch,
       'voice:list': async (operation) => voiceCatalog.map((voice) => Object.assign({}, voice)),
       'voice:download': async (operation) => voiceAction('download', operation),
       'voice:delete': async (operation) => voiceAction('delete', operation),
       'voice:repair': async (operation) => voiceAction('repair', operation),
+      'voice:batch': voiceBatch,
     });
     return normalizeProvider({ id: 'browser-model', version: 3,
       capabilities: { health: true, voices: true, synthesize: true, cancel: true, modelManagement: true, safeRate: false },

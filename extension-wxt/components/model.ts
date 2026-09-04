@@ -13,6 +13,7 @@ export interface ProviderStatus {
   stage?: 'configuration' | 'permission' | 'health' | 'voices' | 'synthesize' | 'model';
   verifiedAt?: string;
   voiceCount?: number;
+  voiceTotalBytes?: number;
   modelCount?: number;
   sourceLabel?: string;
   capabilities?: Record<string, boolean>;
@@ -59,10 +60,19 @@ export interface PopupAuthor {
 
 export interface PopupVoice {
   id: string;
+  rawId?: string;
+  alias?: string;
   label: string;
+  rawLabel?: string;
+  displayLabel?: string;
   lang?: string;
+  locale?: string;
   language?: string;
+  vendor?: string;
   gender?: string;
+  metadataSource?: string;
+  recommendedReason?: string;
+  note?: string;
   characteristic?: string;
   description?: string;
   style?: string;
@@ -82,10 +92,12 @@ export interface PopupModel {
   currentSpeaker: string;
   currentWords?: Array<{ text: string; sourceStart: number; sourceEnd: number }>;
   currentWordIndex?: number;
+  currentWordTiming?: { mode: string; estimated: boolean };
   authors: PopupAuthor[];
   settings: PopupSettings;
   availableVoices?: PopupVoice[];
   selectedVoiceId?: string;
+  replyVoiceCount?: number;
   pageVoiceAssignments?: Record<string, string>;
   pageVoiceLoadState?: 'idle' | 'loading' | 'ready' | 'error';
   voiceLoadState?: 'idle' | 'loading' | 'ready' | 'error';
@@ -131,7 +143,10 @@ export interface ModelDownloadState {
   estimatedBytes?: number;
   concurrency?: number;
   voiceCount?: number;
+  voiceTotalBytes?: number;
   starterVoiceIds?: string[];
+  installMode?: 'full' | 'custom';
+  selectedVoiceIds?: string[];
   voiceCacheRegistry?: Record<string, Record<string, unknown>>;
 }
 
@@ -188,6 +203,7 @@ export const demoPopupModel: PopupModel = {
     { id: 'browser-system:demo-zh', label: '系统中文音色', lang: 'zh-CN', eventTypes: ['word', 'sentence'] },
   ],
   selectedVoiceId: 'browser-system:demo-zh',
+  replyVoiceCount: 3,
   pageVoiceAssignments: { op: 'browser-system:demo-zh' },
   pageVoiceLoadState: 'ready',
   voiceLoadState: 'ready',

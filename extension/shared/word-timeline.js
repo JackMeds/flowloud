@@ -65,7 +65,11 @@
       bufferedSeconds: 0,
       activeWordIndex: -1,
       lastEventSequence: -1,
-      finished: false
+      finished: false,
+      // `estimated` is explicit so the UI can disclose when a provider gave
+      // us duration-only timing instead of real word timestamps.
+      estimated: false,
+      preciseBoundarySeen: false
     };
   }
 
@@ -155,12 +159,21 @@
     }
 
     const snapshot = normalizeProgress(current, event);
-    const nextIndex = wordIndexAtProgress(current, snapshot);
+    if (snapshot.speechOffset !== null) current.preciseBoundarySeen = true;
+    const nextIndex = current.preciseBoundarySeen && snapshot.speechOffset === null
+      ? current.activeWordIndex
+      : wordIndexAtProgress(current, snapshot);
     const nextDone = current.finished || snapshot.done;
     current.durationSeconds = snapshot.durationSeconds;
-    current.timingMode = snapshot.durationSeconds !== null
-      ? 'duration-ratio'
-      : (snapshot.speechOffset !== null ? 'character-boundary' : snapshot.scheduledSeconds > EPSILON ? 'scheduled-ratio' : 'unavailable');
+    // A provider character boundary is authoritative even when it also sends
+    // an audio duration. Duration is only an interpolation fallback.
+    current.timingMode = current.preciseBoundarySeen
+      ? 'character-boundary'
+      : snapshot.durationSeconds !== null
+        ? 'duration-ratio'
+        : snapshot.scheduledSeconds > EPSILON ? 'scheduled-ratio' : 'unavailable';
+    current.estimated = !current.preciseBoundarySeen && snapshot.speechOffset === null
+      && (snapshot.durationSeconds !== null || snapshot.scheduledSeconds > EPSILON);
     current.playedSeconds = snapshot.playedSeconds;
     current.scheduledSeconds = snapshot.scheduledSeconds;
     current.bufferedSeconds = snapshot.bufferedSeconds;
@@ -182,7 +195,11 @@
     const current = timeline && typeof timeline === 'object' ? timeline : createTimeline();
     const snapshot = normalizeProgress(current, Object.assign({}, progress || {}, { done: true }));
     current.durationSeconds = snapshot.durationSeconds;
-    current.timingMode = snapshot.durationSeconds !== null ? 'duration-ratio' : current.timingMode;
+    if (snapshot.speechOffset !== null) current.preciseBoundarySeen = true;
+    current.timingMode = current.preciseBoundarySeen
+      ? 'character-boundary'
+      : snapshot.durationSeconds !== null ? 'duration-ratio' : current.timingMode;
+    current.estimated = !current.preciseBoundarySeen && snapshot.speechOffset === null && (snapshot.durationSeconds !== null || snapshot.scheduledSeconds > EPSILON);
     current.playedSeconds = snapshot.durationSeconds === null
       ? snapshot.playedSeconds
       : snapshot.durationSeconds;
@@ -203,6 +220,8 @@
     current.activeWordIndex = -1;
     current.lastEventSequence = -1;
     current.finished = false;
+    current.estimated = false;
+    current.preciseBoundarySeen = false;
     return current;
   }
 

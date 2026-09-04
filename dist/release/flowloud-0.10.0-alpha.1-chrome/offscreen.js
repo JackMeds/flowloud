@@ -1116,7 +1116,7 @@
       const controller = new AbortController();
       const job = { identity, controller, timedOut: false, provider: provider || null };
       jobs.set(key, job);
-      const operationTimeoutMs = message.type === 'provider:model:download' || /^provider:model:voice-(?:download|repair)$/u.test(String(message.type || ''))
+      const operationTimeoutMs = message.type === 'provider:model:download' || /^provider:model:voice-(?:download|repair|batch)$/u.test(String(message.type || ''))
         ? Number(config.modelDownloadTimeoutMs || MODEL_DOWNLOAD_TIMEOUT_MS)
         : message.type === 'provider:model:verify'
           ? Number(config.modelVerifyTimeoutMs || MODEL_VERIFY_TIMEOUT_MS)
@@ -1697,18 +1697,48 @@
       await voiceCache.put(remoteVoiceUrl, response.clone ? response.clone() : response);
       return { voiceId: id, cached: true, downloaded: true, url: remoteVoiceUrl, source: info.sourceId };
     }
+    async function ensureVoiceSet(repoId, options, ids, controls = {}) {
+      const source = [...new Set((Array.isArray(ids) ? ids : [])
+        .map((voice) => String(voice || '').replace(/^browser-model:/u, ''))
+        .filter((voice) => browserModelManifest?.VOICE_BY_ID?.[voice]))];
+      const limit = Math.min(4, Math.max(1, Number(options?.concurrency) || 4));
+      const results = new Array(source.length);
+      let cursor = 0;
+      let completed = 0;
+      async function worker() {
+        while (true) {
+          const index = cursor++;
+          if (index >= source.length) return;
+          const id = source[index];
+          results[index] = await ensureVoice(repoId, options, id, {
+            offline: options.flowloudOffline === true,
+            signal: controls.signal || options.signal,
+            onProgress: (progress) => controls.onProgress?.(Object.assign({}, progress, {
+              phase: 'voice-batch', voiceId: id, currentVoiceId: id,
+              completed, total: source.length,
+            })),
+          });
+          completed += 1;
+          controls.onProgress?.({ phase: 'voice-batch', voiceId: id, currentVoiceId: id, completed, total: source.length, complete: true });
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(limit, source.length) }, () => worker()));
+      return results;
+    }
     async function browserPipeline(task, repoId, options) {
       if (repoId === 'onnx-community/Kokoro-82M-v1.1-zh-ONNX') {
         const info = modelSource(options);
         const configuredStarters = Array.isArray(options.starterVoiceIds)
           ? options.starterVoiceIds.map((voice) => String(voice || '').replace(/^browser-model:/u, '')).filter((voice) => browserModelManifest?.VOICE_BY_ID?.[voice])
           : [];
-        const starterVoiceIds = options.ensureStarterVoices === true
-          ? (configuredStarters.length ? configuredStarters : (browserModelManifest?.STARTER_VOICE_IDS || ['zf_001', 'zf_002', 'zm_009', 'zm_010']))
-          : ['zf_001'];
-        await Promise.all([...new Set(starterVoiceIds)].map((voiceId) => ensureVoice(repoId, options, voiceId, {
-          offline: options.flowloudOffline === true, onProgress: options.progress_callback,
-        })));
+        const starterVoiceIds = options.ensureAllVoices === true
+          ? (browserModelManifest?.VOICE_IDS || [])
+          : Array.isArray(options.ensureVoiceIds) && options.ensureVoiceIds.length
+            ? options.ensureVoiceIds
+            : options.ensureStarterVoices === true
+              ? (configuredStarters.length ? configuredStarters : (browserModelManifest?.STARTER_VOICE_IDS || ['zf_001', 'zf_002', 'zm_009', 'zm_010']))
+              : ['zf_001'];
+        await ensureVoiceSet(repoId, options, starterVoiceIds, { signal: options.signal, onProgress: options.progress_callback });
         if (!kokoroRuntimePromise) kokoroRuntimePromise = import(chromeApi.runtime.getURL('vendor/kokoro/kokoro.web.min.js'));
         const kokoroRuntime = await kokoroRuntimePromise;
         const modelFetch = options.flowloudOffline === true

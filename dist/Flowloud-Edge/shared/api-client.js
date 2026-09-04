@@ -79,10 +79,15 @@
     } catch (_) {
       payload = null;
     }
-    const message = payload && payload.error && payload.error.message
+    const gatewayCode = String(payload && payload.error && payload.error.code || '');
+    const gatewayMessage = payload && payload.error && payload.error.message
       ? payload.error.message
       : `本地 TTS 服务返回 HTTP ${response.status}。`;
-    throw new LocalApiError(`http_${response.status}`, message, response.status);
+    const missingPairingToken = response.status === 401 && gatewayCode === 'client_auth_required';
+    const message = missingPairingToken
+      ? '本地 TTS 网关正在运行，但扩展缺少配对令牌。请从 QwenTrayGateway 托盘菜单复制令牌，在“声音 → 本地 TTS”中粘贴并重新连接。'
+      : gatewayMessage;
+    throw new LocalApiError(missingPairingToken ? gatewayCode : `http_${response.status}`, message, response.status);
   }
 
   function profilePayload(profile) {

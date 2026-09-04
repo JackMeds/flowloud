@@ -1,19 +1,21 @@
 {
-  "generatedAt": "2026-08-28T00:52:42.793Z",
+  "generatedAt": "2026-08-30T00:35:18.843Z",
   "files": [
     "popup-react.html",
     "options-react.html",
     "document-workbench.html",
-    "chunks/components-DRRmXjYb.js",
-    "chunks/document-model-zLLC8j2h.js",
-    "chunks/document-workbench-DMM7jpdX.js",
-    "chunks/file-text-D9LapgPk.js",
-    "chunks/options-Dc5_eUyQ.js",
-    "chunks/pdf-3ms13LCm.js",
-    "chunks/popup-OjBpg5Z-.js",
-    "chunks/provider-registry-dp8eVdA8.js",
+    "chunks/components-CX_Kin8w.js",
+    "chunks/document-model-DMKpJlVy.js",
+    "chunks/document-workbench-B2hbzf7s.js",
+    "chunks/file-text-E6ErDlKw.js",
+    "chunks/options-CQBtv7SV.js",
+    "chunks/pdf-CturNaJ-.js",
+    "chunks/popup-BSjjwgzg.js",
     "chunks/rolldown-runtime-CbXtAM7H.js",
-    "assets/components-CPmqpHcS.css",
-    "assets/pdf.worker-Dg_VPFYK.mjs"
+    "chunks/voice-workbench-model-DfI660id.js",
+    "assets/components-C0IhDtOr.css",
+    "assets/options-4NRhqbPH.css",
+    "assets/pdf.worker-Dg_VPFYK.mjs",
+    "assets/popup-BR4eTpRz.css"
   ]
 }

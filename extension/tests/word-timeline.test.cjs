@@ -28,6 +28,9 @@ test('wordIndexAtProgress uses duration-ratio text positions and assigns punctua
   assert.equal(Timeline.wordIndexAtProgress(timeline, { playedSeconds: 5 }), 2);
   assert.equal(Timeline.wordIndexAtProgress(timeline, { playedSeconds: 10 }), 3);
   assert.equal(Timeline.wordIndexAtProgress(timeline, { playedSeconds: 10, done: true }), 3);
+  const estimated = Timeline.applyProgress(timeline, { playedSeconds: 2, durationSeconds: 10, sequence: 1 });
+  assert.equal(estimated.index, 1);
+  assert.equal(timeline.estimated, true);
 });
 
 test('chrome.tts character boundaries select the exact word without requiring audio duration', () => {
@@ -37,6 +40,17 @@ test('chrome.tts character boundaries select the exact word without requiring au
   assert.equal(Timeline.wordIndexAtSpeechOffset(timeline, 6), 2);
   const result = Timeline.applyProgress(timeline, { charIndex: 12, sequence: 1 });
   assert.equal(result.index, 3);
+  assert.equal(timeline.timingMode, 'character-boundary');
+  assert.equal(timeline.estimated, false);
+});
+test('character boundaries stay authoritative when an audio duration is also present', () => {
+  const timeline = sampleTimeline();
+  const result = Timeline.applyProgress(timeline, { charIndex: 6, durationSeconds: 10, playedSeconds: 9, sequence: 1 });
+  assert.equal(result.index, 2);
+  assert.equal(timeline.timingMode, 'character-boundary');
+  assert.equal(timeline.estimated, false);
+  const fallback = Timeline.applyProgress(timeline, { playedSeconds: 10, durationSeconds: 10, sequence: 2 });
+  assert.equal(fallback.index, 2);
   assert.equal(timeline.timingMode, 'character-boundary');
 });
 test('applyProgress is monotonic and ignores duplicate or stale event sequences', () => {

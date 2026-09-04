@@ -200,6 +200,7 @@
   let wordMotionSequence = 0;
   let sourceElements = [];
   let sourceIndicesByKey = new Map();
+  let sourceIndicesByPostId = new Map();
   let sourceIndicesByElement = new WeakMap();
   let textIndexesByElement = new WeakMap();
   let sentenceRanges = new Map();
@@ -212,9 +213,13 @@
   let wordMotionRange = null;
   let wordMotionCursorRect = null;
   let wordMotionRetireTimer = null;
+  let wordVisualFrame = null;
+  let pendingWordVisual = null;
   let highlightRetryTimer = null;
   let highlightRetryKey = "";
   let highlightRetryAttempt = 0;
+  const forumVisibilityRequests = new Map();
+  let forumVisibilitySequence = 0;
   let audioProgressSequence = 0;
   let indexedSegments = null;
   let lastScrolledLocatorKey = "";
@@ -326,6 +331,9 @@
       hasMultipleAuthors: authors.length > 1,
       authorSummary: authors,
       current: current ? {
+        id: String(current.id || ""),
+        postId: String(current.postId || ""),
+        floor: Number.isFinite(Number(current.floor)) ? Number(current.floor) : null,
         authorKey: getAuthorKey(current, state.index),
         authorName: getDisplayAuthor(current),
         role: getRoleLabel(current),
@@ -335,6 +343,9 @@
         words,
         wordIndex: Number.isInteger(activeWordIndex) ? activeWordIndex : -1,
         wordCount: words.length,
+        wordTiming: wordTimeline && wordTimeline.segmentIndex === state.index
+          ? { mode: String(wordTimeline.timingMode || 'unavailable'), estimated: wordTimeline.estimated === true }
+          : null,
       } : null,
       error: state.error || null,
     };
@@ -952,7 +963,11 @@
     root.style.setProperty("--qwen-reader-word-glow-strength", String(glow / 100));
     root.style.setProperty("--qwen-reader-word-glow-radius", `${Math.round(2 + glow * .1)}px`);
     root.style.setProperty("--qwen-reader-word-halo-opacity", String(.2 + glow * .0072));
-    root.style.setProperty("--qwen-reader-word-motion-duration", `${Math.round(1370 / speed)}ms`);
+    // Decorative motion must never run for a full synthetic word. Boundary
+    // events are the source of truth; the short transition only softens the
+    // hand-off between two already-authoritative words.
+    const transitionDuration = Math.round(80 / Math.max(.6, speed));
+    root.style.setProperty("--qwen-reader-word-motion-duration", `${transitionDuration}ms`);
     const layer = shadow.querySelector('[data-role="word-motion-layer"]');
     if (layer) {
       layer.dataset.style = style;
@@ -960,7 +975,7 @@
       layer.style.setProperty("--qr-word-glow-strength", String(glow / 100));
       layer.style.setProperty("--qr-word-glow-radius", `${Math.round(2 + glow * .1)}px`);
       layer.style.setProperty("--qr-word-halo-opacity", String(.2 + glow * .0072));
-      layer.style.setProperty("--qr-word-motion-duration", `${Math.round(1370 / speed)}ms`);
+      layer.style.setProperty("--qr-word-motion-duration", `${transitionDuration}ms`);
     }
   }
 
@@ -979,10 +994,11 @@
     if (isInteractivePageTarget(target)) return;
     const selection = typeof window.getSelection === "function" ? window.getSelection() : null;
     if (selectionCoversPoint(selection, event.clientX, event.clientY)) return;
-    const matchingIndex = findSegmentIndexAtTarget(target, event.clientX, event.clientY, {
+    let matchingIndex = findSegmentIndexAtTarget(target, event.clientX, event.clientY, {
       refreshMissing: true,
       strictPoint: true,
     });
+    if (matchingIndex < 0) matchingIndex = await ensureClickedForumSegment(target);
     if (matchingIndex < 0) return;
     followController.resume();
     lastScrolledLocatorKey = "";
@@ -1121,7 +1137,11 @@
   function findSegmentIndexAtTarget(target, clientX, clientY, options) {
     ensureSourceIndex();
     const contentNode = closestReadableTarget(target);
+    const forumPostId = targetForumPostId(target);
+    const forumIndices = forumPostId ? (sourceIndicesByPostId.get(forumPostId) || []) : [];
+    if (forumIndices.length) forumIndices.forEach((index) => ensureSourceIndex(index));
     const collectIndices = () => {
+      if (forumPostId) return forumIndices;
       let node = contentNode;
       let indices = null;
       while (node && node !== document.documentElement.parentElement) {
@@ -1171,6 +1191,46 @@
       if (caretIndex >= 0) return caretIndex;
     }
     return indices.length === 1 ? indices[0] : -1;
+  }
+
+  function targetForumPostId(target) {
+    if (!target || typeof target.closest !== "function") return "";
+    const item = target.closest(".PostStream-item[data-id], .Post[data-id]");
+    return String(item && item.getAttribute("data-id") || "").replace(/^post-/u, "");
+  }
+
+  async function ensureClickedForumSegment(target) {
+    const postId = targetForumPostId(target);
+    if (!postId || !Extractors || typeof Extractors.extractFlarumDom !== "function") return -1;
+    const blocks = Extractors.extractFlarumDom(document).filter((block) => String(block && block.postId || "") === postId);
+    if (!blocks.length) return -1;
+    const partial = Object.assign({}, state.document || {}, {
+      pageKey: state.pageKey || getCurrentPageKey(),
+      adapterId: "flarum",
+      kind: "forum",
+      blocks,
+      complete: false,
+    });
+    const assigned = assignSegments(buildPlaybackSegments(partial));
+    if (!assigned.length) return -1;
+    const currentIdentity = state.current && typeof Player.segmentIdentity === "function"
+      ? Player.segmentIdentity(state.current) : "";
+    const nextSegments = typeof Player.mergeProgressiveSegments === "function"
+      ? Player.mergeProgressiveSegments(state.segments, assigned) : [...state.segments, ...assigned];
+    const preservedIndex = currentIdentity && typeof Player.findSegmentByIdentity === "function"
+      ? Player.findSegmentByIdentity(nextSegments, currentIdentity) : -1;
+    state = Player.reduce(state, {
+      type: "QUEUE_UPDATE",
+      scanId: scanCounter,
+      document: partial,
+      segments: nextSegments,
+      index: preservedIndex >= 0 ? preservedIndex : state.index,
+    });
+    invalidateSourceIndex();
+    render();
+    ensureSourceIndex();
+    const indices = sourceIndicesByPostId.get(postId) || [];
+    return indices.length ? indices[0] : -1;
   }
 
   function findSegmentIndexAtCaret(indices, clientX, clientY) {
@@ -1572,6 +1632,21 @@
     await scanCurrentPage("manual");
   }
 
+  function initialSegmentIndex(segments, document, fallback = 0) {
+    const source = Array.isArray(segments) ? segments : [];
+    const startPostId = String(document && document.startPostId || "").trim();
+    if (startPostId) {
+      const byPostId = source.findIndex((segment) => String(segment && segment.postId || "") === startPostId);
+      if (byPostId >= 0) return byPostId;
+    }
+    const startFloor = Number(document && document.startFloor);
+    if (Number.isFinite(startFloor) && startFloor > 0) {
+      const byFloor = source.findIndex((segment) => Number(segment && segment.floor) === startFloor);
+      if (byFloor >= 0) return byFloor;
+    }
+    return Math.max(0, Math.min(source.length - 1, Number(fallback) || 0));
+  }
+
   async function scanCurrentPage(reason) {
     const pageKey = getCurrentPageKey();
     const preserveDynamicQueue =
@@ -1627,7 +1702,7 @@
         scanId,
         document: partialDocument,
         segments: nextSegments,
-        index: preservedIndex >= 0 ? preservedIndex : resumeIndex,
+        index: preservedIndex >= 0 ? preservedIndex : initialSegmentIndex(assigned, partialDocument, resumeIndex),
       });
       progressiveReady = true;
       invalidateSourceIndex();
@@ -1695,7 +1770,7 @@
         segments: nextSegments,
         index: (progressiveReady || preserveDynamicQueue) && preservedIndex >= 0
           ? preservedIndex
-          : resumeIndex,
+          : initialSegmentIndex(assigned, normalized, resumeIndex),
       });
       invalidateSourceIndex();
       render();
@@ -1954,7 +2029,10 @@
     }
     if (event === "started") {
       activeStreamRequest = String(message.requestId || activeSession);
-      applyWordProgress(message);
+      // The start notification carries the restart offset for playback
+      // bookkeeping, not a word boundary. Do not let it switch the timeline
+      // into exact-boundary mode before the provider emits a real boundary.
+      applyWordProgress(Object.assign({}, message, { charIndex: undefined, speechOffset: undefined }));
       state = Player.reduce(state, {
         type: "AUDIO_PLAYING",
         sessionId: activeSession,
@@ -2478,6 +2556,7 @@
     indexedSegments = null;
     sourceElements = [];
     sourceIndicesByKey = new Map();
+    sourceIndicesByPostId = new Map();
     sourceIndicesByElement = new WeakMap();
     textIndexesByElement = new WeakMap();
     sentenceRanges = new Map();
@@ -2494,6 +2573,7 @@
       indexedSegments = state.segments;
       sourceElements = new Array(state.segments.length);
       sourceIndicesByKey = new Map();
+      sourceIndicesByPostId = new Map();
       sourceIndicesByElement = new WeakMap();
       textIndexesByElement = new WeakMap();
       sentenceRanges = new Map();
@@ -2505,6 +2585,12 @@
         const indices = sourceIndicesByKey.get(key) || [];
         indices.push(index);
         sourceIndicesByKey.set(key, indices);
+        const postId = String(segment && segment.postId || '').trim();
+        if (postId) {
+          const postIndices = sourceIndicesByPostId.get(postId) || [];
+          postIndices.push(index);
+          sourceIndicesByPostId.set(postId, postIndices);
+        }
       });
       sourceIndicesByKey.forEach((indices) => indices.sort((leftIndex, rightIndex) => {
         const leftStart = Number(state.segments[leftIndex] && state.segments[leftIndex].sourceStart);
@@ -2517,6 +2603,10 @@
     }
 
     if (requestedIndex == null) {
+      // Forum pages virtualize their post stream. Build the O(1) identity
+      // maps here, but resolve DOM elements only for the post under the
+      // pointer or the currently highlighted segment.
+      if (state.document && state.document.kind === "forum") return;
       state.segments.forEach((_, index) => {
         if (sourceElements[index] === undefined) ensureSourceIndex(index);
       });
@@ -2556,13 +2646,11 @@
       segment.sourceKey.startsWith("readability:")
     ) {
       element = findReadableElement(segment.text);
-    } else if (!element && segment.floor) {
-      const flarumIndex = Math.max(0, Number(segment.floor) - 1);
-      element =
-        document.querySelector(`.Post[data-number="${segment.floor}"]`) ||
-        document.querySelector(
-          `.PostStream-item[data-index="${flarumIndex}"] .Post`,
-        );
+    } else if (!element && segment.floor && !segment.postId) {
+      // A floor is only a last-resort locator for adapters that do not expose
+      // a stable post id.  Never turn a Flarum floor into a stream index:
+      // deleted/hidden posts make data-index and floor diverge.
+      element = document.querySelector(`.Post[data-number="${segment.floor}"]`);
     }
     return element;
   }
@@ -2878,6 +2966,12 @@
   }
 
   function clearWordHighlight() {
+    if (wordVisualFrame != null) {
+      if (typeof window.cancelAnimationFrame === "function") window.cancelAnimationFrame(wordVisualFrame);
+      window.clearTimeout(wordVisualFrame);
+    }
+    wordVisualFrame = null;
+    pendingWordVisual = null;
     try {
       const registry = globalThis.CSS && globalThis.CSS.highlights;
       if (registry && typeof registry.delete === "function") {
@@ -3021,6 +3115,25 @@
   function setWordMotionCursorBox(cursor, target) {
     cursor.style.transform = `translate3d(${target.left}px, ${target.top}px, 0)`;
     cursor.style.width = `${target.width}px`;
+  }
+
+  function scheduleWordVisual(index, timeline) {
+    pendingWordVisual = { index, timeline };
+    if (wordVisualFrame != null) return;
+    const apply = () => {
+      wordVisualFrame = null;
+      const pending = pendingWordVisual;
+      pendingWordVisual = null;
+      if (!pending || wordTimeline !== pending.timeline || state.status === "paused") return;
+      highlightWord(pending.index);
+      updateMiniCaptionWord(pending.index, false);
+      if (settings.readingFocus === "line") positionReadingFocus();
+    };
+    if (typeof window.requestAnimationFrame === "function") {
+      wordVisualFrame = window.requestAnimationFrame(apply);
+    } else {
+      wordVisualFrame = window.setTimeout(apply, 0);
+    }
   }
 
   function moveWordMotionCursor(cursor, target, wordIndex, instant) {
@@ -3169,10 +3282,8 @@
     }
     const result = WordTimeline.applyProgress(wordTimeline, progress);
     if (!result.ignored && result.index >= 0 && result.index !== highlightedWordIndex) {
-      highlightWord(result.index);
+      scheduleWordVisual(result.index, wordTimeline);
     }
-    if (!result.ignored && result.changed) updateMiniCaptionWord(result.index, false);
-    if (!result.ignored && settings.readingFocus === "line") positionReadingFocus();
     return result;
   }
 
@@ -3226,6 +3337,48 @@
     return resolved;
   }
 
+  function requestForumSegmentVisibility(index) {
+    const segment = state.segments[index];
+    if (!segment || String(segment.adapter || segment.sourceLocator?.adapter || "") !== "flarum") return;
+    const floor = Number(segment.floor);
+    if (!Number.isFinite(floor) || floor <= 0 || typeof window.postMessage !== "function") return;
+    const key = `${state.pageKey || getCurrentPageKey()}:${floor}`;
+    if (forumVisibilityRequests.has(key)) return;
+    const requestId = `flowloud-flarum-${Date.now().toString(36)}-${++forumVisibilitySequence}`;
+    const promise = new Promise((resolve) => {
+      let settled = false;
+      const finish = (available) => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener("message", onMessage);
+        clearTimeout(timer);
+        resolve(available);
+      };
+      const onMessage = (event) => {
+        const data = event && event.data;
+        if (event.source !== window || !data || data.__flowloudFlarum !== true || data.requestId !== requestId) return;
+        finish(data.ok === true);
+      };
+      const timer = window.setTimeout(() => finish(false), 1800);
+      window.addEventListener("message", onMessage);
+      window.postMessage({ __flowloudFlarum: true, type: "ensure-visible", requestId, floor }, "*");
+    });
+    forumVisibilityRequests.set(key, promise);
+    promise.then((available) => {
+      forumVisibilityRequests.delete(key);
+      if (!available) {
+        showToast('当前楼层还未进入页面视口，继续播放；可稍后手动滚动到该楼层。');
+        return;
+      }
+      if (!state.segments[index]) return;
+      refreshSegmentLocation(index);
+      if (state.index === index) {
+        cancelHighlightRetry();
+        highlightCurrent({ deferBroadFallback: true, retry: true, forceFollow: true });
+      }
+    }, () => forumVisibilityRequests.delete(key));
+  }
+
   function cancelHighlightRetry() {
     clearTimeout(highlightRetryTimer);
     highlightRetryTimer = null;
@@ -3270,6 +3423,7 @@
       highlightedElement = null;
       highlightedRange = null;
       highlightedIndex = -1;
+      requestForumSegmentVisibility(index);
       scheduleHighlightRetry(index);
       return false;
     }
