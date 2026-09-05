@@ -12,6 +12,6 @@ permissions:
   contents: read
 jobs:
   brand:
-    uses: JackMeds/github-brand/.github/workflows/check.yml@99f706e05b10bdb221dd5af0705ad104bb0ddea2
+    uses: JackMeds/github-brand/.github/workflows/check.yml@268dd9dcc3702282dcce05647b929f2023f12f95
     with:
-      toolkit-ref: 99f706e05b10bdb221dd5af0705ad104bb0ddea2
+      toolkit-ref: 268dd9dcc3702282dcce05647b929f2023f12f95
