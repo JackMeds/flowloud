@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "repo": "JackMeds/flowloud",
+  "wordmark": "Flowloud",
+  "displayName": "Flowloud / 流声",
+  "localName": "流声 / 让网页读给你听",
+  "kind": "voice",
+  "category": "reading + speech",
+  "accent": "#007E87",
+  "accentDark": "#69D7DB",
+  "tagline": {
+    "en": "Read the web. Listen your way.",
+    "zh": "网页听读、语义导览与文档工作台。"
+  },
+  "tags": [
+    "browser extension",
+    "speech",
+    "local-first"
+  ],
+  "readmes": [
+    "README.md",
+    "README.en.md"
+  ],
+  "links": {
+    "source": "https://github.com/JackMeds/flowloud",
+    "start": "https://github.com/JackMeds/flowloud#快速开始"
+  },
+  "pilot": true,
+  "proof": "assets/brand/product-proof.png"
+}

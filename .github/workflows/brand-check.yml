@@ -1,0 +1,17 @@
+name: Brand presentation
+on:
+  pull_request:
+    paths:
+      - 'README*'
+      - 'docs/**'
+      - 'assets/brand/**'
+      - 'project-brand.json'
+      - '.github/workflows/brand-check.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  brand:
+    uses: JackMeds/github-brand/.github/workflows/check.yml@078435fe0dc47d75d46e3faf96bd1d366c10d056
+    with:
+      toolkit-ref: 078435fe0dc47d75d46e3faf96bd1d366c10d056
