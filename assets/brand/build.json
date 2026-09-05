@@ -1,0 +1,10 @@
+{
+  "toolkit": "JackMeds/github-brand",
+  "version": "1.0.0",
+  "manifestSha256": "a9f2be79a9f588cc8ed97564cfe1a1a0681611a754a1df97fb232b638d5ea527",
+  "fonts": {
+    "InstrumentSans.ttf": "b24f1812584816958afcf22e22d08e44318c5e51651e25d2438efdde389b33b1",
+    "IBMPlexMono-Regular.ttf": "6a3412f058c7d8dfd9170c41e85ade48e5156ecb89356110ca57a0a27734af46",
+    "SourceHanSansSC-Regular.otf": "f1d8611151880c6c336aabeac4640ef434fa13cbfbf1ffe82d0a71b2a5637256"
+  }
+}
